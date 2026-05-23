@@ -16,10 +16,12 @@
 
 ## Reading order before touching code
 
-1. `docs/multi_agent_orchestration_plan.md` — architecture, hooks, settings.json, risk matrix
-2. `docs/tdd_plan.md` — Wave 0/1/2/3 build sequence, quality rubric, eval set
-3. `docs/self_evolving_composer.md` — T1/T2/T3 self-evolution tiers
-4. `docs/adr/0001-contracts.md` — Wave 0 frozen contracts (C0.1–C0.5), append-only
+1. `docs/STATUS.md` — **current state: what's done, what's next, last-green test count**
+2. `docs/multi_agent_orchestration_plan.md` — architecture, hooks, settings.json, risk matrix
+3. `docs/tdd_plan.md` — Wave 0/1/2/3 build sequence, quality rubric, eval set
+4. `docs/self_evolving_composer.md` — T1/T2/T3 self-evolution tiers
+5. `docs/adr/0001-contracts.md` — Wave 0 frozen contracts (C0.1–C0.5), append-only
+6. `evals/SUCCESS.md` + `evals/baseline-protocol.md` — measurement spec for Wave-3 autoresearch
 
 ## Hard constraints (carried across sessions)
 
@@ -37,9 +39,12 @@
 |---|---|
 | Main Claude session (Opus 4.7) | Orchestration, memory, plans. **No `Edit`/`Write`/`Bash`** — denied in `.claude/settings.json` AND blocked by `scripts/boundary_guard.sh` |
 | Native subagents (`.claude/agents/*.md`) | Wrapping layer for context isolation. Each lists exactly one composer MCP tool + `Read`/`Glob`. Model: `haiku` |
-| MCP server (`src/index.ts`) | Wires `composer_research` / `composer_code` / `composer_review` to provider adapters |
-| Providers (`src/providers/*`) | `MockProvider` (Day 1, free). `AnthropicCompatibleProvider` (GLM, Day 2). `CLIProvider` (`agy`, Day 2) |
+| MCP server (`src/index.ts`) | Wires `composer_research` / `composer_code` / `composer_review` to provider adapters; ships C0.3 tool annotations + `Use when…` descriptions |
+| Providers (`src/providers/*`) | `MockProvider` (free), `AnthropicCompatibleProvider` (GLM via z.ai), `CLIProvider` (`agy` via Gemini 3.1, spawn-based with stdin closed) |
+| Config loader (`src/config/env.ts`) | Reads `.env.json` via `fs.readFileSync` — **never** with the `Read` tool |
 | Hooks (`scripts/*.sh`) | `boundary_guard.sh` enforces denials. `learn.sh` (Stop hook) appends user corrections to `.claude/learnings/<month>.md` |
+| Eval harness (`tests/eval/*` + `evals/*`) | Budget guard + composite metric + 3 starter tasks. Wave-3 autoresearch consumes this. |
+| Tape harness (`tests/util/recorder.ts` + `tests/fixtures/tapes/*`) | Record once on real GLM/`agy`, replay forever in vitest. CI cost: $0. |
 
 ## What NOT to build
 

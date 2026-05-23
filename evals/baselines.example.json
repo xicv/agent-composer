@@ -1,0 +1,26 @@
+{
+  "measuredAt": "2026-05-23T00:00:00Z",
+  "measuredBy": "REPLACE_ME",
+  "claudeModel": "claude-opus-4-7",
+  "claudeCodeVersion": "2026.05.x",
+  "baselines": {
+    "t1-slugify": {
+      "mainSessionTokens": 0,
+      "wallSeconds": 0,
+      "method": "/usage at end of session",
+      "notes": "EXAMPLE — replace with real measurement."
+    },
+    "t5-review-catch-off-by-one": {
+      "mainSessionTokens": 0,
+      "wallSeconds": 0,
+      "method": "/usage at end of session",
+      "notes": "EXAMPLE — replace with real measurement."
+    },
+    "t7-refuse-out-of-scope": {
+      "mainSessionTokens": 0,
+      "wallSeconds": 0,
+      "method": "/usage at end of session",
+      "notes": "EXAMPLE — replace with real measurement."
+    }
+  }
+}

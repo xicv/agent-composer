@@ -21,8 +21,9 @@ aggregate = mean(task_score across tasks)
 ## Baseline policy
 
 - Measured **once** per task using stock Claude (no Composer skill, no subagents, no hooks).
-- Stored alongside the task in a sibling JSON: `baselines.json` (Wave 3 will create).
-- Recomputed only if a model upgrade lands (Opus 4.7 → next major).
+- Stored in [`baselines.json`](./baselines.json) — schema target in [`baselines.example.json`](./baselines.example.json).
+- Procedure documented in [`baseline-protocol.md`](./baseline-protocol.md).
+- Recomputed only if a model upgrade lands (Opus 4.7 → next major) OR an eval task is materially reworded.
 
 ## Threshold
 
