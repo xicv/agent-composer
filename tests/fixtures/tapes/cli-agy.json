@@ -1,0 +1,10 @@
+[
+  {
+    "input": {
+      "prompt": "Reply with exactly the two characters 'OK' and nothing else."
+    },
+    "output": {
+      "text": "OK\n"
+    }
+  }
+]

@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__composer__composer_research", "tool_input": { "prompt": "find zod docs" }, "session_id": "test-session" }

@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__composer__composer_review", "tool_input": { "prompt": "review", "diff": "--- a/x\n+++ b/x\n" }, "session_id": "test-session" }

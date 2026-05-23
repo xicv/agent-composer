@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__exec__bash", "tool_input": { "command": "rm -rf /" }, "session_id": "test-session" }

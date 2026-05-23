@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "Glob", "tool_input": { "pattern": "**/*.ts" }, "session_id": "test-session" }

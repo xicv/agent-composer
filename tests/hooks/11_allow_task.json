@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "Task", "tool_input": { "subagent_type": "coder", "prompt": "implement X" }, "session_id": "test-session" }

@@ -1,0 +1,37 @@
+{
+  "name": "composer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-agent orchestration MCP server. Claude orchestrates; GLM and agy do the work.",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test:hooks": "bash tests/hooks/run.sh",
+    "test:all": "npm run test && npm run test:hooks",
+    "usage": "npx -y ccusage daily",
+    "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "ajv-cli": "^5.0.0",
+    "ajv-formats": "^3.0.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  }
+}

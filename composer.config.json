@@ -1,0 +1,7 @@
+{
+  "roles": {
+    "researcher": { "provider": "mock", "model": "mock-researcher-day1" },
+    "coder":      { "provider": "mock", "model": "mock-coder-day1" },
+    "reviewer":   { "provider": "mock", "model": "mock-reviewer-day1" }
+  }
+}

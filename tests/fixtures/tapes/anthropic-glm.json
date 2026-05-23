@@ -1,0 +1,13 @@
+[
+  {
+    "input": {
+      "prompt": "Reply with exactly the two characters 'OK' and nothing else.",
+      "maxTokens": 32
+    },
+    "output": {
+      "text": "OK",
+      "tokensIn": 18,
+      "tokensOut": 2
+    }
+  }
+]

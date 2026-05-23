@@ -1,0 +1,26 @@
+# Secrets — runtime config holding GLM creds. NEVER commit.
+.env
+.env.json
+.env.*.local
+
+# Node / TypeScript build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.vitest/
+
+# Autoresearch — drafts only, never live
+*.candidate.md
+.claude/skills/**/proposals/
+
+# Antigravity / agy CLI local state
+.antigravitycli/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/

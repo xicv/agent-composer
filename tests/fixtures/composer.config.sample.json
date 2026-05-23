@@ -1,0 +1,18 @@
+{
+  "roles": {
+    "researcher": {
+      "provider": "cli",
+      "cli": ["agy", "--dangerously-skip-permissions", "-p"]
+    },
+    "coder": {
+      "provider": "anthropic",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN",
+      "model": "glm-4.6"
+    },
+    "reviewer": {
+      "provider": "cli",
+      "cli": ["agy", "--dangerously-skip-permissions", "-p"]
+    }
+  }
+}

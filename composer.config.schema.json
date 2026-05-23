@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://composer.dev/schemas/composer.config.schema.json",
+  "title": "Composer Configuration",
+  "description": "Dependency Inversion at runtime: maps subagent role → provider impl. C0.2 — frozen Wave 0, append-only during Wave 1.",
+  "type": "object",
+  "required": ["roles"],
+  "additionalProperties": false,
+  "properties": {
+    "roles": {
+      "type": "object",
+      "required": ["researcher", "coder", "reviewer"],
+      "additionalProperties": false,
+      "properties": {
+        "researcher": { "$ref": "#/$defs/roleConfig" },
+        "coder": { "$ref": "#/$defs/roleConfig" },
+        "reviewer": { "$ref": "#/$defs/roleConfig" }
+      }
+    }
+  },
+  "$defs": {
+    "providerId": {
+      "type": "string",
+      "enum": ["anthropic", "openai_compatible", "cli", "mock"],
+      "description": "Discriminator picked up by ProviderFactory. Must match IProvider.id."
+    },
+    "roleConfig": {
+      "type": "object",
+      "required": ["provider"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "$ref": "#/$defs/providerId" },
+        "apiKeyEnv": {
+          "type": "string",
+          "description": "Name of the env var holding the API key. Resolved by ProviderFactory at startup; the key value itself is NEVER stored in this file."
+        },
+        "baseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTP base URL for SDK-based providers (e.g. GLM Anthropic-compat endpoint)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Provider-specific model identifier."
+        },
+        "cli": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "argv array for CLIProvider, e.g. [\"agy\",\"--dangerously-skip-permissions\",\"-p\"]. Passed to child_process.execFile — NEVER shell-interpolated."
+        }
+      }
+    }
+  }
+}

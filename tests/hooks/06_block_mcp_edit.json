@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__github__edit_file", "tool_input": { "path": "/tmp/x" }, "session_id": "test-session" }
