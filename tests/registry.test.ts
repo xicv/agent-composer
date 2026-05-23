@@ -92,6 +92,28 @@ describe("ProviderRegistry — anthropic (Day 2)", () => {
     );
     expect(() => reg.getProviderForRole("coder")).toThrow(/baseUrl/);
   });
+
+  it("throws ProviderConfigError when apiKeyEnv missing from config", () => {
+    const reg = new ProviderRegistry(
+      makeConfig({
+        provider: "anthropic",
+        baseUrl: "https://x",
+        model: "glm-4.6",
+      }),
+    );
+    expect(() => reg.getProviderForRole("coder")).toThrow(/apiKeyEnv/);
+  });
+
+  it("throws ProviderConfigError when model missing", () => {
+    const reg = new ProviderRegistry(
+      makeConfig({
+        provider: "anthropic",
+        baseUrl: "https://x",
+        apiKeyEnv: "TEST_ANTHROPIC_KEY",
+      }),
+    );
+    expect(() => reg.getProviderForRole("coder")).toThrow(/model/);
+  });
 });
 
 describe("ProviderRegistry — cli (Day 2)", () => {

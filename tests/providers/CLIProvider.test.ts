@@ -107,6 +107,59 @@ describe("CLIProvider (execFile injected)", () => {
   });
 });
 
+describe("CLIProvider (real spawn — default execFn against node binary)", () => {
+  // These exercise DEFAULT_EXEC, the spawn-based closure that ships in
+  // production. Without these the spawn closure has 0 coverage (every
+  // other test injects a fake execFn). `node` is virtually always on
+  // PATH; the scripts are inline so no temp files are required.
+
+  it("captures stdout from a node -e script", async () => {
+    const p = new CLIProvider({
+      cli: ["node", "-e", "process.stdout.write('hello-real-spawn')"],
+    });
+    const out = await p.execute({ prompt: "" });
+    expect(out.text).toContain("hello-real-spawn");
+  });
+
+  it("rejects when child exits non-zero (stderr included in error)", async () => {
+    const p = new CLIProvider({
+      cli: [
+        "node",
+        "-e",
+        "process.stderr.write('boom'); process.exit(2)",
+      ],
+    });
+    await expect(p.execute({ prompt: "" })).rejects.toThrow(/exited code=2/);
+  });
+
+  it("rejects with 'timed out' when child runs past timeout", async () => {
+    const p = new CLIProvider({
+      cli: ["node", "-e", "setInterval(() => {}, 1000)"],
+      timeoutMs: 300,
+    });
+    await expect(p.execute({ prompt: "" })).rejects.toThrow(/timed out/);
+  });
+
+  it("rejects with ENOENT when binary missing", async () => {
+    const p = new CLIProvider({
+      cli: ["/definitely/not/a/real/binary-xyz"],
+    });
+    await expect(p.execute({ prompt: "" })).rejects.toThrow();
+  });
+
+  it("enforces maxBuffer when stdout exceeds limit", async () => {
+    const p = new CLIProvider({
+      cli: [
+        "node",
+        "-e",
+        "for (let i = 0; i < 1000; i++) process.stdout.write('x'.repeat(1000))",
+      ],
+      maxBuffer: 1024,
+    });
+    await expect(p.execute({ prompt: "" })).rejects.toThrow(/maxBuffer|exited/);
+  });
+});
+
 const CLI_TAPE = path.resolve("tests/fixtures/tapes/cli-agy.json");
 
 describe("CLIProvider (replay against recorded agy tape)", () => {
