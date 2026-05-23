@@ -147,3 +147,23 @@ Optional fields added; no rename, no removal; **append-only rule honoured**.
 - **C0.3**: each tool may now declare an `annotations` object — `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` — per MCP SDK 1.29. Canonical per-tool matrix lives in `multi_agent_orchestration_plan.md` §4.
 - **C0.5**: subagent + skill `description` fields adopt the `"Use when..."` opening per Anthropic's May-2026 skill-engineering guidance. Old `"Use PROACTIVELY..."` form still parses; no breakage.
 - **Tech debt** (NOT applied): MCP SDK 2.0-alpha returns JSON-RPC `-32602` for tool errors instead of `{isError: true}`. Pin to SDK 1.29 until 2.0 stabilises; `tests/mcp/server.test.ts` will need a one-line update on upgrade.
+
+
+### 2026-05-23 — Wave-3 Step 1 (boundary_guard extensions)
+
+Two append-only extensions to **C0.4** (PreToolUse hook), plus a sibling PR-gate script.
+
+1. **`COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS`** env var (default unset). When set to `"1"` or `"true"`, `scripts/boundary_guard.sh` exits `0` immediately with a stderr warning, bypassing all deny logic. Purpose: bootstrap dev sessions where the locked orchestrator session cannot write files itself. **MUST NOT** be set in CI, production, or any runtime path. Cline-style — verbose name discourages accidental use. Friction is the safety feature.
+
+2. **`COMPOSER_STOP_EVOLVE_FILE`** sentinel mechanism. When the file at `${COMPOSER_STOP_EVOLVE_FILE:-$CLAUDE_PROJECT_DIR/STOP_EVOLVE}` exists, `boundary_guard.sh` denies any `mcp__composer__*` tool call. Purpose: hard kill-switch for nightly self-evolution Routines and ad-hoc `/evolve` runs. Non-composer tools remain subject to the normal block list.
+
+Neither extension renames or removes any prior field — append-only rule honoured. Companion script: `scripts/evolve_check_diff.sh` (PR-gate enforcing the autoresearch diff scope whitelist; harness: `tests/scripts/run.sh`). Whitelist regex set:
+
+```
+^\.claude/agents/[^/]+\.md$
+^\.claude/skills/composer-mastermind/SKILL\.md$
+^evals/tasks/[^/]+\.json$
+^evals/tasks\.jsonl$
+```
+
+The forthcoming ADR 0003 will document the full self-evolution architecture; this amendment captures only the safety primitives that ship in Wave 3 Step 1.

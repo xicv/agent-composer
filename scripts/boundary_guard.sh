@@ -37,6 +37,27 @@ if [[ -z "$TOOL" ]]; then
   emit_deny "boundary_guard: malformed JSON or missing tool_name, failing closed"
 fi
 
+# 3.5. COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS (dev-only escape hatch).
+#   When env var equals "1" or "true", allow every tool. Stderr-warns on
+#   every invocation so the bypass is visible in transcripts. Intended
+#   for bootstrap / dev sessions only. NEVER set in CI or runtime.
+#   See ADR 0001 amendment (2026-05-23, Wave-3 Step 1).
+BYPASS="${COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS:-}"
+if [[ "$BYPASS" == "1" || "$BYPASS" == "true" ]]; then
+  printf 'WARN boundary_guard: COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=%s — boundary disabled, dev mode only\n' "$BYPASS" >&2
+  exit 0
+fi
+
+# 3.6. STOP_EVOLVE killswitch.
+#   If sentinel file exists AND the tool is a composer dispatch, deny.
+#   Sentinel path overridable via COMPOSER_STOP_EVOLVE_FILE (tests use
+#   a temp file); default "$CLAUDE_PROJECT_DIR/STOP_EVOLVE", falling
+#   back to "./STOP_EVOLVE" when CLAUDE_PROJECT_DIR is unset.
+STOP_FILE="${COMPOSER_STOP_EVOLVE_FILE:-${CLAUDE_PROJECT_DIR:-.}/STOP_EVOLVE}"
+if [[ -e "$STOP_FILE" ]] && [[ "$TOOL" == mcp__composer__* ]]; then
+  emit_deny "STOP_EVOLVE sentinel present at $STOP_FILE — Composer dispatches paused."
+fi
+
 # 4. Block list — native dangerous tools + MCP-prefixed variants.
 case "$TOOL" in
   Bash|Edit|Write|NotebookEdit \

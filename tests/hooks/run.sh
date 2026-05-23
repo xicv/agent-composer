@@ -90,6 +90,33 @@ assert_deny_fixture "malformed_missing_tool_name" "15_malformed_missing_tool_nam
 assert_deny_payload "malformed_not_json"          "this-is-not-json{"
 assert_deny_payload "empty_stdin"                 ""
 
+# STOP_EVOLVE sentinel behavior (Wave 3 Step 1)
+STOP_TMP="$(mktemp -t composer_stop.XXXXXX)"
+export COMPOSER_STOP_EVOLVE_FILE="$STOP_TMP"
+assert_deny_payload "stop_evolve_blocks_mcp_research" \
+  '{"hook_event_name":"PreToolUse","tool_name":"mcp__composer__composer_research","tool_input":{"prompt":"x"},"session_id":"t"}'
+assert_pass_payload "stop_evolve_does_not_block_read" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"t"}'
+assert_deny_payload "stop_evolve_with_bash_still_denied" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"t"}'
+rm -f "$STOP_TMP"
+assert_pass_payload "no_stop_evolve_allows_mcp_research" \
+  '{"hook_event_name":"PreToolUse","tool_name":"mcp__composer__composer_research","tool_input":{"prompt":"x"},"session_id":"t"}'
+unset COMPOSER_STOP_EVOLVE_FILE
+
+# COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS (Wave 3 Step 1)
+export COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=true
+assert_pass_payload "bypass_allows_bash" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"t"}'
+assert_pass_payload "bypass_allows_edit" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
+assert_pass_payload "bypass_allows_write" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"x","content":"y"},"session_id":"t"}'
+unset COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS
+assert_deny_payload "no_bypass_still_blocks_bash" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"t"}'
+
+
 echo
 echo "------------------------------------------"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
