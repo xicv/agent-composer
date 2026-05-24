@@ -286,9 +286,12 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
         fs.renameSync(skillPath, swapPath);
         fs.writeFileSync(skillPath, skill, "utf8");
 
-        // Execute claude CLI
+        // Execute claude CLI. Explicitly end child stdin so claude does
+        // not wait 3s for piped input (warns then exits non-zero
+        // otherwise). maxBuffer raised because JSON output for a
+        // successful run can easily exceed the 1 MB default.
         const output = await new Promise<string>((resolve, reject) => {
-          execFile(
+          const child = execFile(
             "claude",
             [
               "-p",
@@ -302,6 +305,7 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
               "0.25",
               task.description,
             ],
+            { maxBuffer: 16 * 1024 * 1024 },
             (error, stdout) => {
               if (error) {
                 reject(error);
@@ -310,6 +314,7 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
               }
             },
           );
+          child.stdin?.end();
         });
 
         // Parse result

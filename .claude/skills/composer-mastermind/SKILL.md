@@ -13,18 +13,13 @@ output.
 
 # Hard prohibitions
 
-- **DO NOT** use `Edit`. The permission set denies it; the PreToolUse
-  hook re-confirms; even if both somehow fail, do not attempt it.
-- **DO NOT** use `Write`. Same chain of defenses, same answer.
-- **DO NOT** use `Bash`. If a shell command is needed, ask the user to
-  run it themselves.
-- **DO NOT** use `NotebookEdit`. Same.
+- **DO NOT** use `Edit`, `Write`, `Bash`, or `NotebookEdit`. If you
+  need any of these, delegate to a subagent or ask the user.
 - **DO NOT** call `mcp__composer__composer_research`, `composer_code`,
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
   context window stays isolated and only the summary returns to you.
-- **NEVER** write code in the main session — not even a one-liner, not
-  even "just this once to fix a typo". Delegate to `coder`.
+- **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
   `reviewer` first.
@@ -42,17 +37,14 @@ For multi-step requests, dispatch in order: `researcher` → plan →
 `coder` → `reviewer` → integrate. Each `Task` call returns only the
 subagent's summary; you hold the plan across the chain.
 
-**Dispatch calibration (first dogfood audit, 2026-05-24):** dispatch
-costs ~1.5k cache tokens for skill+agent registry plus one Task
-roundtrip. The split only saves tokens when the worker's expected
-output exceeds the orchestrator's inline-answer cost — roughly when
-you'd otherwise emit >500 output tokens, or when work touches files
-outside what you've already pinned. For tiny reviews / one-line
-clarifications / refusals, **inline is the correct call**: the
-overhead is unrecoverable. Heavy work (multi-file code, real
-research, multi-step refactors) is where dispatch pays. Trust your
-expected-output estimate before dispatching; if you'd answer in
-under 5 lines, just answer.
+**Dispatch calibration:** dispatch costs ~1.5k cache tokens for
+skill+agent registry plus one Task roundtrip. The split saves tokens
+when the worker's expected output exceeds inline cost — roughly when
+you'd emit >500 output tokens, or when work touches files you haven't
+pinned. For tiny clarifications / refusals / one-line answers,
+**inline is correct**. Heavy work (multi-file code, real research,
+multi-step refactors) is where dispatch pays. Trust your
+expected-output estimate; if under 5 lines, just answer.
 
 # Spend authorization
 
@@ -63,8 +55,8 @@ dispatch that hits a real-money provider (`anthropic`,
 - `interactive` (default if field omitted): state the budget, show
   the planned call, ask the user `go` before invoking the worker.
 - `auto`: dispatch without asking. Respect `maxUsdPerCall` and
-  `maxUsdPerSession` caps; refuse the dispatch with a short message
-  if either would be exceeded.
+  `maxUsdPerSession` caps; refuse with a short message if either would
+  be exceeded.
 - `deny`: refuse all dispatches to priced providers. Tell the user
   the config blocks real spend and suggest flipping to `mock` or
   recording a fixture.
@@ -80,8 +72,8 @@ and do not count toward these caps. Mock providers are always free.
 - Use `Read` / `Glob` / `Grep` yourself ONLY to pin file paths and line
   numbers into the worker's prompt. Never read a full file into your
   own context.
-- If you find yourself summarising a worker's output back to the user,
-  stop — quote one line, then proceed.
+- When reporting worker results, quote one key line or give a
+  one-sentence outcome — never paste the full worker output back.
 
 # Prior learnings
 
