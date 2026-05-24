@@ -84,7 +84,7 @@ describe("composer init", () => {
     runInit({ cwd, verbose: false });
     const s = JSON.parse(readFileSync(join(cwd, ".claude", "settings.json"), "utf8"));
     expect(s.mcpServers.composer.command).toBe("npx");
-    expect(s.mcpServers.composer.args).toContain("@composer-mcp/server");
+    expect(s.mcpServers.composer.args).toContain("agent-composer");
   });
 
   it("merges mcpServers.composer into existing settings.json without erasing other settings", () => {

@@ -4,7 +4,7 @@
 
 ## What it is
 
-Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code, runs bash, or edits files directly — instead it dispatches work through three subagents wired to the `@composer-mcp/server` MCP server:
+Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code, runs bash, or edits files directly — instead it dispatches work through three subagents wired to the `agent-composer` MCP server:
 
 | Subagent | Tool | Role |
 |---|---|---|
@@ -33,7 +33,7 @@ composer-mastermind/
 
 ## Requires
 
-- `@composer-mcp/server` (peer; install via `npx @composer-mcp/server` or global npm install)
+- `agent-composer` (peer; install via `npx agent-composer` or global npm install)
 - A `composer.config.json` + `.env.json` at the consumer project root (run `npx composer-mcp init` to scaffold; see ADR 0002 M0.3)
 - Claude Code ≥4.6
 

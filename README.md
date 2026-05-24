@@ -1,6 +1,6 @@
 # Composer — multi-agent orchestration for Claude Code
 
-[![npm](https://img.shields.io/badge/npm-%40composer--mcp%2Fserver-blue)](#install) [![tests](https://img.shields.io/badge/vitest-319%20passing-brightgreen)](#contributing) [![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
+[![npm](https://img.shields.io/badge/npm-agent--composer-blue)](#install) [![tests](https://img.shields.io/badge/vitest-319%20passing-brightgreen)](#contributing) [![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 
 > **Claude orchestrates. GLM and `agy` execute.** Composer is an MCP server + Claude Code plugin that lets the most-capable model hold the plan while cheaper models do the typing — saving Claude Max5 tokens and keeping every dispatched task reviewable.
 
@@ -10,7 +10,7 @@ Two coordinated artefacts:
 
 | Artefact | Purpose |
 |---|---|
-| **`@composer-mcp/server`** (this npm package) | MCP server exposing `composer_research`, `composer_code`, `composer_review` tools. Wraps GLM (via Anthropic-compatible endpoint) and the `agy` CLI (Gemini). |
+| **`agent-composer`** (this npm package) | MCP server exposing `composer_research`, `composer_code`, `composer_review` tools. Wraps GLM (via Anthropic-compatible endpoint) and the `agy` CLI (Gemini). |
 | **`composer-mastermind`** (Claude Code plugin) | Orchestrator skill + three haiku-wrapped subagents (`coder`, `researcher`, `reviewer`) + `boundary_guard` PreToolUse hook + `/evolve` slash command. |
 
 Combined, they turn the main Claude session into a coordinator that never writes code, runs bash, or edits files directly. Work is dispatched through the three MCP tools; the boundary hook fails closed if a denied tool is requested.
@@ -19,12 +19,12 @@ Combined, they turn the main Claude session into a coordinator that never writes
 
 ```bash
 # 1. Install the MCP server
-npm install -g @composer-mcp/server
+npm install -g agent-composer
 
 # 2. Bootstrap a project (creates composer.config.json + .env.json template +
 #    .gitignore + .claude/settings.json with mcpServers.composer entry)
 cd your-project
-composer-mcp init
+agent-composer init
 
 # 3. Fill credentials
 $EDITOR .env.json    # ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN
@@ -110,7 +110,7 @@ Five resilience layers ensure unattended `/evolve` runs cannot damage the host r
 
 ## Security model
 
-- **`@composer-mcp/server` publish surface**: `dist/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). 34 KB tarball.
+- **`agent-composer` publish surface**: `dist/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). 34 KB tarball.
 - **Spend caps**: per-call (`maxUsdPerCall`, default $0.50) and per-session (`maxUsdPerSession`, default $5.00) enforced in the runner before any external API call. Configurable per project.
 - **Self-evolution scope** (see ADR 0003): five layers gate any SKILL.md mutation — diff-path regex, text deny-list, stat gate, human-promote-only, audit trail. Auto-promote is permanently off the table.
 - **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Write`/`Bash`/`NotebookEdit` in the orchestrator session. The C0.5 subagent tools allowlist is append-only.

@@ -61,7 +61,7 @@ const DEFAULT_MCP_SETTINGS = {
   mcpServers: {
     composer: {
       command: "npx",
-      args: ["-y", "@composer-mcp/server"],
+      args: ["-y", "agent-composer"],
     },
   },
 };
