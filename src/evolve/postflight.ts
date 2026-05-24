@@ -11,6 +11,7 @@
 // candidate.
 
 import type { IProvider } from "../providers/IProvider.js";
+import { s2DenyPrefilter } from "./s2-deny.js";
 
 export interface PostflightInput {
   ecosystem: string;
@@ -55,6 +56,14 @@ export async function runPostflight(
   provider: IProvider,
   input: PostflightInput,
 ): Promise<Verdict> {
+  // ADR 0003 S2: deterministic deny-pattern prefilter runs BEFORE the LLM
+  // researcher. Short-circuits on any escalation primitive or boundary-
+  // bypass directive — the LLM cannot be prompt-injected to accept these
+  // because the LLM is never called on these candidates.
+  const s2 = s2DenyPrefilter(input.candidate);
+  if (!s2.allowed) {
+    return { accept: false, reason: s2.reason ?? "S2 deny-pattern matched" };
+  }
   const prompt = buildPostflightPrompt(input);
   try {
     const out = await provider.execute({ prompt });

@@ -43,7 +43,7 @@ composer-mastermind/
 
 ## Source of truth
 
-This is the **frozen v0.1.0 snapshot** of the composer-monorepo's canonical assets. The development instance lives at `~/Projects/composer/.claude/` in the upstream repo; releases re-sync via M0.5.
+This is the **frozen v0.1.0 snapshot** of the composer-monorepo's canonical assets. The development instance lives at the upstream repo's `.claude/` tree; releases re-sync via M0.5 (see `scripts/release-sync.mjs`).
 
 ## License
 
