@@ -123,3 +123,13 @@ export function pickOperator(index: number): OperatorMeta {
   }
   return OPERATORS[index % OPERATORS.length]!;
 }
+
+// CLI-facing lookup: snake_case op.name → camelCase key (e.g. "tighten_language" → "tightenLanguage").
+export const OPERATOR_BY_CLI_NAME: Readonly<Record<string, OperatorMeta>> = Object.fromEntries(
+  OPERATORS.map((op) => {
+    const camel = op.name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    return [camel, op];
+  }),
+);
+
+export const VALID_OPERATOR_CLI_NAMES: ReadonlyArray<string> = Object.keys(OPERATOR_BY_CLI_NAME);

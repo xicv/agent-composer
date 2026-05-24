@@ -5,6 +5,8 @@ import { BudgetGuard, BudgetExceededError } from "./budget.js";
 import { MockProvider } from "../../src/providers/MockProvider.js";
 import { scoreTask, aggregateScore } from "./metric.js";
 import type { EvalTask } from "./schema.js";
+import { runEvolve, type EvolveDeps, type EvolveOptions } from "../../src/evolve/runner.js";
+import { OPERATORS } from "../../src/evolve/operators.js";
 
 const TASKS_PATH = path.resolve("evals/tasks.jsonl");
 
@@ -127,6 +129,44 @@ describe("EvalRunner — multi-task + budget integration", () => {
       expect: {},
     }));
     await expect(runner.runAll(tasks)).rejects.toBeInstanceOf(BudgetExceededError);
+  });
+});
+
+describe("runEvolve — deps.pickOperator override", () => {
+  it("forced operator appears in every round history entry", async () => {
+    const provider = new MockProvider({ responses: Array(20).fill("ecosystem snapshot") });
+    const forcedOp = OPERATORS[1]!; // tighten_language — pure text transform, no provider call
+    const usedNames: string[] = [];
+
+    const deps: EvolveDeps = {
+      reflectionProvider: provider,
+      researchProvider: provider,
+      evaluate: async () => ({ score: 0.5, transcripts: [] }),
+      reReplicate: async () => true,
+      skillDomain: "test-domain",
+      pickOperator: (round) => {
+        void round;
+        usedNames.push(forcedOp.name);
+        return forcedOp;
+      },
+      postflightOverride: async () => ({ accept: true, reason: "test bypass" }),
+    };
+
+    const opts: EvolveOptions = {
+      parent: "dispatch Read " + "x".repeat(3000),
+      tasks: [
+        { id: "t1", description: "task one" },
+        { id: "t2", description: "task two" },
+      ],
+      deps,
+      maxRounds: 2,
+      budget: { maxCalls: 50, maxUsd: 10 },
+    };
+
+    const result = await runEvolve(opts);
+    expect(result.history).toHaveLength(2);
+    expect(result.history.every((log) => log.operator === forcedOp.name)).toBe(true);
+    expect(usedNames).toHaveLength(2);
   });
 });
 

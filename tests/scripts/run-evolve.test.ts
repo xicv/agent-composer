@@ -66,6 +66,39 @@ describe("run-evolve helpers", () => {
       expect(() => parseArgs(["--unknown-flag"])).toThrow("unknown flag: --unknown-flag");
     });
 
+    it("parses --length-lambda as a float and stores in lengthLambda", () => {
+      const result = parseArgs(["--length-lambda", "0.0005"]);
+      expect(result.lengthLambda).toBe(0.0005);
+    });
+
+    it("rejects negative --length-lambda", () => {
+      expect(() => parseArgs(["--length-lambda", "-0.001"])).toThrow(
+        "--length-lambda must be non-negative",
+      );
+    });
+
+    it("parses --force-operator and stores the name", () => {
+      const result = parseArgs(["--force-operator", "tightenLanguage"]);
+      expect(result.forceOperator).toBe("tightenLanguage");
+    });
+
+    it("rejects unknown --force-operator with list of valid names", () => {
+      expect(() => parseArgs(["--force-operator", "bogus"])).toThrow(
+        '--force-operator: "bogus" is unknown; valid names:',
+      );
+    });
+
+    it("returns both lengthLambda and forceOperator when both flags set (summary contract)", () => {
+      const result = parseArgs([
+        "--length-lambda",
+        "0.0005",
+        "--force-operator",
+        "tightenLanguage",
+      ]);
+      expect(result.lengthLambda).toBe(0.0005);
+      expect(result.forceOperator).toBe("tightenLanguage");
+    });
+
     it("throws when --budget-usd value is non-numeric", () => {
       expect(() => parseArgs(["--budget-usd", "abc"])).toThrow('--budget-usd: "abc" is not a number');
     });

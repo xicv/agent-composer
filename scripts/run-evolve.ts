@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { runEvolve, type EvolveOptions, type EvolveDeps } from "../src/evolve/runner.js";
+import { OPERATOR_BY_CLI_NAME, VALID_OPERATOR_CLI_NAMES } from "../src/evolve/operators.js";
 import { AnthropicCompatibleProvider } from "../src/providers/AnthropicCompatibleProvider.js";
 import { CLIProvider } from "../src/providers/CLIProvider.js";
 import { loadConfig } from "../src/config/loader.js";
@@ -32,6 +33,8 @@ export interface ParsedArgs {
   budgetUsd: number;
   maxRounds: number;
   evalMode: "synthetic" | "real";
+  lengthLambda?: number;
+  forceOperator?: string;
 }
 
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
@@ -39,6 +42,8 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
   let maxRounds = 10;
   let evalMode: "synthetic" | "real" = "synthetic";
   let maxRoundsExplicit = false;
+  let lengthLambda: number | undefined;
+  let forceOperator: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -67,6 +72,24 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
       }
       evalMode = val;
       i++;
+    } else if (arg === "--length-lambda") {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error("--length-lambda requires a value");
+      const num = parseFloat(val);
+      if (isNaN(num)) throw new Error(`--length-lambda: "${val}" is not a number`);
+      if (num < 0) throw new Error("--length-lambda must be non-negative");
+      lengthLambda = num;
+      i++;
+    } else if (arg === "--force-operator") {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error("--force-operator requires a value");
+      if (!(val in OPERATOR_BY_CLI_NAME)) {
+        throw new Error(
+          `--force-operator: "${val}" is unknown; valid names: ${VALID_OPERATOR_CLI_NAMES.join(", ")}`,
+        );
+      }
+      forceOperator = val;
+      i++;
     } else {
       throw new Error(`unknown flag: ${arg}`);
     }
@@ -77,7 +100,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     maxRounds = 3;
   }
 
-  return { budgetUsd, maxRounds, evalMode };
+  return { budgetUsd, maxRounds, evalMode, lengthLambda, forceOperator };
 }
 
 export function enforceSpendCap(config: ComposerConfig, budgetUsd: number): void {
@@ -439,6 +462,9 @@ async function main(): Promise<void> {
     evaluate,
     reReplicate,
     skillDomain: "composer-mastermind subagent orchestration",
+    ...(args.forceOperator !== undefined
+      ? { pickOperator: () => OPERATOR_BY_CLI_NAME[args.forceOperator!]! }
+      : {}),
   };
 
   const opts: EvolveOptions = {
@@ -447,6 +473,7 @@ async function main(): Promise<void> {
     deps,
     maxRounds: args.maxRounds,
     budget: { maxCalls: 100, maxUsd: args.budgetUsd },
+    ...(args.lengthLambda !== undefined ? { lengthLambda: args.lengthLambda } : {}),
   };
 
   const result = await runEvolve(opts);
@@ -477,6 +504,12 @@ async function main(): Promise<void> {
     }
   }
 
+  if (args.lengthLambda !== undefined) {
+    console.log(`lengthLambda: ${args.lengthLambda}`);
+  }
+  if (args.forceOperator !== undefined) {
+    console.log(`forcedOperator: ${args.forceOperator}`);
+  }
   console.log(`stoppedAt: ${result.stoppedAt}`);
   console.log(
     `postflight: accept=${result.postflight?.accept ?? "n/a"} reason="${result.postflight?.reason ?? ""}"`,

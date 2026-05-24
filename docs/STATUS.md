@@ -198,6 +198,7 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 |---|---|---|---|---|---|---|---|---|---|---|
 | 2026-05-24 | Step 5 v1 (/evolve driver + slash command) | opus-4-7 | 11.4 | $2.97 | 2.44M | 45 | 2 | 3 new | 434 | All gates green; smoke driver exit 0 |
 | 2026-05-24 | Step 5 v2 (real-eval-against-tasks scorer) | haiku-4-5 | 6.5 | $1.02 | 3.72M | 34 | 1 | 2 modified | +507 | 268/269 first pass; 1-line fp-precision fix → 269/269 green |
+| 2026-05-24 | Step 5 v3 (--length-lambda + --force-operator + EvolveDeps.pickOperator) | sonnet-4-6 | 6.9 | $1.22 | 1.99M | 31 | 1 | 4 modified | +366 | 275/275 first pass; lint clean; extra operators.ts edit was judgment call (added camelCase lookup) |
 
 ### Build 1 (Step 5 v1) — findings
 
@@ -254,4 +255,22 @@ Command: `./node_modules/.bin/tsx scripts/run-evolve.ts --eval-mode real --budge
 **Findings.** The autoresearch infrastructure works end-to-end on real eval. No winner found because (a) round-robin rolled `add_counterexample` (length-adding) while `lengthPenalty` favors brevity — both sides scored negative on length alone; (b) postflight would have blocked promotion regardless. Conservative-by-design: Wilcoxon + CI95 + re-run survival + postflight gate together = candidate must clearly win on multiple axes. GLM/z.ai real spend this run = $0 because the operator didn't invoke `reflect_and_rewrite`.
 
 **Next-experiment ideas.** Tune `lengthLambda` lower so existing SKILL isn't punished into negative range. Force `tightenLanguage` operator (the one that matches the length-penalty signal) for a deterministic test. Run with `--max-rounds 3` after either raising session cap to $15 or lowering the driver's worst-case constant from $0.50 to match per-call cap ($0.25).
+
+### Build 3 (Step 5 v3) — sonnet-4-6 verdict
+
+Build 3 added `--length-lambda` and `--force-operator` flags via a new `EvolveDeps.pickOperator` hook. Three-model picture:
+
+| Axis | Build 1 (opus) | Build 2 (haiku) | Build 3 (sonnet) |
+|---|---|---|---|
+| Wall (min) | 11.4 | 6.5 | 6.9 |
+| Cost (USD) | $2.97 | $1.02 | $1.22 |
+| Turns | 45 | 34 | 31 |
+| Reads | 39 | 22 | 7 |
+| Edits | 4 | 5 | 12 |
+| Tokens | 2.44M | 3.72M | 1.99M |
+| First-pass quality | clean | 1 fp-precision bug (test) | clean + extra judgment call (operators.ts camelCase lookup) |
+
+**Sonnet verdict — best codegen ROI of the three.** 59 % cheaper than opus, similar wall to haiku, no fix-ups required, AND made a sensible unsolicited helper edit (CLI camelCase ↔ snake_case lookup table) the brief implicitly required. Reads dropped to 7 — sonnet trusted the bundled context most. Output 18k tokens (haiku 26k, opus 36k) — sonnet was the most concise.
+
+**Default-model recommendation.** Use sonnet-4-6 for composer-dispatched codegen unless the task is purely structural (then haiku, accept fp-edge-case risk) or genuinely complex / multi-file from scratch (then opus). Haiku still wins on raw $ when fp/precision edges don't matter (cost $1.02 vs sonnet $1.22, but sonnet's zero-fixup time recoups the 20 % cost gap).
 

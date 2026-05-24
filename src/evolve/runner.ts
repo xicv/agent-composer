@@ -15,7 +15,7 @@
 // All worker calls accounted in EvolveBudgetGuard. Provider-side costs
 // are estimated per-call (default $0.025 per eval call, matches plan).
 
-import { pickOperator, type OperatorContext } from "./operators.js";
+import { pickOperator, type OperatorContext, type OperatorMeta } from "./operators.js";
 import { lengthPenalty, estimateTokens } from "./lengthPenalty.js";
 import { candidateBeatsParent } from "./pareto.js";
 import { PlateauDetector } from "./plateau.js";
@@ -52,6 +52,8 @@ export interface EvolveDeps {
   postflightOverride?: (winner: string, snap: PreflightSnapshot) => Promise<Verdict>;
   /** Estimated USD cost per worker call. */
   costPerCallUsd?: number;
+  /** Override operator selection strategy; default = round-robin pickOperator. */
+  pickOperator?: (round: number) => OperatorMeta;
 }
 
 export interface EvolveOptions {
@@ -141,7 +143,7 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
 
   for (let round = 0; round < maxRounds; round++) {
     const split = rotateHoldout(tasks, round);
-    const op = pickOperator(round);
+    const op = (deps.pickOperator ?? pickOperator)(round);
     const ctx: OperatorContext = {
       currentEcosystem: preflight.text,
       reflect: (text) =>
