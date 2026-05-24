@@ -543,14 +543,55 @@ describe("createRealEvaluate — worktree isolation", () => {
     expect((removeCalls[0]?.[1] as string[])).toContain("--force");
   });
 
-  it("removes worktree even when claude spawn throws", async () => {
+  it("removes worktree even when claude spawn throws, and does not abort the evaluate run", async () => {
     makeExecFileMock(true);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
-    await expect(evaluate(CANDIDATE, [{ id: "t1", description: "task one" }])).rejects.toThrow("spawn failed");
+    const result = await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
     const removeCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
       (c) => c[0] === "git" && (c[1] as string[])[1] === "remove",
     );
     expect(removeCalls).toHaveLength(1);
+    expect(result.score).toBe(0);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("task t1 failed"));
+    errSpy.mockRestore();
+  });
+
+  it("continues to the next task when one task's spawn throws", async () => {
+    let callCount = 0;
+    (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
+      .mockImplementation((_cmd, _args, _opts, cb) => {
+        const callback = cb as ExecFileCallback;
+        const isClaude = _cmd === "claude";
+        if (isClaude) {
+          callCount++;
+          if (callCount === 1) {
+            setImmediate(() => callback(new Error("transient claude failure"), "", ""));
+          } else {
+            setImmediate(() => callback(null, FAKE_CLAUDE_RESPONSE, ""));
+          }
+        } else {
+          // git worktree add/remove
+          setImmediate(() => callback(null, "", ""));
+        }
+        return { stdin: { end: vi.fn() } } as unknown as ReturnType<typeof childProcess.execFile>;
+      });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [
+      { id: "t1", description: "task one" },
+      { id: "t2", description: "task two" },
+    ]);
+    // Both tasks reached the claude spawn (first failed, second succeeded)
+    const claudeCalls = vi.mocked(childProcess.execFile).mock.calls.filter((c) => c[0] === "claude");
+    expect(claudeCalls).toHaveLength(2);
+    // Both worktrees still cleaned up
+    const removeCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "remove",
+    );
+    expect(removeCalls).toHaveLength(2);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("task t1 failed"));
+    errSpy.mockRestore();
   });
 
   it("real-repo SKILL.md is never written (MD5 invariant)", async () => {

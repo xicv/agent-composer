@@ -7,6 +7,6 @@
   "spendAuthorization": {
     "mode": "auto",
     "maxUsdPerCall": 0.50,
-    "maxUsdPerSession": 5.00
+    "maxUsdPerSession": 50.00
   }
 }

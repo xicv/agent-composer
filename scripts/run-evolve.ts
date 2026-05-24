@@ -354,6 +354,9 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
         const baseline = baselines[task.id]?.mainSessionTokens ?? 0;
         const taskScore = scoreTask(evalResult, baseline);
         results.push(taskScore);
+      } catch (err) {
+        console.error(`run-evolve: task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+        results.push({ taskId: task.id, score: 0 });
       } finally {
         await new Promise<void>((resolve) => {
           execFile("git", ["worktree", "remove", "--force", worktreePath], {}, () => resolve());
