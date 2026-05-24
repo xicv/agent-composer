@@ -10,11 +10,18 @@ import { loadConfig } from "./config/loader.js";
 import { applyEnvJson } from "./config/env.js";
 import { ProviderRegistry } from "./registry.js";
 import { createComposerServer } from "./server.js";
+import { runInit } from "./cli/init.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 const ENV_PATH = process.env["COMPOSER_ENV"] ?? ".env.json";
 
 async function main(): Promise<void> {
+  const subcommand = process.argv[2];
+  if (subcommand === "init") {
+    runInit({ cwd: process.cwd() });
+    return;
+  }
+
   applyEnvJson(ENV_PATH);
   const config = loadConfig(CONFIG_PATH);
   const registry = new ProviderRegistry(config);
