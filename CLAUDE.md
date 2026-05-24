@@ -31,7 +31,7 @@
 - **Wave 0 contracts are append-only during Wave 1+.** New optional fields OK; renames/removals require a new ADR and a pause across all open workers.
 - **`boundary_guard.sh` is fail-closed.** Exit 0 + JSON `permissionDecision: "deny"` for blocked tools; same for malformed input.
 - **`composer-mastermind/SKILL.md` is negative-style.** "DO NOT use Edit; NEVER call Bash; ALWAYS dispatch via Task" — mirrors Anthropic's frontend-design skill convention.
-- **Day 2 (real GLM/`agy` fixture record) needs explicit user `go`.** Costs ~$0.02 in GLM tokens; not auto-spent.
+- **GLM/`agy` real-money calls obey `composer.config.json` `spendAuthorization.mode`** (added 2026-05-24 after first dogfood audit). Default `interactive` keeps the legacy "ask `go` before any priced call" behaviour; `auto` proceeds within `maxUsdPerCall` / `maxUsdPerSession` caps; `deny` blocks all priced calls. The orchestrator (composer-mastermind skill) is responsible for honoring it. Fixture recording (`scripts/record-fixtures.ts`) also reads it.
 
 ## How work is structured
 

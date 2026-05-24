@@ -92,6 +92,67 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
   });
 });
 
+describe("parseConfig — spendAuthorization (Wave 3 audit follow-up)", () => {
+  it("accepts config without spendAuthorization (backward compat)", () => {
+    const cfg = parseConfig(VALID);
+    expect(cfg.spendAuthorization).toBeUndefined();
+  });
+
+  it("accepts mode=interactive (the documented default behaviour)", () => {
+    const cfg = parseConfig({ ...VALID, spendAuthorization: { mode: "interactive" } });
+    expect(cfg.spendAuthorization?.mode).toBe("interactive");
+  });
+
+  it("accepts mode=auto (skip per-call gate, rely on caps)", () => {
+    const cfg = parseConfig({ ...VALID, spendAuthorization: { mode: "auto" } });
+    expect(cfg.spendAuthorization?.mode).toBe("auto");
+  });
+
+  it("accepts mode=deny (block all real spend, force tape replay)", () => {
+    const cfg = parseConfig({ ...VALID, spendAuthorization: { mode: "deny" } });
+    expect(cfg.spendAuthorization?.mode).toBe("deny");
+  });
+
+  it("rejects unknown mode value", () => {
+    expect(() =>
+      parseConfig({ ...VALID, spendAuthorization: { mode: "yolo" } }),
+    ).toThrow();
+  });
+
+  it("requires mode field when spendAuthorization present", () => {
+    expect(() =>
+      parseConfig({ ...VALID, spendAuthorization: {} }),
+    ).toThrow();
+  });
+
+  it("accepts optional maxUsdPerSession + maxUsdPerCall caps", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      spendAuthorization: { mode: "auto", maxUsdPerSession: 1.0, maxUsdPerCall: 0.25 },
+    });
+    expect(cfg.spendAuthorization?.maxUsdPerSession).toBe(1.0);
+    expect(cfg.spendAuthorization?.maxUsdPerCall).toBe(0.25);
+  });
+
+  it("rejects negative caps", () => {
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        spendAuthorization: { mode: "auto", maxUsdPerCall: -0.01 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects additional properties on spendAuthorization (strict)", () => {
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        spendAuthorization: { mode: "auto", bogus: 1 },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("loadConfig (disk)", () => {
   it("loads + validates JSON file from disk", () => {
     const tmp = path.join(os.tmpdir(), `composer-cfg-${Date.now()}.json`);

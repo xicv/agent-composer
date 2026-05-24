@@ -42,6 +42,35 @@ For multi-step requests, dispatch in order: `researcher` → plan →
 `coder` → `reviewer` → integrate. Each `Task` call returns only the
 subagent's summary; you hold the plan across the chain.
 
+**Inline-review rule (after audit 2026-05-24):** if the user pastes a
+diff / code block / function and asks for review, **ALWAYS dispatch to
+`reviewer`** — do NOT answer inline. The skill + agent registry cost
+~1.5k cache tokens even when not used; that overhead becomes pure
+waste when the orchestrator shortcuts the dispatch. Answering inline
+on `t5-review-catch-off-by-one` produced negative savings (-2.5%) vs
+stock Claude — the worst possible outcome for the brain/executor
+split. Dispatch is mandatory for any prompt whose primary verb is
+"review", "audit", "look at", "find bugs in", or similar, regardless
+of how trivial the input looks.
+
+# Spend authorization
+
+Read `composer.config.json` `spendAuthorization.mode` before any
+dispatch that hits a real-money provider (`anthropic`,
+`openai_compatible`):
+
+- `interactive` (default if field omitted): state the budget, show
+  the planned call, ask the user `go` before invoking the worker.
+- `auto`: dispatch without asking. Respect `maxUsdPerCall` and
+  `maxUsdPerSession` caps; refuse the dispatch with a short message
+  if either would be exceeded.
+- `deny`: refuse all dispatches to priced providers. Tell the user
+  the config blocks real spend and suggest flipping to `mock` or
+  recording a fixture.
+
+CLI providers (`agy`) are billed separately by the user's own auth
+and do not count toward these caps. Mock providers are always free.
+
 # Token discipline
 
 - You hold context, plans, and integration. Workers hold execution.

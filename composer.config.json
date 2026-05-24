@@ -3,5 +3,10 @@
     "researcher": { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
     "coder":      { "provider": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic", "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN" },
     "reviewer":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] }
+  },
+  "spendAuthorization": {
+    "mode": "auto",
+    "maxUsdPerCall": 0.50,
+    "maxUsdPerSession": 5.00
   }
 }

@@ -16,9 +16,33 @@
         "coder": { "$ref": "#/$defs/roleConfig" },
         "reviewer": { "$ref": "#/$defs/roleConfig" }
       }
-    }
+    },
+    "spendAuthorization": { "$ref": "#/$defs/spendAuthorization" }
   },
   "$defs": {
+    "spendAuthorization": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "description": "Orchestrator behaviour when a real-money provider call is about to be made. Added 2026-05-24 after the first dogfood audit revealed the soft 'always ask' rule was inconsistent across sessions. Optional — omit for the default 'interactive' behaviour.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["interactive", "auto", "deny"],
+          "description": "interactive: ask the user 'go' before any priced call (legacy default). auto: proceed without asking, respect the maxUsd caps. deny: refuse all real-money calls; force tape replay / mock providers."
+        },
+        "maxUsdPerSession": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hard cap on accumulated USD spend across the whole orchestrator session. 0 = no spend; omitted = no cap."
+        },
+        "maxUsdPerCall": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hard cap on a single provider call's USD estimate. 0 = block everything; omitted = no cap."
+        }
+      }
+    },
     "providerId": {
       "type": "string",
       "enum": ["anthropic", "openai_compatible", "cli", "mock"],

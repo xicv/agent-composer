@@ -25,6 +25,22 @@ export type RoleConfig = z.infer<typeof RoleConfigSchema>;
 export const RoleNameSchema = z.enum(["researcher", "coder", "reviewer"]);
 export type RoleName = z.infer<typeof RoleNameSchema>;
 
+export const SpendAuthorizationModeSchema = z.enum([
+  "interactive",
+  "auto",
+  "deny",
+]);
+export type SpendAuthorizationMode = z.infer<typeof SpendAuthorizationModeSchema>;
+
+export const SpendAuthorizationSchema = z
+  .object({
+    mode: SpendAuthorizationModeSchema,
+    maxUsdPerSession: z.number().nonnegative().optional(),
+    maxUsdPerCall: z.number().nonnegative().optional(),
+  })
+  .strict();
+export type SpendAuthorization = z.infer<typeof SpendAuthorizationSchema>;
+
 export const ComposerConfigSchema = z
   .object({
     roles: z
@@ -34,6 +50,7 @@ export const ComposerConfigSchema = z
         reviewer: RoleConfigSchema,
       })
       .strict(),
+    spendAuthorization: SpendAuthorizationSchema.optional(),
   })
   .strict();
 export type ComposerConfig = z.infer<typeof ComposerConfigSchema>;
