@@ -1,0 +1,19 @@
+{
+  "name": "composer-mastermind",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestrator: Claude as brain, GLM/agy as executors. Dispatches code/research/review work to subagents wired through the @composer-mcp/server MCP server.",
+  "claudeCodeVersion": ">=4.6",
+  "requires": ["@composer-mcp/server"],
+  "settings": {
+    "PreToolUse": ["bash:hooks/boundary_guard.sh"],
+    "Stop": ["bash:hooks/learn.sh"]
+  },
+  "skills": ["skills/composer-mastermind/SKILL.md"],
+  "agents": [
+    "agents/coder.md",
+    "agents/researcher.md",
+    "agents/reviewer.md"
+  ],
+  "commands": ["commands/evolve.md"],
+  "license": "MIT"
+}
