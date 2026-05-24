@@ -237,3 +237,21 @@ Build 2 applied all four hypotheses simultaneously. Results vs Build 1:
 2. **Hybrid escalation** — start on haiku; if `npm test` fails after first integration, spawn a follow-up `claude -p --model opus` to fix only the failures. Best-of-both: haiku speed + opus correctness on the last mile.
 3. **Subagent-only mode** — instead of spawning a full headless orchestrator, dispatch directly through `Task` from the current session to the project's coder/reviewer subagents. Skips the headless cache replay entirely. Requires the composer MCP server to be wired into the calling session.
 
+### First real `/evolve` run (2026-05-24, post-Build-2)
+
+Command: `./node_modules/.bin/tsx scripts/run-evolve.ts --eval-mode real --budget-usd 5.00 --max-rounds 1` (constrained to 1 round to fit the $5 session cap; worst-case formula refused $2 budget initially).
+
+| round | operator | parentScore | candidateScore | promoted | reason |
+|---|---|---|---|---|---|
+| 0 | add_counterexample | −0.3210 | −0.3210 | no | no significant improvement |
+
+- `stoppedAt: maxRounds`
+- `postflight: accept=false` — agy research provider flagged the candidate for "implicitly injecting `@.claude/learnings/index.md` instead of querying a dedicated vector store"
+- `budgetStats: calls=5 usd=$0.1250`
+- Final synthetic-score print: parent 0.9740 → winner 0.9740 (unchanged; no promotion)
+- **SKILL.md MD5 identical to pre-run snapshot** — atomic swap+restore preserved integrity
+
+**Findings.** The autoresearch infrastructure works end-to-end on real eval. No winner found because (a) round-robin rolled `add_counterexample` (length-adding) while `lengthPenalty` favors brevity — both sides scored negative on length alone; (b) postflight would have blocked promotion regardless. Conservative-by-design: Wilcoxon + CI95 + re-run survival + postflight gate together = candidate must clearly win on multiple axes. GLM/z.ai real spend this run = $0 because the operator didn't invoke `reflect_and_rewrite`.
+
+**Next-experiment ideas.** Tune `lengthLambda` lower so existing SKILL isn't punished into negative range. Force `tightenLanguage` operator (the one that matches the length-penalty signal) for a deterministic test. Run with `--max-rounds 3` after either raising session cap to $15 or lowering the driver's worst-case constant from $0.50 to match per-call cap ($0.25).
+
