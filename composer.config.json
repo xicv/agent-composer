@@ -1,7 +1,7 @@
 {
   "roles": {
-    "researcher": { "provider": "mock", "model": "mock-researcher-day1" },
-    "coder":      { "provider": "mock", "model": "mock-coder-day1" },
-    "reviewer":   { "provider": "mock", "model": "mock-reviewer-day1" }
+    "researcher": { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
+    "coder":      { "provider": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic", "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN" },
+    "reviewer":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] }
   }
 }
