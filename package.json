@@ -1,11 +1,29 @@
 {
-  "name": "composer",
-  "version": "0.0.0",
+  "name": "@composer-mcp/server",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Multi-agent orchestration MCP server. Claude orchestrates; GLM and agy do the work.",
+  "bin": {
+    "composer-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "composer.config.schema.json",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./schema": "./composer.config.schema.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/postbuild.mjs",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,7 +33,8 @@
     "test:scripts": "bash tests/scripts/run.sh",
     "test:all": "npm run test && npm run test:hooks && npm run test:scripts",
     "usage": "npx -y ccusage daily",
-    "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json"
+    "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json",
+    "prepublishOnly": "npm run lint && npm run test && npm run build && npm run schema:lint"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
