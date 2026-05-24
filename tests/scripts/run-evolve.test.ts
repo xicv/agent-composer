@@ -4,10 +4,24 @@ import {
   enforceSpendCap,
   SpendCapExceededError,
   syntheticScore,
+  createRealEvaluate,
 } from "../../scripts/run-evolve.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as childProcess from "node:child_process";
+import { createHash } from "node:crypto";
+
+vi.mock("node:child_process", () => ({ execFile: vi.fn() }));
+
+vi.mock("node:fs", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs")>();
+  return {
+    ...actual,
+    writeFileSync: vi.fn(actual.writeFileSync),
+    readFileSync: vi.fn(actual.readFileSync),
+  };
+});
 
 describe("run-evolve helpers", () => {
   describe("parseArgs", () => {
@@ -412,5 +426,162 @@ describe("run-evolve helpers", () => {
       expect(tokenComponent).toBe(0);
       expect(baselineTokens).toBe(1);
     });
+  });
+});
+
+describe("createRealEvaluate — worktree isolation", () => {
+  const REAL_SKILL_PATH = "/real/repo/.claude/skills/composer-mastermind/SKILL.md";
+  const BASELINES: Record<string, { mainSessionTokens: number }> = {
+    t1: { mainSessionTokens: 1000 },
+    t2: { mainSessionTokens: 800 },
+  };
+  const FAKE_CLAUDE_RESPONSE = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    result: "",
+    is_error: false,
+    usage: {
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+    total_cost_usd: 0.001,
+  });
+  const CANDIDATE = "dispatch Read worktree candidate";
+
+  type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
+  type ExecFileMockArgs = [string, (readonly string[] | null | undefined), unknown, unknown];
+
+  function makeExecFileMock(claudeFails?: boolean) {
+    return (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
+      .mockImplementation((_cmd, args, _opts, cb) => {
+        const callback = cb as ExecFileCallback;
+        const a = (args ?? []) as string[];
+        const isWorktreeAdd = _cmd === "git" && a[1] === "add";
+        const isClaude = _cmd === "claude";
+        const isWorktreeRemove = _cmd === "git" && a[1] === "remove";
+        if (isWorktreeAdd || isWorktreeRemove) {
+          setImmediate(() => callback(null, "", ""));
+        } else if (isClaude) {
+          if (claudeFails) {
+            setImmediate(() => callback(new Error("spawn failed"), "", ""));
+          } else {
+            setImmediate(() => callback(null, FAKE_CLAUDE_RESPONSE, ""));
+          }
+        } else {
+          setImmediate(() => callback(null, "", ""));
+        }
+        return { stdin: { end: vi.fn() } } as unknown as ReturnType<typeof childProcess.execFile>;
+      });
+  }
+
+  let writeFileSyncSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
+    writeFileSyncSpy = vi.mocked(fs.writeFileSync) as unknown as ReturnType<typeof vi.fn>;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates a worktree for each task", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const addCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "add",
+    );
+    expect(addCalls).toHaveLength(1);
+  });
+
+  it("worktree path embeds the task id", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const addCall = vi.mocked(childProcess.execFile).mock.calls.find(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "add",
+    );
+    expect((addCall?.[1] as string[])?.join(" ")).toContain("t1");
+  });
+
+  it("writes candidate SKILL into worktree path, not real repo", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    expect(writeFileSyncSpy.mock.calls.length).toBeGreaterThan(0);
+    for (const call of writeFileSyncSpy.mock.calls) {
+      const dest = call[0] as string;
+      expect(dest).not.toBe(REAL_SKILL_PATH);
+      expect(dest).toContain(".claude/skills/composer-mastermind/SKILL.md");
+      expect(dest).toContain("/tmp/");
+    }
+  });
+
+  it("spawns claude with cwd pointing at worktree", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const claudeCall = vi.mocked(childProcess.execFile).mock.calls.find((c) => c[0] === "claude");
+    expect(claudeCall).toBeDefined();
+    const opts = claudeCall?.[2] as { cwd?: string };
+    expect(opts.cwd).toContain("/tmp/");
+    expect(opts.cwd).toContain("t1");
+  });
+
+  it("removes worktree after successful eval", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const removeCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "remove",
+    );
+    expect(removeCalls).toHaveLength(1);
+    expect((removeCalls[0]?.[1] as string[])).toContain("--force");
+  });
+
+  it("removes worktree even when claude spawn throws", async () => {
+    makeExecFileMock(true);
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await expect(evaluate(CANDIDATE, [{ id: "t1", description: "task one" }])).rejects.toThrow("spawn failed");
+    const removeCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "remove",
+    );
+    expect(removeCalls).toHaveLength(1);
+  });
+
+  it("real-repo SKILL.md is never written (MD5 invariant)", async () => {
+    makeExecFileMock();
+    const originalContent = "original skill content";
+    const beforeHash = createHash("md5").update(originalContent).digest("hex");
+    vi.mocked(fs.readFileSync).mockReturnValue(originalContent);
+
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+
+    const afterContent = fs.readFileSync(REAL_SKILL_PATH, "utf8") as string;
+    const afterHash = createHash("md5").update(afterContent).digest("hex");
+    expect(afterHash).toBe(beforeHash);
+    const realRepoWrites = writeFileSyncSpy.mock.calls.filter((c: unknown[]) => c[0] === REAL_SKILL_PATH);
+    expect(realRepoWrites).toHaveLength(0);
+  });
+
+  it("creates one worktree per task for multiple tasks", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [
+      { id: "t1", description: "task one" },
+      { id: "t2", description: "task two" },
+    ]);
+    const addCalls = vi.mocked(childProcess.execFile).mock.calls.filter(
+      (c) => c[0] === "git" && (c[1] as string[])[1] === "add",
+    );
+    expect(addCalls).toHaveLength(2);
+    const worktreePaths = addCalls.map((c) => (c[1] as string[])[2]);
+    expect(worktreePaths[0]).toContain("t1");
+    expect(worktreePaths[1]).toContain("t2");
   });
 });

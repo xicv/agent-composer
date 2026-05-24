@@ -199,6 +199,7 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-05-24 | Step 5 v1 (/evolve driver + slash command) | opus-4-7 | 11.4 | $2.97 | 2.44M | 45 | 2 | 3 new | 434 | All gates green; smoke driver exit 0 |
 | 2026-05-24 | Step 5 v2 (real-eval-against-tasks scorer) | haiku-4-5 | 6.5 | $1.02 | 3.72M | 34 | 1 | 2 modified | +507 | 268/269 first pass; 1-line fp-precision fix → 269/269 green |
 | 2026-05-24 | Step 5 v3 (--length-lambda + --force-operator + EvolveDeps.pickOperator) | sonnet-4-6 | 6.9 | $1.22 | 1.99M | 31 | 1 | 4 modified | +366 | 275/275 first pass; lint clean; extra operators.ts edit was judgment call (added camelCase lookup) |
+| 2026-05-24 | Build 4 (worktree-sandbox real-eval refactor) | sonnet-4-6 | 10.3 | $1.50 (cap) | 2.02M | 34 | 1 | 3 modified | +190/-22 | Budget cap hit before commit; main session repaired 2 test bugs (ESM `vi.spyOn(fs, …)` → `vi.mock("node:fs", …)`; `.toContain` on args array) → 283/283 green |
 
 ### Build 1 (Step 5 v1) — findings
 
@@ -289,4 +290,24 @@ Build 3 added `--length-lambda` and `--force-operator` flags via a new `EvolveDe
 **Sonnet verdict — best codegen ROI of the three.** 59 % cheaper than opus, similar wall to haiku, no fix-ups required, AND made a sensible unsolicited helper edit (CLI camelCase ↔ snake_case lookup table) the brief implicitly required. Reads dropped to 7 — sonnet trusted the bundled context most. Output 18k tokens (haiku 26k, opus 36k) — sonnet was the most concise.
 
 **Default-model recommendation.** Use sonnet-4-6 for composer-dispatched codegen unless the task is purely structural (then haiku, accept fp-edge-case risk) or genuinely complex / multi-file from scratch (then opus). Haiku still wins on raw $ when fp/precision edges don't matter (cost $1.02 vs sonnet $1.22, but sonnet's zero-fixup time recoups the 20 % cost gap).
+
+### Build 4 (worktree-sandbox real-eval refactor) — verdict
+
+Build 4 replaced the per-task atomic-swap-on-real-skill design with a throwaway git worktree per task. The real `.claude/skills/composer-mastermind/SKILL.md` is never touched during real-mode evaluate — each task evaluates in `/tmp/composer-eval-<pid>-<taskId>` with the candidate SKILL written into that worktree's own copy. Solves the sandbox hazard (destructive haiku spawns can no longer touch the real repo) and the concurrent-edit hazard (user can edit SKILL.md mid-run) with one design change.
+
+**Per-hypothesis verdict.**
+- **#1 (worktree replaces atomic-swap) — WIN.** Refactor landed; both hazards subsumed. Real-mode never invokes the swap path now; atomic swap remains only as an artefact in the test file at line 240 (kept because it exercises the test-disk pattern, not the production code).
+- **#2 (--max-budget-usd at $1.50 sufficient) — FAIL.** Sonnet hit cap at turn 34 / $1.5021 mid-fix on a TS strict-null error in the test file. Budget cap is still a soft ceiling (+$0.002 overrun, same as Builds 2/3 patterns). Need ≥$2.00 for next refactor of this depth, or split into two smaller dispatches.
+- **#3 (sonnet codegen quality on refactor + tests) — MIXED.** Driver refactor (`scripts/run-evolve.ts`) was clean — tsc green, lint green, integration logic correct. Test file had two pattern bugs neither caught by tsc nor lint: `vi.spyOn(fs, "writeFileSync")` (ESM module-namespace not configurable) and `.toContain("t1")` on an args array (element-equality, not substring). Both required main-session repair to reach 283/283. Pattern: sonnet's first-pass driver code is production-quality, but its first-pass test mocks regress on ESM-specific patterns.
+
+**Findings.**
+
+- **Budget cap is a hard ceiling, not a hint.** Wall 10.3 min, num_turns 34 — at the point of cutoff the agent was mid-fix on TS2532, one Edit away from gate validation. Closer monitoring: at 8.5 min the build had 3 files edited but no test run; another ≥3 min would have been needed for first-pass gate cycle. Recommendation: for refactors with ≥150 LOC delta on tests, budget $2.00–$2.50.
+- **Test mocks are sonnet's weak spot in ESM.** This is the second build (after Build 2's fp-precision bug) where sonnet's tests fail despite passing tsc+lint. Project-memory entry worth adding: "vitest ESM ⇒ never use `vi.spyOn(*, ...)` on a node-builtin module namespace; use hoisted `vi.mock(...)` with `await importActual` instead". Save sonnet a turn next time by including this hint in handoff briefs.
+- **`.toContain` array semantics.** Sonnet expected substring behavior on `expect(addCall?.[1]).toContain("t1")` where `addCall?.[1]` was a `string[]`. Vitest treats array `.toContain(x)` as element-equality, so passing an array element containing "t1" as a substring fails. Mechanical fix: `.join(" ")` first.
+- **Net Build-4 economics.** Composer-dispatched cost: $1.50 + ~$0.05 main-session repair ≈ $1.55. Estimated me-inline equivalent: ~$0.40–0.80 main session (refactor is well-specified). Premium ratio ≈ 2–4× — in line with Builds 1–3. The dogfood premium continues to buy context isolation, not raw cost savings.
+- **Quality of the worktree refactor itself.** The production-code refactor in `scripts/run-evolve.ts` (40-line diff) is clean: each task's spawn now sets `cwd: worktreePath`, candidate SKILL writes go to the worktree's `.claude/skills/composer-mastermind/SKILL.md`, and `git worktree remove --force` runs in a finally block. 8 new tests in `tests/scripts/run-evolve.test.ts` cover: worktree-per-task creation, path-embeds-task-id, candidate-SKILL-write-destination, spawn-cwd-points-at-worktree, worktree-removal-on-success, worktree-removal-on-error, real-repo-SKILL.md-MD5-invariant, and one-worktree-per-task-for-multiple-tasks. Together they encode the safety claim: real repo is never mutated by real-mode evaluate.
+- **Safety doc update.** `.claude/commands/evolve.md` had the "do not edit SKILL.md while /evolve is running" caveat removed; replaced with note that real-mode evaluates each task in a throwaway worktree.
+
+Build 4 closes the two real-eval hazards. Next concrete decision: whether to backport the worktree pattern to synthetic mode for symmetry (probably no — synthetic mode never spawns subprocesses, atomic swap there is fine).
 

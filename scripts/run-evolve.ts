@@ -1,7 +1,7 @@
 // Wave 3 Step 5 v2 — autoresearch driver with real-mode evaluator.
 // Wires real providers + synthetic v1 scorer into runEvolve(), writes
 // the winner to SKILL.candidate.md for manual review/promotion.
-// Real mode spawns claude CLI for actual task evaluation with atomic SKILL.md swap.
+// Real mode spawns claude CLI per-task inside a throwaway git worktree (cwd-isolated).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -275,21 +275,24 @@ function aggregateScore(scores: TaskScore[]): number {
   return scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
 }
 
-function createRealEvaluate(skillPath: string, baselines: Record<string, { mainSessionTokens: number }>) {
+export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>) {
   return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: [] }> => {
     const results: TaskScore[] = [];
-    const swapPath = `${skillPath}.swap-${process.pid}`;
 
     for (const task of tasks) {
+      const worktreePath = `/tmp/composer-eval-${process.pid}-${task.id}`;
       try {
-        // Atomic swap: rename original → swap, write candidate
-        fs.renameSync(skillPath, swapPath);
-        fs.writeFileSync(skillPath, skill, "utf8");
+        await new Promise<void>((resolve, reject) => {
+          execFile("git", ["worktree", "add", worktreePath, "HEAD", "--detach"], {}, (error) => {
+            if (error) reject(new Error(`git worktree add failed: ${error instanceof Error ? error.message : String(error)}`));
+            else resolve();
+          });
+        });
 
-        // Execute claude CLI. Explicitly end child stdin so claude does
-        // not wait 3s for piped input (warns then exits non-zero
-        // otherwise). maxBuffer raised because JSON output for a
-        // successful run can easily exceed the 1 MB default.
+        // Write candidate SKILL into worktree only — real repo SKILL.md is never touched
+        const worktreeSkillPath = path.join(worktreePath, ".claude/skills/composer-mastermind/SKILL.md");
+        fs.writeFileSync(worktreeSkillPath, skill, "utf8");
+
         const output = await new Promise<string>((resolve, reject) => {
           const child = execFile(
             "claude",
@@ -305,7 +308,7 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
               "0.25",
               task.description,
             ],
-            { maxBuffer: 16 * 1024 * 1024 },
+            { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath },
             (error, stdout) => {
               if (error) {
                 reject(error);
@@ -317,7 +320,6 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
           child.stdin?.end();
         });
 
-        // Parse result
         let response: ClaudeJsonResponse;
         try {
           response = JSON.parse(output);
@@ -353,15 +355,9 @@ function createRealEvaluate(skillPath: string, baselines: Record<string, { mainS
         const taskScore = scoreTask(evalResult, baseline);
         results.push(taskScore);
       } finally {
-        // Atomic restore
-        try {
-          if (fs.existsSync(swapPath)) {
-            fs.rmSync(skillPath, { force: true });
-            fs.renameSync(swapPath, skillPath);
-          }
-        } catch (err) {
-          throw new Error(`Failed to restore SKILL.md from swap: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        await new Promise<void>((resolve) => {
+          execFile("git", ["worktree", "remove", "--force", worktreePath], {}, () => resolve());
+        });
       }
     }
 

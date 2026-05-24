@@ -50,6 +50,7 @@ The summary prints to stdout:
 - Respects `composer.config.json` `spendAuthorization.maxUsdPerSession`. If `--budget-usd` exceeds the cap, the script exits with an error message and exit code 1 before spending.
 - Loop termination is governed by `runEvolve()` itself: whichever of budget, plateau, or `--max-rounds` hits first. To abort mid-loop, send SIGINT (Ctrl-C); the script exits without writing `SKILL.candidate.md` unless the write step already completed.
 - Task descriptions in `evals/tasks.jsonl` are passed verbatim to the reflection provider — keep that file under version control to retain a clear trust boundary.
+- **SKILL.md edits are safe during a real-mode run.** Each task eval runs in a throwaway `git worktree` at `/tmp/composer-eval-<pid>-<taskId>`. The candidate skill is written only into the worktree copy; the real repo's SKILL.md is never touched during evaluation. You can freely edit SKILL.md in your editor while `/evolve --eval-mode real` is running.
 
 ## v1 caveat
 
