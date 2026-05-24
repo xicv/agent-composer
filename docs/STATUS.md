@@ -391,3 +391,43 @@ A 3-round attempt was queued to test whether `reflect_and_rewrite` benefits from
 
 All four layers were exercised by today's 3-round run. Together they make real-mode `/evolve` robust enough to run multi-round experiments without operator supervision — a structural prerequisite for the Wave 4 autoresearch loop.
 
+### Run A — `add_counterexample` 3-round experiment (operator-switch hypothesis)
+
+Command: `tsx scripts/run-evolve.ts --eval-mode real --budget-usd 15.00 --max-rounds 3 --length-lambda 0.0001 --force-operator addCounterexample`.
+
+**First attempt: wedged for 48 min on t1-slugify.** Per-task `execFile("claude", …)` had no `timeout` option; spawned haiku entered a rate-limit retry loop and never exited. The previously-shipped resilience layers (sandbox, per-task fault, stat-gate, diagnostics) did not help because the spawn itself never returned. Killed via `TaskStop`; orphan worktree manually removed.
+
+**Fifth resilience layer shipped (commit `0ad57b4`).** Added `{ timeout: 180_000, killSignal: "SIGTERM" }` to the per-task execFile options. Diagnostic now appends `[TIMEOUT after 180s]` to the error message when Node detects `error.killed === true || error.signal === "SIGTERM"`. Tests +2 (timeout marker, option shape). 290/290 vitest.
+
+**Second attempt: completed cleanly in 7.5 min, $0.325 GLM, zero task failures.**
+
+| round | operator | parentScore | candidateScore | promoted | reason |
+|---|---|---|---|---|---|
+| 0 | add_counterexample | 0.2384 | **0.2384** | no | no significant improvement (Δ = 0.0000) |
+| 1 | add_counterexample | 0.2384 | **0.2384** | no | no significant improvement (Δ = 0.0000) |
+| 2 | add_counterexample | 0.2384 | **0.2384** | no | no significant improvement (Δ = 0.0000) |
+
+`postflight: accept=true reason="The candidate skill clearly defines a local orchestration pattern and does not reference any external APIs or frameworks listed as deprecated or removed in the snapshot."`
+
+**Δ = exactly zero, three rounds in a row.** `add_counterexample` appends a counterexample block to SKILL.md; haiku's per-task evaluation is invariant to that appended text (auxiliary context, doesn't change dispatch/success/token signals). At length-lambda 0.0001 the length penalty is negligible. The candidates are structurally identical-scoring to the parent — no signal in either direction.
+
+**Combined verdict across two operator families: SKILL is on a flat plateau, not a local optimum.** `reflect_and_rewrite` produced noisy worse candidates (Δ −0.0166, −0.1601, −0.0149); `add_counterexample` produced exact-zero candidates. Neither operator class finds traction. This decisively answers the operator-switch hypothesis from Path A in the prior next-step matrix: **operator switch alone does not escape the no-winner regime.**
+
+**Postflight signal flipped accept-direction with operator class.** `reflect_and_rewrite` rejected 4-of-5 candidates on ecosystem-deprecation grounds (rewrites generate novel text agy scrutinizes). `add_counterexample` accepted all 3 candidates (appended counterexample block is canonical and harmless). Postflight is a content gate, not a delta gate — confirms the layered S2/S3 separation drafted in ADR 0003.
+
+**Path A falsified ⇒ Path C engaged.** The next step is no longer "find a winner via GEPA polish"; it is "ship the SKILL we have to other projects via Wave 4 packaging". ADRs 0002 (meta-MCP packaging) and 0003 (self-evolution surface) drafted in this session as the contract.
+
+### Resilience-layer ledger (sealed 2026-05-24)
+
+Five layers stacked. The circuit-breaker is closed: spawned haiku evals cannot escape their lane in any dimension — destructive (sandbox), individual fault (per-task try/catch), statistical assumption (stat-gate guards), opacity (diagnostics), or wall-time (timeout).
+
+| # | Layer | Commit | Failure mode it prevents |
+|---|---|---|---|
+| 1 | git-worktree-per-task sandbox | `0bfb9bf` | destructive haiku commands damage real repo |
+| 2 | per-task fault isolation | `3e68db2` | single-task spawn failure aborts entire run |
+| 3 | stat-gate precondition guards | `00cc3cf` | wilcoxonSignedRankP throws on asymmetric arrays |
+| 4 | spawn-error diagnostics | `00cc3cf` | silent claude exit hides root cause |
+| 5 | per-task wall-time bound | `0ad57b4` | spawn hangs indefinitely (rate-limit retry, I/O wedge) |
+
+These five layers are the **structural prerequisites for ADR 0002's plugin distribution**. Without them the orchestration loop is too fragile to run unattended in arbitrary consumer projects.
+
