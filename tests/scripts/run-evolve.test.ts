@@ -625,4 +625,23 @@ describe("createRealEvaluate — worktree isolation", () => {
     expect(worktreePaths[0]).toContain("t1");
     expect(worktreePaths[1]).toContain("t2");
   });
+
+  it("captures claude stderr tail in the error message when the spawn fails", async () => {
+    (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
+      .mockImplementation((_cmd, _args, _opts, cb) => {
+        const callback = cb as ExecFileCallback;
+        if (_cmd === "claude") {
+          setImmediate(() => callback(new Error("Command failed: claude -p"), "", "rate limit exceeded\nretry after 60s"));
+        } else {
+          setImmediate(() => callback(null, "", ""));
+        }
+        return { stdin: { end: vi.fn() } } as unknown as ReturnType<typeof childProcess.execFile>;
+      });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("rate limit exceeded"));
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("retry after 60s"));
+    errSpy.mockRestore();
+  });
 });

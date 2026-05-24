@@ -309,9 +309,14 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
               task.description,
             ],
             { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath },
-            (error, stdout) => {
+            (error, stdout, stderr) => {
               if (error) {
-                reject(error);
+                const stderrTail = (stderr ?? "").toString().trim().split("\n").slice(-3).join(" | ");
+                const stdoutTail = (stdout ?? "").toString().trim().split("\n").slice(-2).join(" | ");
+                const diag = stderrTail || stdoutTail
+                  ? ` [stderr: ${stderrTail}] [stdout: ${stdoutTail}]`
+                  : "";
+                reject(new Error(`${error.message}${diag}`));
               } else {
                 resolve(stdout);
               }

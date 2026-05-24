@@ -114,8 +114,19 @@ export function candidateBeatsParent(
   candidateScores: ReadonlyArray<number>,
   opts: BeatsOptions = {},
 ): BeatsResult {
-  const pMean = mean(parentScores);
-  const cMean = mean(candidateScores);
+  const pMean = parentScores.length ? mean(parentScores) : 0;
+  const cMean = candidateScores.length ? mean(candidateScores) : 0;
+  // Empty-side guard: cannot promote a candidate that has no evaluable scores
+  // (all task evals failed asymmetrically). Refuse rather than crash on
+  // downstream stats. Parent-empty is similarly meaningless.
+  if (parentScores.length === 0 || candidateScores.length === 0) {
+    return {
+      beats: false,
+      reason: `inconclusive — empty score array (parent=${parentScores.length}, candidate=${candidateScores.length})`,
+      parentMean: pMean,
+      candidateMean: cMean,
+    };
+  }
   const pCI = ci95(parentScores);
   const cCI = ci95(candidateScores);
   const pThresh = opts.pThreshold ?? 0.1;
@@ -131,8 +142,11 @@ export function candidateBeatsParent(
       candidateCI: cCI,
     };
   }
-  // Wilcoxon — only meaningful if candidate mean ≥ parent.
-  if (cMean > pMean) {
+  // Wilcoxon — only meaningful if candidate mean ≥ parent AND arrays are
+  // paired (equal length). When real-eval evaluator hits asymmetric per-task
+  // failures (e.g. one task crashed on the candidate side but not the parent),
+  // skip the paired stat and let the next gate (Occam tiebreak / no-op) decide.
+  if (cMean > pMean && parentScores.length === candidateScores.length && parentScores.length >= 2) {
     const p = wilcoxonSignedRankP(parentScores, candidateScores);
     if (p < pThresh) {
       return {
