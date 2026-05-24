@@ -70,6 +70,44 @@ export class EvalRunner {
   }
 }
 
+// Wave 3 Step 3 — train/val/holdout split.
+//
+// Holdout = tasks[round % N] — never seen by selection logic within
+// the round. Train+val = remainder; for N>=4 the remainder is halved
+// (train = first floor(M/2), val = remaining). For N=3 (starter set)
+// the remainder is split 1/1.
+//
+// Mirrors the evolve-internal `rotateHoldout` in src/evolve/runner.ts
+// but exposes a deeper train/val partition for autoresearch + baseline
+// callers that want both phases distinct.
+
+export interface TaskSplit {
+  holdout: EvalTask;
+  train: EvalTask[];
+  val: EvalTask[];
+}
+
+export function splitTasks(
+  tasks: ReadonlyArray<EvalTask>,
+  round: number,
+): TaskSplit {
+  if (tasks.length < 2) {
+    throw new Error(`splitTasks: need at least 2 tasks, got ${tasks.length}`);
+  }
+  if (round < 0 || !Number.isInteger(round)) {
+    throw new Error(`splitTasks: round must be non-negative integer, got ${round}`);
+  }
+  const idx = round % tasks.length;
+  const holdout = tasks[idx]!;
+  const remainder = tasks.filter((_, i) => i !== idx);
+  const trainCount = Math.floor(remainder.length / 2);
+  return {
+    holdout,
+    train: remainder.slice(0, trainCount),
+    val: remainder.slice(trainCount),
+  };
+}
+
 export function loadTasks(jsonlPath: string): EvalTask[] {
   const raw = fs.readFileSync(jsonlPath, "utf8");
   const lines = raw.split("\n").filter((l) => l.trim().length > 0);

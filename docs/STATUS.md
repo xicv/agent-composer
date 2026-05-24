@@ -12,9 +12,9 @@
 | **Coverage patch** | CLIProvider real-spawn tests + 2 registry branches | ✅ committed `0516416` |
 | **Wave 2 F2.2** | Eval framework + 3 starter tasks + budget guard + metric | ✅ committed `e12b5b6` |
 | **Wave 3 Step 1** | STOP_EVOLVE killswitch + bypass flag + diff whitelist | ✅ committed `50f4ab4` |
-| **Wave 3 Step 2** | Evolve core — operators, lengthPenalty, budget, pareto, plateau, preflight, postflight, reflection, runner | ✅ this commit |
+| **Wave 3 Step 2** | Evolve core — operators, lengthPenalty, budget, pareto, plateau, preflight, postflight, reflection, runner | ✅ committed `dd37fa9` |
+| **Wave 3 Step 3** | Eval split (train/val/holdout) + SUCCESS.md amendment (binary gates, λ, holdout policy) | ✅ this commit |
 | **Baseline measurement** | Stock-Claude token counts for the 3 eval tasks | ⏸ pending — user task, see [`../evals/baseline-protocol.md`](../evals/baseline-protocol.md) |
-| **Wave 3 Step 3** | Eval split (train/val/holdout) | ⏸ next |
 | **Wave 3 Step 4** | `ANTHROPIC_MODEL` env override | ⏸ next |
 | **Wave 3 Step 5** | `/evolve` command + SKILL routing heuristic | ⏸ next |
 | **Wave 3 Step 6** | ADRs 0002 (meta-MCP deferred) + 0003 (self-evolution) + docs sync | ⏸ next |
@@ -26,7 +26,7 @@
 
 | Gate | Value |
 |---|---|
-| Vitest | **198 / 198** pass across 21 test files |
+| Vitest | **206 / 206** pass across 22 test files |
 | Bash hook harness | **25 / 25** pass |
 | Bash script harness | **14 / 14** pass |
 | Coverage — statements | 93.12% (target 80%) |
