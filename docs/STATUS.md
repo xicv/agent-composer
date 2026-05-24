@@ -311,3 +311,36 @@ Build 4 replaced the per-task atomic-swap-on-real-skill design with a throwaway 
 
 Build 4 closes the two real-eval hazards. Next concrete decision: whether to backport the worktree pattern to synthetic mode for symmetry (probably no — synthetic mode never spawns subprocesses, atomic swap there is fine).
 
+### Third real `/evolve` run (2026-05-24, post-Build-4 sandboxed infra)
+
+Command: `tsx scripts/run-evolve.ts --eval-mode real --budget-usd 5.00 --max-rounds 1 --length-lambda 0.0001 --force-operator reflectAndRewrite` (same flags as second run, on Build-4 worktree-sandboxed infra at HEAD `0bfb9bf`).
+
+| round | operator | parentScore | candidateScore | promoted | reason |
+|---|---|---|---|---|---|
+| 0 | reflect_and_rewrite | 0.2384 | 0.2366 | no | no significant improvement (Δ −0.0018) |
+
+- `stoppedAt: maxRounds`, `postflight: accept=false`, `budgetStats: 5 calls $0.1250` internal
+- Wall: 6.6 min (395s), exit 0
+- Real `.claude/skills/composer-mastermind/SKILL.md` MD5 preserved: `6e662529c28d545f6fc1f9fea0a344ea` — never touched during run
+- `/tmp/composer-eval-*` worktrees: zero leaks after run (verified clean teardown)
+- `git worktree list`: only `/Users/xicao/Projects/composer 0bfb9bf [main]` — no sandbox residue
+
+**Build 4 safety claim verified end-to-end.** The first real `/evolve` run to complete without collateral damage. Prior runs (pre-Build-4) deleted `node_modules` (t7 ran `rm -rf` against the real cwd) and clobbered user edits to SKILL.md via the atomic-restore. This run: zero filesystem damage, real SKILL.md byte-identical pre and post, all per-task worktrees created and torn down cleanly.
+
+**Convergence pattern across the three real runs:**
+
+| Run | parentScore | candidateScore | Δ | Operator | Postflight |
+|---|---|---|---|---|---|
+| 1st (a1b1f45) | −0.3210 | −0.3210 | 0 | add_counterexample | n/a (no rewrite) |
+| 2nd (f650d6c) | 0.2441 | 0.2384 | −0.0057 | reflect_and_rewrite | accept=true |
+| **3rd (this)** | **0.2384** | **0.2366** | **−0.0018** | reflect_and_rewrite | **accept=false** |
+
+GLM's `reflect_and_rewrite` keeps producing candidates that score very slightly worse than parent on actual task perf. Δ trending toward zero (−0.0057 → −0.0018) suggests convergence: GLM's reflection space around the existing SKILL is narrow at temperature/length-lambda current settings. Two angles to push next:
+
+1. **More exploration pressure.** Try `add_counterexample` (length-additive) at length-lambda 0.0001 — the lambda 0.05 default crushed it on run 1. Or raise GLM reflection temperature.
+2. **Higher rounds.** All three runs forced `--max-rounds 1`. Run `--max-rounds 3` now that the per-call budget formula admits multi-round runs cleanly. Each round adds ~$0.125 GLM, ~7 min wall. $5/session cap easily covers 3 rounds.
+
+**Postflight rejected on substantive grounds.** "The candidate relies on implicit conversation memory and zero-shot LLM prompts for subagent routing, both of which the ecosystem snapshot explicitly lists as deprecated patterns." The agy postflight gate has now blocked two of three candidates on genuinely valid criticisms (last run: "implicit `@.claude/learnings/index.md` injection"). The four-layer gate (stat + Wilcoxon + CI95 + postflight) earns its complexity.
+
+**Cost picture for /evolve real-mode.** Three runs total: $0.000 + $0.125 + $0.125 = $0.25 GLM. Negligible vs $5/session cap. The dominant cost is wall time (~7 min per round), not money.
+
