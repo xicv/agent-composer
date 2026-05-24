@@ -12,6 +12,12 @@ import path from "node:path";
 export interface ComposerEnv {
   ANTHROPIC_AUTH_TOKEN?: string;
   ANTHROPIC_BASE_URL?: string;
+  /**
+   * Wave 3 Step 4 — model identifier override for the AnthropicCompatible
+   * provider. Precedence (resolved in src/registry.ts):
+   *   process.env.ANTHROPIC_MODEL > composer.config.json role.model > "glm-5.1"
+   */
+  ANTHROPIC_MODEL?: string;
 }
 
 const DEFAULT_ENV_FILE = ".env.json";
@@ -40,6 +46,9 @@ export function loadEnvJson(envPath: string = DEFAULT_ENV_FILE): ComposerEnv {
   if (typeof obj["ANTHROPIC_BASE_URL"] === "string") {
     result.ANTHROPIC_BASE_URL = obj["ANTHROPIC_BASE_URL"];
   }
+  if (typeof obj["ANTHROPIC_MODEL"] === "string") {
+    result.ANTHROPIC_MODEL = obj["ANTHROPIC_MODEL"];
+  }
   return result;
 }
 
@@ -56,7 +65,9 @@ export function getEnv(): ComposerEnv {
   const result: ComposerEnv = {};
   const t = process.env["ANTHROPIC_AUTH_TOKEN"];
   const u = process.env["ANTHROPIC_BASE_URL"];
+  const m = process.env["ANTHROPIC_MODEL"];
   if (typeof t === "string" && t.length > 0) result.ANTHROPIC_AUTH_TOKEN = t;
   if (typeof u === "string" && u.length > 0) result.ANTHROPIC_BASE_URL = u;
+  if (typeof m === "string" && m.length > 0) result.ANTHROPIC_MODEL = m;
   return result;
 }

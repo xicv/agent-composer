@@ -104,15 +104,53 @@ describe("ProviderRegistry — anthropic (Day 2)", () => {
     expect(() => reg.getProviderForRole("coder")).toThrow(/apiKeyEnv/);
   });
 
-  it("throws ProviderConfigError when model missing", () => {
-    const reg = new ProviderRegistry(
+});
+
+describe("ProviderRegistry — anthropic model precedence (Step 4)", () => {
+  const stashKey = process.env["TEST_ANTHROPIC_KEY"];
+  const stashModel = process.env["ANTHROPIC_MODEL"];
+  beforeEach(() => {
+    process.env["TEST_ANTHROPIC_KEY"] = "test-glm-key";
+    delete process.env["ANTHROPIC_MODEL"];
+  });
+  afterEach(() => {
+    if (stashKey === undefined) delete process.env["TEST_ANTHROPIC_KEY"];
+    else process.env["TEST_ANTHROPIC_KEY"] = stashKey;
+    if (stashModel === undefined) delete process.env["ANTHROPIC_MODEL"];
+    else process.env["ANTHROPIC_MODEL"] = stashModel;
+  });
+
+  function anthropic(model?: string) {
+    return new ProviderRegistry(
       makeConfig({
         provider: "anthropic",
         baseUrl: "https://x",
         apiKeyEnv: "TEST_ANTHROPIC_KEY",
+        ...(model !== undefined ? { model } : {}),
       }),
     );
-    expect(() => reg.getProviderForRole("coder")).toThrow(/model/);
+  }
+
+  it("ANTHROPIC_MODEL env var WINS over role.model in config", () => {
+    process.env["ANTHROPIC_MODEL"] = "glm-5.1";
+    const p = anthropic("glm-4.6").getProviderForRole("coder");
+    expect(p.modelLabel).toBe("glm-5.1");
+  });
+
+  it("falls back to role.model when env not set", () => {
+    const p = anthropic("glm-4.6").getProviderForRole("coder");
+    expect(p.modelLabel).toBe("glm-4.6");
+  });
+
+  it("defaults to glm-5.1 when neither env nor config provide a model", () => {
+    const p = anthropic(undefined).getProviderForRole("coder");
+    expect(p.modelLabel).toBe("glm-5.1");
+  });
+
+  it("treats empty env var as unset", () => {
+    process.env["ANTHROPIC_MODEL"] = "";
+    const p = anthropic("glm-4.6").getProviderForRole("coder");
+    expect(p.modelLabel).toBe("glm-4.6");
   });
 });
 

@@ -14,6 +14,13 @@ import type {
   RoleName,
 } from "./config/schema.js";
 
+/**
+ * Wave 3 Step 4 — fallback when neither process.env.ANTHROPIC_MODEL
+ * nor composer.config.json role.model are provided. Tracks the current
+ * GLM family release (z.ai Anthropic-compat endpoint).
+ */
+export const DEFAULT_ANTHROPIC_MODEL = "glm-5.1";
+
 export class ProviderNotImplementedError extends Error {
   constructor(providerId: string) {
     super(
@@ -53,7 +60,6 @@ export class ProviderRegistry {
       case "anthropic": {
         if (!roleConfig.baseUrl) throw new ProviderConfigError("anthropic", "baseUrl");
         if (!roleConfig.apiKeyEnv) throw new ProviderConfigError("anthropic", "apiKeyEnv");
-        if (!roleConfig.model) throw new ProviderConfigError("anthropic", "model");
         const apiKey = process.env[roleConfig.apiKeyEnv];
         if (!apiKey) {
           throw new ProviderConfigError(
@@ -61,10 +67,16 @@ export class ProviderRegistry {
             `env var ${roleConfig.apiKeyEnv} (set it via .env.json or shell)`,
           );
         }
+        // Step 4 precedence: env > role.model > DEFAULT_ANTHROPIC_MODEL.
+        const envModel = process.env["ANTHROPIC_MODEL"];
+        const model =
+          (typeof envModel === "string" && envModel.length > 0 ? envModel : undefined) ??
+          roleConfig.model ??
+          DEFAULT_ANTHROPIC_MODEL;
         return new AnthropicCompatibleProvider({
           baseUrl: roleConfig.baseUrl,
           apiKey,
-          model: roleConfig.model,
+          model,
         });
       }
 
