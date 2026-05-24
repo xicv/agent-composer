@@ -33,7 +33,7 @@
     "test:scripts": "bash tests/scripts/run.sh",
     "test:all": "npm run test && npm run test:hooks && npm run test:scripts",
     "usage": "npx -y ccusage daily",
-    "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json",
+    "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json && ajv compile --strict=true -s plugin.schema.json && ajv validate --strict=true -s plugin.schema.json -d 'plugin/*/plugin.json'",
     "prepublishOnly": "npm run lint && npm run test && npm run build && npm run schema:lint"
   },
   "dependencies": {

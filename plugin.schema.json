@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://composer-mcp.dev/plugin.schema.json",
+  "title": "Composer plugin manifest",
+  "description": "Schema for Claude Code plugin manifests under plugin/<plugin-name>/plugin.json. Locked by ADR 0002 M0.2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "description"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Plugin slug — lowercase kebab-case. Matches the parent directory name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$",
+      "description": "Semantic version (semver 2.0)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 8,
+      "description": "One-paragraph human-readable summary surfaced in plugin lists."
+    },
+    "claudeCodeVersion": {
+      "type": "string",
+      "description": "Claude Code version range this plugin supports. npm semver range syntax (>=4.6, ^4.6.0, etc)."
+    },
+    "requires": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Peer dependencies — npm package names of MCP servers or other plugins this plugin assumes."
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hook wiring merged into the consumer project's .claude/settings.json on install.",
+      "properties": {
+        "PreToolUse": { "type": "array", "items": { "type": "string" } },
+        "PostToolUse": { "type": "array", "items": { "type": "string" } },
+        "Stop": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths (relative to plugin root) of SKILL.md files to register on install."
+    },
+    "agents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths (relative to plugin root) of subagent .md files to register on install."
+    },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths (relative to plugin root) of slash-command .md files to register on install."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier."
+    }
+  }
+}
