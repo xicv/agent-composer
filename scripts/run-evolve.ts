@@ -308,15 +308,18 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
               "0.25",
               task.description,
             ],
-            { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath },
+            { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath, timeout: 180_000, killSignal: "SIGTERM" },
             (error, stdout, stderr) => {
               if (error) {
                 const stderrTail = (stderr ?? "").toString().trim().split("\n").slice(-3).join(" | ");
                 const stdoutTail = (stdout ?? "").toString().trim().split("\n").slice(-2).join(" | ");
+                const errAny = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
+                const timedOut = errAny.killed === true || errAny.signal === "SIGTERM";
+                const timeoutMarker = timedOut ? " [TIMEOUT after 180s]" : "";
                 const diag = stderrTail || stdoutTail
                   ? ` [stderr: ${stderrTail}] [stdout: ${stdoutTail}]`
                   : "";
-                reject(new Error(`${error.message}${diag}`));
+                reject(new Error(`${error.message}${timeoutMarker}${diag}`));
               } else {
                 resolve(stdout);
               }

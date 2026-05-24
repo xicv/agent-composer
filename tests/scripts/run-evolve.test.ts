@@ -626,6 +626,36 @@ describe("createRealEvaluate — worktree isolation", () => {
     expect(worktreePaths[1]).toContain("t2");
   });
 
+  it("marks timeout in the error message when claude spawn is killed by execFile timeout", async () => {
+    (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
+      .mockImplementation((_cmd, _args, _opts, cb) => {
+        const callback = cb as ExecFileCallback;
+        if (_cmd === "claude") {
+          // Synthesise an execFile-timeout error: Node sets error.killed=true and signal=SIGTERM
+          const err = Object.assign(new Error("Command failed: claude -p"), { killed: true, signal: "SIGTERM" });
+          setImmediate(() => callback(err as unknown as Error, "", ""));
+        } else {
+          setImmediate(() => callback(null, "", ""));
+        }
+        return { stdin: { end: vi.fn() } } as unknown as ReturnType<typeof childProcess.execFile>;
+      });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("TIMEOUT after 180s"));
+    errSpy.mockRestore();
+  });
+
+  it("passes a 180s timeout option to the claude execFile invocation", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const claudeCall = vi.mocked(childProcess.execFile).mock.calls.find((c) => c[0] === "claude");
+    const opts = claudeCall?.[2] as { timeout?: number; killSignal?: string };
+    expect(opts.timeout).toBe(180_000);
+    expect(opts.killSignal).toBe("SIGTERM");
+  });
+
   it("captures claude stderr tail in the error message when the spawn fails", async () => {
     (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
       .mockImplementation((_cmd, _args, _opts, cb) => {
