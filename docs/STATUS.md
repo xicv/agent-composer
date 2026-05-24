@@ -1,6 +1,6 @@
 # Composer — Project Status
 
-> Last updated: **2026-05-23**. Single source of truth for "what's done, what's next". Read this **after** [`CLAUDE.md`](../CLAUDE.md) but **before** anything in `tdd_plan.md` §8 (which is the original build sequence, frozen as written for traceability).
+> Last updated: **2026-05-24**. Single source of truth for "what's done, what's next". Read this **after** [`CLAUDE.md`](../CLAUDE.md) but **before** anything in `tdd_plan.md` §8 (which is the original build sequence, frozen as written for traceability).
 
 ## At a glance
 
@@ -11,21 +11,28 @@
 | **Advisor pass** | Tool annotations, "Use when…" descriptions, `@types/node` 25, `CLAUDE.md` | ✅ committed `07c8a79` |
 | **Coverage patch** | CLIProvider real-spawn tests + 2 registry branches | ✅ committed `0516416` |
 | **Wave 2 F2.2** | Eval framework + 3 starter tasks + budget guard + metric | ✅ committed `e12b5b6` |
+| **Wave 3 Step 1** | STOP_EVOLVE killswitch + bypass flag + diff whitelist | ✅ committed `50f4ab4` |
+| **Wave 3 Step 2** | Evolve core — operators, lengthPenalty, budget, pareto, plateau, preflight, postflight, reflection, runner | ✅ this commit |
 | **Baseline measurement** | Stock-Claude token counts for the 3 eval tasks | ⏸ pending — user task, see [`../evals/baseline-protocol.md`](../evals/baseline-protocol.md) |
+| **Wave 3 Step 3** | Eval split (train/val/holdout) | ⏸ next |
+| **Wave 3 Step 4** | `ANTHROPIC_MODEL` env override | ⏸ next |
+| **Wave 3 Step 5** | `/evolve` command + SKILL routing heuristic | ⏸ next |
+| **Wave 3 Step 6** | ADRs 0002 (meta-MCP deferred) + 0003 (self-evolution) + docs sync | ⏸ next |
+| **Wave 3 Step 7** | GLM 5.1 tape re-record (~$0.30 — needs explicit `go`) | ⏸ gated |
 | **Wave 3 F3.1** | End-to-end smoke (real subagent dispatch) | ⏸ gated on baseline |
-| **Wave 3 F3.2** | Autoresearch on `composer-mastermind/SKILL.md` (~$2 GLM) | ⏸ gated on F3.1 |
 | **Eval expansion** | Remaining 4 task classes from plan §7 | ⏸ optional, $0 cost |
 
-## Test gates (last green run on commit `e12b5b6`)
+## Test gates (last green run, Wave 3 Step 2 HEAD)
 
 | Gate | Value |
 |---|---|
-| Vitest | **123 / 123** pass across 12 test files |
-| Bash hook harness | **17 / 17** pass |
-| Coverage — statements | 98.52% (target 80%) |
-| Coverage — branches | 92.91% |
+| Vitest | **198 / 198** pass across 21 test files |
+| Bash hook harness | **25 / 25** pass |
+| Bash script harness | **14 / 14** pass |
+| Coverage — statements | 93.12% (target 80%) |
+| Coverage — branches | 85.30% |
 | Coverage — functions | 100% |
-| Coverage — lines | 98.94% |
+| Coverage — lines | 94.87% |
 | `tsc` src | 0 errors |
 | `tsc` test | 0 errors |
 | `ajv` schema lint | clean |
@@ -70,16 +77,27 @@ composer/
 │   ├── server.ts                          # createComposerServer factory
 │   ├── registry.ts                        # ProviderFactory
 │   ├── config/{env,loader,schema}.ts
-│   └── providers/
-│       ├── IProvider.ts                   # C0.1 frozen contract
-│       ├── MockProvider.ts                # F1.3
-│       ├── AnthropicCompatibleProvider.ts # F1.1 (GLM via Anthropic compat)
-│       └── CLIProvider.ts                 # F1.2 (agy / Gemini 3.1, spawn-based)
+│   ├── providers/
+│   │   ├── IProvider.ts                   # C0.1 frozen contract
+│   │   ├── MockProvider.ts                # F1.3
+│   │   ├── AnthropicCompatibleProvider.ts # F1.1 (GLM via Anthropic compat)
+│   │   └── CLIProvider.ts                 # F1.2 (agy / Gemini 3.1, spawn-based)
+│   └── evolve/                            # Wave 3 Step 2 — self-evolve core
+│       ├── operators.ts                   # 5 mutation operators, round-robin
+│       ├── lengthPenalty.ts               # bloat-drift gate (λ·tokens)
+│       ├── budget.ts                      # EvolveBudgetGuard (maxCalls 100, maxUsd $4)
+│       ├── pareto.ts                      # 95% CI + paired Wilcoxon + Occam tiebreak
+│       ├── plateau.ts                     # 5-round flat detector
+│       ├── preflight.ts                   # agy ecosystem snapshot (best-effort)
+│       ├── postflight.ts                  # agy candidate validator (fail-safe REJECT)
+│       ├── reflection.ts                  # GLM 5.1 reflect_and_rewrite mutator
+│       └── runner.ts                      # evolve loop orchestrator
 └── tests/
     ├── hooks/{01..15}*.json + run.sh      # F1.9 fixtures + bash harness
     ├── providers/, config/, mcp/, registry.test.ts
     ├── util/recorder.ts                   # F1.12 tape harness
     ├── eval/                              # F2.2 — schema/budget/metric/runner
+    ├── evolve/                            # Wave 3 Step 2 — 75 tests across 9 modules
     ├── fixtures/tapes/{anthropic-glm,cli-agy}.json
     └── contracts/IProvider.implementable.ts
 ```
