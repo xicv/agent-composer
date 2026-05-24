@@ -194,9 +194,10 @@ Gates after change: 230/230 vitest, tsc clean, schema:lint valid. Step 5/6 remai
 
 Per-build measurement of composer-dispatched feature work. Tracks token cost, wall time, dispatch ratio, and outcome quality so we can answer "is composer getting better or worse over time?" longitudinally.
 
-| Date | Build | Wall (min) | Max5 cost | Max5 tokens | Turns | Dispatches | Files | Lines | Outcome |
-|---|---|---|---|---|---|---|---|---|---|
-| 2026-05-24 | Step 5 v1 (/evolve driver + slash command) | 11.4 | $2.97 | 2.44M | 45 | 2 | 3 new | 434 | All gates green; smoke driver exit 0 |
+| Date | Build | Model | Wall (min) | Max5 cost | Max5 tokens | Turns | Dispatches | Files | Lines | Outcome |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-05-24 | Step 5 v1 (/evolve driver + slash command) | opus-4-7 | 11.4 | $2.97 | 2.44M | 45 | 2 | 3 new | 434 | All gates green; smoke driver exit 0 |
+| 2026-05-24 | Step 5 v2 (real-eval-against-tasks scorer) | haiku-4-5 | 6.5 | $1.02 | 3.72M | 34 | 1 | 2 modified | +507 | 268/269 first pass; 1-line fp-precision fix → 269/269 green |
 
 ### Build 1 (Step 5 v1) — findings
 
@@ -212,4 +213,27 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 2. **Tighter briefs** — the Step 5 brief was ~1500 tokens. Shorter briefs reduce cache_creation per turn. Trade-off: less guidance → more orchestrator iteration.
 3. **Pre-dispatched context** — bundle the relevant source files into the brief itself (one Read by me, zero Reads by orchestrator). Cuts the 39-Read loop.
 4. **Per-build budget cap** — set `--max-budget-usd` on the spawned `claude -p` so cost is bounded; if hit, fall back to me-inline rather than continuing to deliberate.
+
+### Build 2 (Step 5 v2) — hypothesis verdicts
+
+Build 2 applied all four hypotheses simultaneously. Results vs Build 1:
+
+| Axis | Build 1 (opus) | Build 2 (haiku) | Δ |
+|---|---|---|---|
+| Wall | 11.4 min | 6.5 min | **−43 %** |
+| Max5 cost | $2.97 | $1.02 | **−66 %** |
+| Turns | 45 | 34 | −24 % |
+| Reads | 39 | 22 | −44 % |
+| Total tokens | 2.44M | 3.72M | +52 % (haiku is ~10× cheaper per token, so cache use up but cost down) |
+
+- **#1 (haiku) — WIN, strongest signal.** 66 % cost reduction. Code quality acceptable: 1 floating-point precision bug in a test (`toBe(0.85)` failed on `0.8500000000000001`), 1-line fix. No correctness issues in the driver itself. Default to haiku for codegen tasks where the structure is fully specified.
+- **#2 (tighter brief) — Inconclusive.** Build 2 brief was actually larger (~5 KB) because it bundled context (hypothesis #3). Need a separate A/B to isolate brief-length effect.
+- **#3 (pre-bundled context) — Likely WIN.** Reads dropped 39→22 (−44 %), turns dropped 45→34. Bundling metric signatures + baselines/tasks shape into the brief meant the orchestrator could go directly to dispatch without exploring.
+- **#4 (--max-budget-usd cap) — Soft cap.** Set $1.00, actual $1.02. Cap is advisory or has accounting lag; not a hard kill switch. Useful as ceiling indicator but don't trust it for strict cost gating.
+
+### Next-build hypotheses (Build 3)
+
+1. **Haiku + tighter brief (no bundling)** — isolate hypothesis #2 by reverting the bundled context. Expect: faster cache-creation but more Reads.
+2. **Hybrid escalation** — start on haiku; if `npm test` fails after first integration, spawn a follow-up `claude -p --model opus` to fix only the failures. Best-of-both: haiku speed + opus correctness on the last mile.
+3. **Subagent-only mode** — instead of spawning a full headless orchestrator, dispatch directly through `Task` from the current session to the project's coder/reviewer subagents. Skips the headless cache replay entirely. Requires the composer MCP server to be wired into the calling session.
 

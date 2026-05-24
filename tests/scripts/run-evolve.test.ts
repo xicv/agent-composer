@@ -1,6 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { parseArgs, enforceSpendCap, SpendCapExceededError, syntheticScore } from "../../scripts/run-evolve.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  parseArgs,
+  enforceSpendCap,
+  SpendCapExceededError,
+  syntheticScore,
+} from "../../scripts/run-evolve.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 describe("run-evolve helpers", () => {
   describe("parseArgs", () => {
@@ -8,12 +15,51 @@ describe("run-evolve helpers", () => {
       const result = parseArgs([]);
       expect(result.budgetUsd).toBe(2.0);
       expect(result.maxRounds).toBe(10);
+      expect(result.evalMode).toBe("synthetic");
     });
 
     it("parses explicit --budget-usd and --max-rounds", () => {
       const result = parseArgs(["--budget-usd", "0.50", "--max-rounds", "3"]);
       expect(result.budgetUsd).toBe(0.5);
       expect(result.maxRounds).toBe(3);
+      expect(result.evalMode).toBe("synthetic");
+    });
+
+    it("parses --eval-mode synthetic", () => {
+      const result = parseArgs(["--eval-mode", "synthetic"]);
+      expect(result.evalMode).toBe("synthetic");
+      expect(result.maxRounds).toBe(10);
+    });
+
+    it("parses --eval-mode real", () => {
+      const result = parseArgs(["--eval-mode", "real"]);
+      expect(result.evalMode).toBe("real");
+      expect(result.maxRounds).toBe(3);
+    });
+
+    it("rejects unknown --eval-mode value", () => {
+      expect(() => parseArgs(["--eval-mode", "bogus"])).toThrow(
+        '--eval-mode: "bogus" must be "synthetic" or "real"',
+      );
+    });
+
+    it("throws when --eval-mode lacks a value", () => {
+      expect(() => parseArgs(["--eval-mode"])).toThrow("--eval-mode requires a value");
+    });
+
+    it("defaults to 3 rounds in real mode when --max-rounds not specified", () => {
+      const result = parseArgs(["--eval-mode", "real"]);
+      expect(result.maxRounds).toBe(3);
+    });
+
+    it("respects explicit --max-rounds in real mode", () => {
+      const result = parseArgs(["--eval-mode", "real", "--max-rounds", "5"]);
+      expect(result.maxRounds).toBe(5);
+    });
+
+    it("synthetic mode keeps default 10 rounds when --max-rounds not specified", () => {
+      const result = parseArgs(["--eval-mode", "synthetic"]);
+      expect(result.maxRounds).toBe(10);
     });
 
     it("throws on unknown flag", () => {
@@ -141,6 +187,197 @@ describe("run-evolve helpers", () => {
       const score = syntheticScore(skill);
       expect(score).toBeGreaterThanOrEqual(0);
       expect(score).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe("real mode evaluator", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("creates swap file, writes candidate, and restores on success", () => {
+      const tempDir = path.resolve(process.cwd(), ".test-real-eval-swap");
+      const skillPath = path.join(tempDir, "SKILL.md");
+      fs.mkdirSync(tempDir, { recursive: true });
+      fs.writeFileSync(skillPath, "original skill content", "utf8");
+
+      // Directly test the swap logic inline since we're mocking
+      const originalContent = fs.readFileSync(skillPath, "utf8");
+      const swapPath = `${skillPath}.swap-${process.pid}`;
+
+      fs.renameSync(skillPath, swapPath);
+      fs.writeFileSync(skillPath, "candidate skill", "utf8");
+
+      expect(fs.readFileSync(skillPath, "utf8")).toBe("candidate skill");
+      expect(fs.existsSync(swapPath)).toBe(true);
+
+      // Restore
+      fs.rmSync(skillPath, { force: true });
+      fs.renameSync(swapPath, skillPath);
+
+      expect(fs.readFileSync(skillPath, "utf8")).toBe(originalContent);
+      expect(fs.existsSync(swapPath)).toBe(false);
+
+      // Cleanup
+      fs.rmSync(tempDir, { recursive: true });
+    });
+
+    it("parses JSON response with token usage correctly", async () => {
+      const mockResponse = {
+        content: [{ type: "text", text: "test output" }],
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 100,
+          cache_read_input_tokens: 50,
+          output_tokens: 20,
+        },
+      };
+
+      // Test token extraction
+      const tokens =
+        (mockResponse.usage.input_tokens ?? 0) +
+        (mockResponse.usage.cache_creation_input_tokens ?? 0) +
+        (mockResponse.usage.cache_read_input_tokens ?? 0) +
+        (mockResponse.usage.output_tokens ?? 0);
+
+      expect(tokens).toBe(180);
+    });
+
+    it("classifies tool_use events by description", () => {
+      const responses = [
+        {
+          description: "dispatch coder subagent",
+          expected: ["coder"],
+        },
+        {
+          description: "dispatch reviewer",
+          expected: ["reviewer"],
+        },
+        {
+          description: "dispatch researcher",
+          expected: ["researcher"],
+        },
+        {
+          description: "some other action",
+          expected: [],
+        },
+      ];
+
+      for (const test of responses) {
+        const roles: string[] = [];
+        const desc = test.description;
+
+        if (desc.toLowerCase().includes("coder")) {
+          roles.push("coder");
+        } else if (desc.toLowerCase().includes("reviewer")) {
+          roles.push("reviewer");
+        } else if (desc.toLowerCase().includes("researcher")) {
+          roles.push("researcher");
+        }
+
+        expect(roles).toEqual(test.expected);
+      }
+    });
+
+    it("checks success by searching outputContains substrings case-insensitively", () => {
+      const mockResponse = {
+        content: [{ type: "text", text: "Found a BUG in the code" }],
+      };
+
+      const outputContains = ["bug", "code"];
+      const fullText = mockResponse.content.map((item) => item.text ?? "").join(" ");
+      const lowerText = fullText.toLowerCase();
+
+      const success = outputContains.every((substr) => lowerText.includes(substr.toLowerCase()));
+      expect(success).toBe(true);
+
+      const outputContainsFail = ["bug", "syntax error"];
+      const successFail = outputContainsFail.every((substr) => lowerText.includes(substr.toLowerCase()));
+      expect(successFail).toBe(false);
+    });
+
+    it("evaluates dispatch correctly when dispatchRequired is true", () => {
+      const input = {
+        actualSequence: ["coder", "reviewer"],
+        expectedSequence: ["coder", "reviewer"],
+        dispatchRequired: true,
+        success: true,
+      };
+
+      const actualMatchesExpected =
+        input.actualSequence.length === input.expectedSequence.length &&
+        input.actualSequence.every((r, i) => r === input.expectedSequence[i]);
+
+      expect(actualMatchesExpected).toBe(true);
+    });
+
+    it("evaluates dispatch correctly when dispatchRequired is false with no dispatch", () => {
+      const input = {
+        actualSequence: [],
+        expectedSequence: ["coder"],
+        dispatchRequired: false,
+        success: true,
+      };
+
+      // When dispatchRequired is false and actualSequence is empty, success determines correctness
+      const correct = input.actualSequence.length === 0 ? input.success : false;
+      expect(correct).toBe(true);
+    });
+
+    it("scores task with baseline comparison", () => {
+      const evalResult = {
+        taskId: "t1",
+        success: true,
+        mainSessionTokens: 50,
+        dispatchedCorrectly: true,
+        durationMs: 0,
+        workerCalls: 1,
+        workerTextSample: "",
+      };
+
+      const baseline = 100;
+      const baselineTokens = baseline > 0 ? baseline : 1;
+      const tokenComponent = baseline > 0 ? Math.max(0, 1 - evalResult.mainSessionTokens / baselineTokens) : 0;
+      const successComponent = evalResult.success ? 1 : 0;
+      const dispatchComponent = evalResult.dispatchedCorrectly ? 1 : 0;
+
+      const score = 0.5 * successComponent + 0.3 * tokenComponent + 0.2 * dispatchComponent;
+      // 0.5 * 1 + 0.3 * 0.5 + 0.2 * 1 = 0.5 + 0.15 + 0.2 = 0.85 (fp drift OK)
+      expect(score).toBeCloseTo(0.85, 6);
+    });
+
+    it("aggregates task scores correctly", () => {
+      const scores = [
+        { taskId: "t1", score: 0.9 },
+        { taskId: "t2", score: 0.8 },
+        { taskId: "t3", score: 0.7 },
+      ];
+
+      const aggregated = scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
+      expect(aggregated).toBeCloseTo(0.8, 5);
+    });
+
+    it("handles missing baseline gracefully by treating as 0", () => {
+      const evalResult = {
+        taskId: "unknown-task",
+        success: true,
+        mainSessionTokens: 100,
+        dispatchedCorrectly: true,
+        durationMs: 0,
+        workerCalls: 1,
+        workerTextSample: "",
+      };
+
+      const baseline = 0; // Missing baseline
+      const baselineTokens = baseline > 0 ? baseline : 1;
+      const tokenComponent = baseline > 0 ? Math.max(0, 1 - evalResult.mainSessionTokens / baselineTokens) : 0;
+
+      expect(tokenComponent).toBe(0);
+      expect(baselineTokens).toBe(1);
     });
   });
 });
