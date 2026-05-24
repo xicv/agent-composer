@@ -11,7 +11,9 @@
 // Never overwrites a present, non-default file (no --force flag in this slice).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { globalConfigDir } from "../config/paths.js";
 
 export type InitStepStatus = "created" | "updated" | "skipped";
 
@@ -99,6 +101,103 @@ export function runInit(opts: InitOptions): InitResult {
   log("  4. Smoke-test the autoresearch loop: /evolve --eval-mode synthetic");
 
   return { steps };
+}
+
+export interface GlobalInitOptions {
+  /** Override the global config dir (tests inject a tmpdir). Defaults to ~/.config/composer. */
+  globalDir?: string;
+  /** Override the user's Claude Code home dir (tests inject a tmpdir). Defaults to ~/.claude. */
+  claudeHome?: string;
+  verbose?: boolean;
+  defaultBaseUrl?: string;
+  defaultAuthToken?: string;
+}
+
+/**
+ * User-level (global) bootstrap. Writes composer.config.json and .env.json
+ * to ~/.config/composer/ and patches ~/.claude/settings.json with the
+ * mcpServers.composer entry so new projects work without per-project init.
+ *
+ * Runtime lookup chain (see src/config/paths.ts) makes the global files
+ * apply automatically when a project has no local copy.
+ */
+export function runGlobalInit(opts: GlobalInitOptions = {}): InitResult {
+  const dir = opts.globalDir ?? globalConfigDir();
+  const claudeHome = opts.claudeHome ?? join(homedir(), ".claude");
+  const steps: InitStep[] = [];
+  const log = (...args: unknown[]) => {
+    if (opts.verbose !== false) process.stdout.write(args.map(String).join(" ") + "\n");
+  };
+
+  steps.push(ensureDir(dir, "global config dir"));
+  steps.push(writeGlobalComposerConfig(dir));
+  steps.push(
+    writeGlobalEnvJson(
+      dir,
+      opts.defaultBaseUrl ?? DEFAULT_BASE_URL,
+      opts.defaultAuthToken ?? DEFAULT_AUTH_TOKEN_PLACEHOLDER,
+    ),
+  );
+  steps.push(ensureDir(claudeHome, "~/.claude directory"));
+  steps.push(wireGlobalMcpServer(claudeHome));
+
+  for (const s of steps) {
+    const tag = s.status === "created" ? "+" : s.status === "updated" ? "~" : "=";
+    log(`  ${tag} ${s.name}${s.path ? ` (${s.path})` : ""}${s.reason ? ` — ${s.reason}` : ""}`);
+  }
+  log("");
+  log("composer init --global: done.");
+  log("");
+  log("Next steps:");
+  log(`  1. Fill ${join(dir, ".env.json")} with real ANTHROPIC_AUTH_TOKEN.`);
+  log("  2. Launch Claude Code from ANY project: claude");
+  log("     (no per-project init required — runtime falls back to global config + env)");
+  log("  3. Per-project overrides still work: drop composer.config.json or .env.json in cwd.");
+
+  return { steps };
+}
+
+function ensureDir(dirPath: string, label: string): InitStep {
+  if (existsSync(dirPath)) return { name: label, status: "skipped", path: dirPath, reason: "already exists" };
+  mkdirSync(dirPath, { recursive: true });
+  return { name: label, status: "created", path: dirPath };
+}
+
+function writeGlobalComposerConfig(dir: string): InitStep {
+  const path = join(dir, "composer.config.json");
+  if (existsSync(path)) {
+    return { name: "global composer.config.json", status: "skipped", path, reason: "already exists; not overwritten" };
+  }
+  writeFileSync(path, JSON.stringify(DEFAULT_COMPOSER_CONFIG, null, 2) + "\n", "utf8");
+  return { name: "global composer.config.json", status: "created", path };
+}
+
+function writeGlobalEnvJson(dir: string, baseUrl: string, token: string): InitStep {
+  const path = join(dir, ".env.json");
+  if (existsSync(path)) {
+    return { name: "global .env.json", status: "skipped", path, reason: "already exists; not overwritten" };
+  }
+  writeFileSync(path, JSON.stringify(DEFAULT_ENV_TEMPLATE(baseUrl, token), null, 2) + "\n", "utf8");
+  return { name: "global .env.json", status: "created", path, reason: "placeholder — fill with real token" };
+}
+
+function wireGlobalMcpServer(claudeHome: string): InitStep {
+  const path = join(claudeHome, "settings.json");
+  if (!existsSync(path)) {
+    writeFileSync(path, JSON.stringify(DEFAULT_MCP_SETTINGS, null, 2) + "\n", "utf8");
+    return { name: "~/.claude/settings.json", status: "created", path, reason: "mcpServers.composer wired (user-level)" };
+  }
+  const current = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  const mcpServers = (current["mcpServers"] as Record<string, unknown> | undefined) ?? {};
+  if (mcpServers["composer"]) {
+    return { name: "~/.claude/settings.json", status: "skipped", path, reason: "mcpServers.composer already wired" };
+  }
+  const merged = {
+    ...current,
+    mcpServers: { ...mcpServers, composer: DEFAULT_MCP_SETTINGS.mcpServers.composer },
+  };
+  writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  return { name: "~/.claude/settings.json", status: "updated", path, reason: "mcpServers.composer wired (user-level)" };
 }
 
 function ensureClaudeDir(cwd: string): InitStep {

@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { resolveConfigPath } from "./paths.js";
 
 export interface ComposerEnv {
   ANTHROPIC_AUTH_TOKEN?: string;
@@ -22,9 +23,19 @@ export interface ComposerEnv {
 
 const DEFAULT_ENV_FILE = ".env.json";
 
-export function loadEnvJson(envPath: string = DEFAULT_ENV_FILE): ComposerEnv {
-  const resolved = path.resolve(envPath);
-  if (!fs.existsSync(resolved)) return {};
+/**
+ * Reads `.env.json` via the path lookup chain (explicit > cwd > global).
+ * Returns `{}` if no file in the chain exists or any parse step fails — this
+ * loader is fail-silent by design (the registry surfaces missing-key errors
+ * later with better context).
+ */
+export function loadEnvJson(envPath?: string): ComposerEnv {
+  // If the caller passed an explicit path, use it directly (legacy behaviour
+  // for tests that pass a synthetic path). Otherwise resolve via the chain.
+  const resolved = envPath
+    ? path.resolve(envPath)
+    : resolveConfigPath(DEFAULT_ENV_FILE);
+  if (!resolved || !fs.existsSync(resolved)) return {};
   let raw: string;
   try {
     raw = fs.readFileSync(resolved, "utf8");

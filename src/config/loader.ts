@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ComposerConfigSchema, type ComposerConfig } from "./schema.js";
+import { resolveConfigPath, globalConfigDir } from "./paths.js";
 
 export function parseConfig(input: unknown): ComposerConfig {
   const result = ComposerConfigSchema.safeParse(input);
@@ -19,9 +20,19 @@ export function parseConfig(input: unknown): ComposerConfig {
 }
 
 export function loadConfig(configPath: string): ComposerConfig {
-  const resolved = path.resolve(configPath);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Composer config not found at ${resolved}`);
+  // Resolve via the lookup chain: explicit path > cwd > global config dir.
+  // Only throws when no file exists at any layer, so a user can drop
+  // composer.config.json at ~/.config/composer/ and have it apply everywhere.
+  const resolved = resolveConfigPath(configPath, configPath);
+  if (!resolved) {
+    const local = path.resolve(configPath);
+    const global = path.join(globalConfigDir(), configPath);
+    throw new Error(
+      `Composer config not found. Looked in:\n` +
+      `  - ${local}\n` +
+      `  - ${global}\n` +
+      `Run \`agent-composer init\` (project) or \`agent-composer init --global\` (user-level).`,
+    );
   }
   const raw = fs.readFileSync(resolved, "utf8");
   let parsed: unknown;
