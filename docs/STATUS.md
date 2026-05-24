@@ -190,3 +190,26 @@ Re-scored aggregate:
 
 Gates after change: 230/230 vitest, tsc clean, schema:lint valid. Step 5/6 remain unblocked; the dispatch-calibration finding informs how the SKILL.md routing heuristic should evolve under autoresearch (Step 5).
 
+## Dogfood audit log
+
+Per-build measurement of composer-dispatched feature work. Tracks token cost, wall time, dispatch ratio, and outcome quality so we can answer "is composer getting better or worse over time?" longitudinally.
+
+| Date | Build | Wall (min) | Max5 cost | Max5 tokens | Turns | Dispatches | Files | Lines | Outcome |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-05-24 | Step 5 v1 (/evolve driver + slash command) | 11.4 | $2.97 | 2.44M | 45 | 2 | 3 new | 434 | All gates green; smoke driver exit 0 |
+
+### Build 1 (Step 5 v1) — findings
+
+- **Dispatch ratio low:** 2 Task→coder/reviewer calls vs 45 total orchestrator turns. The headless orchestrator (Opus inside `claude -p`) did 39 Reads + 4 Edits + 7 Bashes + 3 Writes itself rather than dispatching them. Composer-mastermind SKILL says "ALWAYS dispatch via Task" but the rule is read as guidance, not contract — matches the t5 audit finding.
+- **Cache replay dominates:** 2.27M cache_read tokens means full project context was re-loaded on every one of 45 turns. Tighter context windows or shorter dispatch loops would cut this dramatically.
+- **Cost premium vs me-inline:** rough Fermi estimate for the same work done by me directly in the current session: ~150–250k tokens, ~$0.50–1.50. Composer-dispatched cost roughly 2–6× more in total tokens. The split DID protect the calling session's context (none of this 2.4M landed in this conversation), but absolute cost is higher.
+- **Quality:** working code on first integration. 23 new tests passing (more than the ~7 asked — reviewer added edge cases). Smoke test exit 0 with budget-exhaust path firing as designed.
+- **GLM/agy side cost:** estimated ~$0.05 (2 dispatch calls). Negligible.
+
+### Improvement hypotheses for the next build
+
+1. **Haiku orchestrator for headless dispatches** — Opus self-deliberation is the bulk of the spend. Routing the headless orchestrator to haiku (via `--model haiku` flag on the spawned `claude -p`) should cut Max5 cost ~10×.
+2. **Tighter briefs** — the Step 5 brief was ~1500 tokens. Shorter briefs reduce cache_creation per turn. Trade-off: less guidance → more orchestrator iteration.
+3. **Pre-dispatched context** — bundle the relevant source files into the brief itself (one Read by me, zero Reads by orchestrator). Cuts the 39-Read loop.
+4. **Per-build budget cap** — set `--max-budget-usd` on the spawned `claude -p` so cost is bounded; if hit, fall back to me-inline rather than continuing to deliberate.
+
