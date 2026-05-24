@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { scoreTask, aggregateScore, type TaskScore } from "./metric.js";
-import type { EvalResult } from "./schema.js";
+import {
+  scoreTask,
+  aggregateScore,
+  evaluateDispatch,
+  type TaskScore,
+} from "./metric.js";
+import type { EvalResult, SubagentRole } from "./schema.js";
 
 function res(overrides: Partial<EvalResult> = {}): EvalResult {
   return {
@@ -85,6 +90,117 @@ describe("scoreTask — config validation", () => {
     expect(() =>
       scoreTask(res(), { baselineMainTokens: -1 }),
     ).toThrow();
+  });
+});
+
+describe("evaluateDispatch — audit 2026-05-24 thin-task carve-out", () => {
+  const reviewerOnly: SubagentRole[] = ["reviewer"];
+  const coderOnly: SubagentRole[] = ["coder"];
+  const noDispatch: SubagentRole[] = [];
+
+  it("required + matching sequence = correct", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: ["reviewer"],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: true,
+        success: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("required + missing dispatch = incorrect (strict mode)", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: [],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: true,
+        success: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("required + wrong subagent = incorrect", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: ["coder"],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: true,
+        success: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("not required + no dispatch + success = correct (the thin-task win)", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: [],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: false,
+        success: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("not required + no dispatch + failure = incorrect (must dispatch when inline fails)", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: [],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: false,
+        success: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("not required + dispatched anyway + matches expected = correct", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: ["reviewer"],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: false,
+        success: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("not required + dispatched wrong subagent = incorrect", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: ["coder"],
+        expectedSequence: reviewerOnly,
+        dispatchRequired: false,
+        success: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("empty expected + no dispatch (refuse-out-of-scope) = correct", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: noDispatch,
+        expectedSequence: noDispatch,
+        dispatchRequired: true,
+        success: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("default dispatchRequired=true when undefined (backward compat)", () => {
+    expect(
+      evaluateDispatch({
+        actualSequence: ["coder"],
+        expectedSequence: coderOnly,
+        success: true,
+      }),
+    ).toBe(true);
+    expect(
+      evaluateDispatch({
+        actualSequence: [],
+        expectedSequence: coderOnly,
+        success: true,
+      }),
+    ).toBe(false);
   });
 });
 

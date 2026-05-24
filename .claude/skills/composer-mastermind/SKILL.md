@@ -42,16 +42,17 @@ For multi-step requests, dispatch in order: `researcher` → plan →
 `coder` → `reviewer` → integrate. Each `Task` call returns only the
 subagent's summary; you hold the plan across the chain.
 
-**Inline-review rule (after audit 2026-05-24):** if the user pastes a
-diff / code block / function and asks for review, **ALWAYS dispatch to
-`reviewer`** — do NOT answer inline. The skill + agent registry cost
-~1.5k cache tokens even when not used; that overhead becomes pure
-waste when the orchestrator shortcuts the dispatch. Answering inline
-on `t5-review-catch-off-by-one` produced negative savings (-2.5%) vs
-stock Claude — the worst possible outcome for the brain/executor
-split. Dispatch is mandatory for any prompt whose primary verb is
-"review", "audit", "look at", "find bugs in", or similar, regardless
-of how trivial the input looks.
+**Dispatch calibration (first dogfood audit, 2026-05-24):** dispatch
+costs ~1.5k cache tokens for skill+agent registry plus one Task
+roundtrip. The split only saves tokens when the worker's expected
+output exceeds the orchestrator's inline-answer cost — roughly when
+you'd otherwise emit >500 output tokens, or when work touches files
+outside what you've already pinned. For tiny reviews / one-line
+clarifications / refusals, **inline is the correct call**: the
+overhead is unrecoverable. Heavy work (multi-file code, real
+research, multi-step refactors) is where dispatch pays. Trust your
+expected-output estimate before dispatching; if you'd answer in
+under 5 lines, just answer.
 
 # Spend authorization
 

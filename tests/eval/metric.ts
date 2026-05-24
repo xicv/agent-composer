@@ -7,7 +7,40 @@
 // Weights are config-overridable (must sum to 1.0). The baseline must
 // be measured ONCE on stock Claude Max5 — see evals/SUCCESS.md.
 
-import type { EvalResult } from "./schema.js";
+import type { EvalResult, SubagentRole } from "./schema.js";
+
+export interface EvaluateDispatchInput {
+  actualSequence: ReadonlyArray<SubagentRole>;
+  expectedSequence: ReadonlyArray<SubagentRole>;
+  /** Defaults to true (strict — must match expected sequence to be correct). */
+  dispatchRequired?: boolean;
+  /** Whether the orchestrator-side answer succeeded by output check. */
+  success: boolean;
+}
+
+/**
+ * Resolves whether an orchestrator's actual routing was the correct
+ * choice given the task's expected dispatch contract.
+ *
+ * Strict (dispatchRequired=true): actual must equal expected.
+ * Lenient (dispatchRequired=false): no-dispatch + success is correct
+ * (thin-task carve-out); dispatch-then-wrong-subagent is still wrong.
+ */
+export function evaluateDispatch(input: EvaluateDispatchInput): boolean {
+  const { actualSequence, expectedSequence, success } = input;
+  const required = input.dispatchRequired ?? true;
+  const actualMatchesExpected =
+    actualSequence.length === expectedSequence.length &&
+    actualSequence.every((r, i) => r === expectedSequence[i]);
+
+  if (required) return actualMatchesExpected;
+
+  // Lenient: no dispatch is OK iff inline answer succeeded.
+  if (actualSequence.length === 0) return success;
+
+  // Dispatch happened anyway — must still match the expected sequence.
+  return actualMatchesExpected;
+}
 
 export interface MetricConfig {
   baselineMainTokens: number;

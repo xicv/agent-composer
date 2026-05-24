@@ -59,6 +59,24 @@ describe("EvalTaskSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts optional dispatchRequired flag (audit 2026-05-24 carve-out)", () => {
+    expect(() =>
+      EvalTaskSchema.parse({
+        ...VALID_TASK,
+        expect: { dispatchSequence: ["reviewer"], dispatchRequired: false },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects non-boolean dispatchRequired", () => {
+    expect(() =>
+      EvalTaskSchema.parse({
+        ...VALID_TASK,
+        expect: { dispatchRequired: "maybe" },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("EvalResultSchema", () => {

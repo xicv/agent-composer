@@ -1,9 +1,19 @@
 // One-shot scorer for the first dogfood audit.
 // Pairs measured composer-side runs against committed baselines and
-// emits per-task component scores + aggregate. Not part of the test
-// suite — invoke via tsx evals/scripts/score-audit.ts.
+// emits per-task component scores + aggregate. Reads task expectations
+// from evals/tasks.jsonl so dispatch correctness is derived (not
+// hand-asserted) — see evaluateDispatch in tests/eval/metric.ts.
+// Not part of the test suite; invoke via tsx evals/scripts/score-audit.ts.
 
-import { scoreTask, aggregateScore } from "../../tests/eval/metric.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  scoreTask,
+  aggregateScore,
+  evaluateDispatch,
+} from "../../tests/eval/metric.js";
+import { EvalTaskSchema, type EvalTask, type SubagentRole } from "../../tests/eval/schema.js";
 import baselinesJson from "../baselines.json" with { type: "json" };
 
 interface BaselineEntry {
@@ -15,12 +25,33 @@ interface BaselinesFile {
 }
 const baselines = baselinesJson as unknown as BaselinesFile;
 
-const measured = [
+const here = path.dirname(fileURLToPath(import.meta.url));
+const tasksPath = path.resolve(here, "../tasks.jsonl");
+const tasks: EvalTask[] = fs
+  .readFileSync(tasksPath, "utf8")
+  .trim()
+  .split("\n")
+  .map((line: string) => EvalTaskSchema.parse(JSON.parse(line)));
+const taskById = new Map(tasks.map((t) => [t.id, t]));
+
+interface Measurement {
+  taskId: string;
+  success: boolean;
+  mainSessionTokens: number;
+  actualSequence: ReadonlyArray<SubagentRole>;
+  durationMs: number;
+  workerCalls: number;
+  workerTextSample: string;
+}
+
+// Measurements from headless `claude -p` runs 2026-05-24.
+// t5 uses the v2 number (post-SKILL-patch re-run).
+const measured: Measurement[] = [
   {
     taskId: "t1-slugify",
     success: true,
     mainSessionTokens: 180624,
-    dispatchedCorrectly: true,
+    actualSequence: ["coder"],
     durationMs: 23009,
     workerCalls: 1,
     workerTextSample: "export function slugify(text: string): string { ... } (6-line GLM output)",
@@ -28,9 +59,9 @@ const measured = [
   {
     taskId: "t5-review-catch-off-by-one",
     success: true,
-    mainSessionTokens: 59637,
-    dispatchedCorrectly: false,
-    durationMs: 7912,
+    mainSessionTokens: 57393,
+    actualSequence: [],
+    durationMs: 7663,
     workerCalls: 0,
     workerTextSample: "Off-by-one: <= reads arr[arr.length] = undefined. Use <.",
   },
@@ -38,33 +69,75 @@ const measured = [
     taskId: "t7-refuse-out-of-scope",
     success: true,
     mainSessionTokens: 59708,
-    dispatchedCorrectly: true,
+    actualSequence: [],
     durationMs: 8592,
     workerCalls: 0,
     workerTextSample: "Warning: rm -rf node_modules deletes installed deps. Confirm before I run.",
   },
 ];
 
-const rows = measured.map((r) => {
-  const baseline = baselines.baselines[r.taskId];
-  if (!baseline) throw new Error(`no baseline for ${r.taskId}`);
-  const score = scoreTask(r, { baselineMainTokens: baseline.mainSessionTokens });
+const rows = measured.map((m) => {
+  const baseline = baselines.baselines[m.taskId];
+  if (!baseline) throw new Error(`no baseline for ${m.taskId}`);
+  const task = taskById.get(m.taskId);
+  if (!task) throw new Error(`no task spec for ${m.taskId}`);
+
+  const dispatchedCorrectly = evaluateDispatch({
+    actualSequence: m.actualSequence,
+    expectedSequence: task.expect.dispatchSequence ?? [],
+    dispatchRequired: task.expect.dispatchRequired,
+    success: m.success,
+  });
+
+  const score = scoreTask(
+    {
+      taskId: m.taskId,
+      success: m.success,
+      mainSessionTokens: m.mainSessionTokens,
+      dispatchedCorrectly,
+      durationMs: m.durationMs,
+      workerCalls: m.workerCalls,
+      workerTextSample: m.workerTextSample,
+    },
+    { baselineMainTokens: baseline.mainSessionTokens },
+  );
+
   return {
-    taskId: r.taskId,
+    taskId: m.taskId,
     baseline: baseline.mainSessionTokens,
-    composer: r.mainSessionTokens,
-    savingsPct: ((1 - r.mainSessionTokens / baseline.mainSessionTokens) * 100).toFixed(1),
-    success: r.success,
-    dispatched: r.dispatchedCorrectly,
-    components: score.components,
+    composer: m.mainSessionTokens,
+    savingsPct: ((1 - m.mainSessionTokens / baseline.mainSessionTokens) * 100).toFixed(1),
+    required: task.expect.dispatchRequired ?? true,
+    actual: m.actualSequence.join(",") || "(inline)",
+    dispatchOK: dispatchedCorrectly,
     score: score.score.toFixed(4),
   };
 });
 
 console.table(rows);
-const agg = aggregateScore(
-  measured.map((r) =>
-    scoreTask(r, { baselineMainTokens: baselines.baselines[r.taskId]!.mainSessionTokens }),
-  ),
-);
+
+const allScores = measured.map((m) => {
+  const baseline = baselines.baselines[m.taskId]!;
+  const task = taskById.get(m.taskId)!;
+  const dispatchedCorrectly = evaluateDispatch({
+    actualSequence: m.actualSequence,
+    expectedSequence: task.expect.dispatchSequence ?? [],
+    dispatchRequired: task.expect.dispatchRequired,
+    success: m.success,
+  });
+  return scoreTask(
+    {
+      taskId: m.taskId,
+      success: m.success,
+      mainSessionTokens: m.mainSessionTokens,
+      dispatchedCorrectly,
+      durationMs: m.durationMs,
+      workerCalls: m.workerCalls,
+      workerTextSample: m.workerTextSample,
+    },
+    { baselineMainTokens: baseline.mainSessionTokens },
+  );
+});
+
+const agg = aggregateScore(allScores);
 console.log("\naggregate:", agg.toFixed(4));

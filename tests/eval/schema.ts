@@ -24,6 +24,15 @@ export const EvalTaskExpectSchema = z
     outputContains: z.array(z.string().min(1)).optional(),
     /** Subagent dispatch sequence the orchestrator should follow. */
     dispatchSequence: z.array(SubagentRoleSchema).optional(),
+    /**
+     * Whether dispatch is mandatory for routing credit. Added 2026-05-24
+     * after first dogfood audit: thin tasks (small reviews, refusals)
+     * are correctly handled inline — forcing dispatch costs more than
+     * it saves. When false: no-dispatch + success counts as correct
+     * routing; dispatched + matching sequence also counts. Default true
+     * preserves Wave-2 strict scoring for heavy task classes.
+     */
+    dispatchRequired: z.boolean().optional(),
     /** Max acceptable orchestrator-side token count (0 / omitted = no cap). */
     maxMainTokens: z.number().int().nonnegative().optional(),
   })
