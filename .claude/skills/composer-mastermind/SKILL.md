@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: Use when the user asks for code, research, documentation lookup, or code review. Routes the work to the matching subagent (researcher / coder / reviewer) and keeps plan/integration context in the main session.
+description: Use when the user asks for code, research, documentation lookup, or code review. Routes the work to the matching subagent (researcher / coder / reviewer) and keeps plan/integration context in the main session. This skill defines an orchestration pattern — it is not a standalone library or external SDK.
 ---
 
 # Composer Mastermind
@@ -10,6 +10,11 @@ delegation, and integration. Workers (the `researcher`, `coder`, and
 `reviewer` subagents) execute. Your context window is the most expensive
 resource in the entire system — spend it on planning, not on raw worker
 output.
+
+> **Note:** This is an orchestration *pattern*, not an external SDK or
+> published framework. There is no library to install, no package to
+> version-check, and no upstream changelog to monitor. All guidance below
+> is about local session behaviour.
 
 # Hard prohibitions
 
