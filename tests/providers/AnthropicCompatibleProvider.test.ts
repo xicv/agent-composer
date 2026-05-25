@@ -152,6 +152,64 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     const out = await p.execute({ prompt: "x" });
     expect(out.text).toBe("Part A. Part B.");
   });
+
+  it("execute() forwards thinking block when type=enabled", async () => {
+    create.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const p = new AnthropicCompatibleProvider({
+      baseUrl: "https://x",
+      apiKey: "k",
+      model: "glm-5.1",
+      defaultMaxTokens: 65536,
+      thinking: { type: "enabled", budgetTokens: 32768 },
+      clientFactory: () => fakeClient,
+    });
+    await p.execute({ prompt: "p" });
+    const params = create.mock.calls[0]?.[0];
+    expect(params?.thinking).toEqual({ type: "enabled", budget_tokens: 32768 });
+    expect(params?.max_tokens).toBe(65536);
+  });
+
+  it("execute() omits thinking block when not configured", async () => {
+    create.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const p = buildProvider();
+    await p.execute({ prompt: "p" });
+    const params = create.mock.calls[0]?.[0];
+    expect(params?.thinking).toBeUndefined();
+  });
+
+  it("constructor rejects thinking budget below SDK minimum (1024)", () => {
+    expect(
+      () =>
+        new AnthropicCompatibleProvider({
+          baseUrl: "https://x",
+          apiKey: "k",
+          model: "glm-5.1",
+          defaultMaxTokens: 16384,
+          thinking: { type: "enabled", budgetTokens: 512 },
+          clientFactory: () => fakeClient,
+        }),
+    ).toThrow(/budgetTokens must be >=1024/);
+  });
+
+  it("constructor rejects thinking budget >= max_tokens", () => {
+    expect(
+      () =>
+        new AnthropicCompatibleProvider({
+          baseUrl: "https://x",
+          apiKey: "k",
+          model: "glm-5.1",
+          defaultMaxTokens: 4096,
+          thinking: { type: "enabled", budgetTokens: 4096 },
+          clientFactory: () => fakeClient,
+        }),
+    ).toThrow(/must be less than max_tokens/);
+  });
 });
 
 const ANTHROPIC_TAPE = path.resolve(

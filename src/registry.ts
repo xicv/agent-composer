@@ -77,6 +77,8 @@ export class ProviderRegistry {
           baseUrl: roleConfig.baseUrl,
           apiKey,
           model,
+          defaultMaxTokens: roleConfig.maxTokens,
+          thinking: roleConfig.thinking,
         });
       }
 

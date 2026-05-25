@@ -72,6 +72,29 @@
           "items": { "type": "string" },
           "minItems": 1,
           "description": "argv array for CLIProvider, e.g. [\"agy\",\"--dangerously-skip-permissions\",\"-p\"]. Passed to child_process.execFile — NEVER shell-interpolated."
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-role override for the provider's default max output tokens. When `thinking.budgetTokens` is set this must be greater than it. Added 2026-05-25 for v0.1.3."
+        },
+        "thinking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "description": "Extended-thinking knob for Anthropic-compat providers (GLM glm-5.1, glm-4.6+, Claude). Ignored by other providers. Added 2026-05-25 for v0.1.3.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["enabled", "disabled"],
+              "description": "enabled: include the `thinking` block on every call. disabled: explicitly opt out."
+            },
+            "budgetTokens": {
+              "type": "integer",
+              "minimum": 1024,
+              "description": "Max tokens the model may spend on internal reasoning. Required when type=enabled. Anthropic SDK minimum is 1024."
+            }
+          }
         }
       }
     }

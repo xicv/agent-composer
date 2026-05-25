@@ -17,6 +17,10 @@ export interface AnthropicLike {
   };
 }
 
+export type ThinkingParam =
+  | { type: "enabled"; budget_tokens: number }
+  | { type: "disabled" };
+
 export interface AnthropicCreateParams {
   model: string;
   max_tokens: number;
@@ -24,6 +28,7 @@ export interface AnthropicCreateParams {
     role: "user" | "assistant";
     content: ReadonlyArray<{ type: "text"; text: string }>;
   }>;
+  thinking?: ThinkingParam;
 }
 
 export interface AnthropicCreateResult {
@@ -36,6 +41,8 @@ export interface AnthropicCompatibleProviderOptions {
   apiKey: string;
   model: string;
   defaultMaxTokens?: number;
+  /** Extended-thinking knob; omit to disable. When type=enabled, budgetTokens is required. */
+  thinking?: { type: "enabled"; budgetTokens: number } | { type: "disabled" };
   /** Override Anthropic SDK construction. Used by tests. */
   clientFactory?: (opts: { baseURL: string; apiKey: string }) => AnthropicLike;
 }
@@ -51,6 +58,7 @@ export class AnthropicCompatibleProvider implements IProvider {
 
   private readonly client: AnthropicLike;
   private readonly defaultMaxTokens: number;
+  private readonly thinking?: ThinkingParam;
 
   constructor(opts: AnthropicCompatibleProviderOptions) {
     if (!opts.baseUrl) throw new Error("AnthropicCompatibleProvider: baseUrl required");
@@ -58,6 +66,23 @@ export class AnthropicCompatibleProvider implements IProvider {
     if (!opts.model) throw new Error("AnthropicCompatibleProvider: model required");
     this.modelLabel = opts.model;
     this.defaultMaxTokens = opts.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+    if (opts.thinking) {
+      if (opts.thinking.type === "enabled") {
+        if (typeof opts.thinking.budgetTokens !== "number" || opts.thinking.budgetTokens < 1024) {
+          throw new Error(
+            "AnthropicCompatibleProvider: thinking.budgetTokens must be >=1024 when type=enabled (Anthropic SDK minimum)",
+          );
+        }
+        if (opts.thinking.budgetTokens >= this.defaultMaxTokens) {
+          throw new Error(
+            `AnthropicCompatibleProvider: thinking.budgetTokens (${opts.thinking.budgetTokens}) must be less than max_tokens (${this.defaultMaxTokens}); set role.maxTokens higher`,
+          );
+        }
+        this.thinking = { type: "enabled", budget_tokens: opts.thinking.budgetTokens };
+      } else {
+        this.thinking = { type: "disabled" };
+      }
+    }
     const factory = opts.clientFactory ?? DEFAULT_FACTORY;
     this.client = factory({ baseURL: opts.baseUrl, apiKey: opts.apiKey });
   }
@@ -77,11 +102,14 @@ export class AnthropicCompatibleProvider implements IProvider {
     }
     userContent.push({ type: "text", text: input.prompt });
 
-    const msg = await this.client.messages.create({
+    const params: AnthropicCreateParams = {
       model: this.modelLabel,
       max_tokens: input.maxTokens ?? this.defaultMaxTokens,
       messages: [{ role: "user", content: userContent }],
-    });
+    };
+    if (this.thinking) params.thinking = this.thinking;
+
+    const msg = await this.client.messages.create(params);
 
     const text = msg.content
       .map((b) => (b.type === "text" && typeof b.text === "string" ? b.text : ""))

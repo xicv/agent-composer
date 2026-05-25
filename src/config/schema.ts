@@ -11,6 +11,21 @@ export const ProviderIdSchema = z.enum([
 ]);
 export type ProviderIdParsed = z.infer<typeof ProviderIdSchema>;
 
+export const ThinkingConfigSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("enabled"),
+      budgetTokens: z.number().int().min(1024),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("disabled"),
+    })
+    .strict(),
+]);
+export type ThinkingConfig = z.infer<typeof ThinkingConfigSchema>;
+
 export const RoleConfigSchema = z
   .object({
     provider: ProviderIdSchema,
@@ -18,6 +33,8 @@ export const RoleConfigSchema = z
     baseUrl: z.url().optional(),
     model: z.string().min(1).optional(),
     cli: z.array(z.string().min(1)).min(1).optional(),
+    maxTokens: z.number().int().min(1).optional(),
+    thinking: ThinkingConfigSchema.optional(),
   })
   .strict();
 export type RoleConfig = z.infer<typeof RoleConfigSchema>;
