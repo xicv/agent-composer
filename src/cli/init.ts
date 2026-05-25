@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { globalConfigDir } from "../config/paths.js";
+import { installPluginAssets } from "./install-plugin.js";
 
 export type InitStepStatus = "created" | "updated" | "skipped";
 
@@ -111,6 +112,10 @@ export interface GlobalInitOptions {
   verbose?: boolean;
   defaultBaseUrl?: string;
   defaultAuthToken?: string;
+  /** Skip plugin asset install (default: false — assets ARE installed). */
+  skipPluginAssets?: boolean;
+  /** Override the plugin source directory (tests inject). */
+  pluginSourceDir?: string;
 }
 
 /**
@@ -140,6 +145,16 @@ export function runGlobalInit(opts: GlobalInitOptions = {}): InitResult {
   );
   steps.push(ensureDir(claudeHome, "~/.claude directory"));
   steps.push(wireGlobalMcpServer(claudeHome));
+
+  // Wave 4 0.1.2: drop plugin assets at user-level so the orchestrator
+  // skill + subagents + /evolve + boundary hook auto-load in every project.
+  if (!opts.skipPluginAssets) {
+    const pluginSteps = installPluginAssets({
+      claudeHome,
+      pluginSourceDir: opts.pluginSourceDir,
+    });
+    steps.push(...pluginSteps);
+  }
 
   for (const s of steps) {
     const tag = s.status === "created" ? "+" : s.status === "updated" ? "~" : "=";
