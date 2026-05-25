@@ -80,6 +80,34 @@ and do not count toward these caps. Mock providers are always free.
 - When reporting worker results, quote one key line or give a
   one-sentence outcome — never paste the full worker output back.
 
+# Other MCPs (token-heavy upstreams)
+
+Composer's `mcp__composer__*` tools route to GLM/agy automatically.
+**Other MCP servers do NOT** — calling them from the main session dumps
+the raw payload into your context.
+
+Rule of thumb: when a single `mcp__<server>__<tool>` call is expected
+to return more than ~1k tokens, **dispatch via `Task` to the
+`general-purpose` (or `Explore`) subagent** so the raw payload stays in
+the subagent's context and only the summary returns to you.
+
+| MCP / tool family | Expected payload | Default behaviour |
+|---|---|---|
+| `mcp__chrome-devtools__take_snapshot`, `list_console_messages`, `lighthouse_audit`, `performance_*` | large (KB-MB) | DISPATCH |
+| `mcp__sequel-mcp__query` / `execute` on real tables | unknown — assume large | DISPATCH unless you wrote `LIMIT 10` |
+| `mcp__ferris-search__*`, `mcp__web-reader__*`, `mcp__zread__read_file`, full-article fetchers | large | DISPATCH |
+| `mcp__fff__grep` / `find_files`, `mcp__textlog__*` previews, MCP `list_*` / `get_default_*` | small/bounded | INLINE OK |
+| `mcp__plugin_claude-mem_mcp-search__get_observations` (one ID) | small | INLINE OK |
+| `mcp__plugin_claude-mem_mcp-search__smart_search` / `query_corpus` | medium-large | DISPATCH if browsing |
+
+Dispatch prompt template: "Call `mcp__<server>__<tool>` with `<args>`.
+Return only `<the specific fields the plan needs>` — no raw payload, no
+re-pasting." Make the worker do the filtering, not you.
+
+Composer does NOT yet proxy other MCPs (Path C in the roadmap). Until
+it does, this manual dispatch is the only way to keep the main session
+from drowning in upstream payloads.
+
 # Prior learnings
 
 @.claude/learnings/index.md
