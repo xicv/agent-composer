@@ -1,6 +1,14 @@
 // Wave 1 F1.1 — Anthropic-SDK-shaped provider, used against GLM's
 // Anthropic-compatible endpoint and any future compatible host.
 // Real network calls happen here; tests inject a fake via clientFactory.
+//
+// KNOWN BUG: provider uses non-streaming messages.create. The Anthropic SDK
+// refuses non-streaming requests when configured size suggests >10 min
+// duration ("Streaming is required for operations that may take longer than
+// 10 minutes"). Workaround: keep role.maxTokens ≲ 16k and
+// role.thinking.budgetTokens ≲ 8k. Proper fix: switch to .stream()
+// (or .create({stream:true})) and aggregate events — requires updating
+// AnthropicLike interface + test mocks.
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {

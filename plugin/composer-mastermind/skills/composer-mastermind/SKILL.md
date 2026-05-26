@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: Use when the user asks for code, research, documentation lookup, or code review. Routes the work to the matching subagent (researcher / coder / reviewer) and keeps plan/integration context in the main session. This skill defines an orchestration pattern — it is not a standalone library or external SDK.
+description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer) via Task tool. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
 ---
 
 # Composer Mastermind

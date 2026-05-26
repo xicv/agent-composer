@@ -323,7 +323,7 @@ Command: `tsx scripts/run-evolve.ts --eval-mode real --budget-usd 5.00 --max-rou
 - Wall: 6.6 min (395s), exit 0
 - Real `.claude/skills/composer-mastermind/SKILL.md` MD5 preserved: `6e662529c28d545f6fc1f9fea0a344ea` — never touched during run
 - `/tmp/composer-eval-*` worktrees: zero leaks after run (verified clean teardown)
-- `git worktree list`: only `/Users/xicao/Projects/composer 0bfb9bf [main]` — no sandbox residue
+- `git worktree list`: only `<repo>/composer 0bfb9bf [main]` — no sandbox residue
 
 **Build 4 safety claim verified end-to-end.** The first real `/evolve` run to complete without collateral damage. Prior runs (pre-Build-4) deleted `node_modules` (t7 ran `rm -rf` against the real cwd) and clobbered user edits to SKILL.md via the atomic-restore. This run: zero filesystem damage, real SKILL.md byte-identical pre and post, all per-task worktrees created and torn down cleanly.
 

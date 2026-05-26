@@ -37,7 +37,7 @@ Write to `evals/baselines.json`. Schema mirrors `baselines.example.json`:
 ```json
 {
   "measuredAt": "2026-05-23T19:00:00Z",
-  "measuredBy": "nick@avcrm",
+  "measuredBy": "<your-handle>",
   "claudeModel": "claude-opus-4-7",
   "claudeCodeVersion": "<output of: claude --version>",
   "baselines": {

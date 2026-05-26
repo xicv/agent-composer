@@ -13,7 +13,12 @@ import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
-const ENV_PATH = process.env["COMPOSER_ENV"] ?? ".env.json";
+// Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
+// chain (cwd → ~/.config/composer/). Passing ".env.json" as a literal explicit
+// path makes loadEnvJson skip the global fallback — broke running
+// agent-composer from any cwd that lacks a local .env.json (manifested as
+// "missing ANTHROPIC_AUTH_TOKEN" from composer_code).
+const ENV_PATH = process.env["COMPOSER_ENV"];
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
