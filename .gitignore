@@ -27,3 +27,7 @@ coverage/
 
 # Local dev-mode overrides (bypass flag, extra tool allows)
 .claude/settings.local.json
+
+# Auto-appended by learn.sh Stop hook — keeps PII out of commits
+.claude/learnings/2026-*.md
+.claude/worktrees/
