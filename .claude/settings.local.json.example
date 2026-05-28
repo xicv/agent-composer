@@ -1,0 +1,16 @@
+{
+  "_note": "Copy to .claude/settings.local.json to enable dispatch_guard observability. Phase 1 logs Task dispatches to /tmp/composer-dispatch-log.jsonl; never denies. Delete after you stop iterating routing-threshold design.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/dispatch_guard.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

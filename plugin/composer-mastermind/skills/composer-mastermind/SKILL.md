@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer) via Task tool. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
+description: MUST USE for code-change requests that require Edit/Write/NotebookEdit on real files (add, modify, fix, refactor, implement, write, change, update files). Routes work to subagents (researcher / coder / reviewer) via Task tool. SKIP this skill — answer inline — when (a) the request is a one-line review/refusal/clarification with no file mutation, (b) the request is a destructive op the orchestrator should refuse (rm, drop, delete, reset --hard, --force), or (c) the user has already given an exact answer-key like a code snippet to paste verbatim. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook denies them and requires dispatch.
 ---
 
 # Composer Mastermind
@@ -97,6 +97,31 @@ dispatch that hits a real-money provider (`anthropic`,
 
 CLI providers (`agy`) are billed separately by the user's own auth
 and do not count toward these caps. Mock providers are always free.
+
+# Headless invocation
+
+When composer-mastermind runs inside a headless `claude -p` (eval harness,
+test runner, CI dispatch, scheduled job, any non-interactive context), prefer
+**Haiku** as the orchestrator model. Build-2 dogfood measurement showed
+-66 % cost vs Opus 4.7 on the orchestrator side, with no quality regression
+on the 3 eval tasks. Workers (GLM / agy) are unchanged.
+
+How to invoke:
+
+```sh
+claude -p --model claude-haiku-4-5-20251001 \
+  --output-format json --permission-mode bypassPermissions \
+  "<your prompt>"
+```
+
+Rules:
+
+- Interactive sessions (user is watching): default Opus 4.7. Haiku
+  hands off integration nuance the user expects.
+- Headless / scheduled / eval: default Haiku. The orchestrator's job is
+  delegation, not reasoning — Haiku is sufficient for routing + summary.
+- Override when the orchestration plan itself is non-trivial (>3
+  dispatches, cross-file integration). Then Opus 4.7 earns its keep.
 
 # Token discipline
 

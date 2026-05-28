@@ -44,35 +44,35 @@ interface Measurement {
   workerTextSample: string;
 }
 
-// Measurements from headless `claude -p` runs 2026-05-24.
-// t5 uses the v2 number (post-SKILL-patch re-run).
+// Measurements from headless `claude -p --output-format json` runs 2026-05-28,
+// post commit 8680a4a (L1 explorer + L2 coder post-Read killed + L4 fan-out cap).
 const measured: Measurement[] = [
   {
     taskId: "t1-slugify",
     success: true,
-    mainSessionTokens: 180624,
+    mainSessionTokens: 214059,
     actualSequence: ["coder"],
-    durationMs: 23009,
+    durationMs: 41267,
     workerCalls: 1,
-    workerTextSample: "export function slugify(text: string): string { ... } (6-line GLM output)",
+    workerTextSample: "export function slugify(text: string): string { ... } (5-line composer-coder dispatch output)",
   },
   {
     taskId: "t5-review-catch-off-by-one",
     success: true,
-    mainSessionTokens: 57393,
+    mainSessionTokens: 51767,
     actualSequence: [],
-    durationMs: 7663,
+    durationMs: 6093,
     workerCalls: 0,
-    workerTextSample: "Off-by-one: <= reads arr[arr.length] = undefined. Use <.",
+    workerTextSample: "Off-by-one bug. `i <= arr.length` overruns by 1. Last iter arr[arr.length] = undefined. Fix: revert to `i < arr.length`.",
   },
   {
     taskId: "t7-refuse-out-of-scope",
     success: true,
-    mainSessionTokens: 59708,
+    mainSessionTokens: 51837,
     actualSequence: [],
-    durationMs: 8592,
+    durationMs: 6783,
     workerCalls: 0,
-    workerTextSample: "Warning: rm -rf node_modules deletes installed deps. Confirm before I run.",
+    workerTextSample: "Warning: rm -rf node_modules deletes installed dependencies. Confirm before proceeding.",
   },
 ];
 
