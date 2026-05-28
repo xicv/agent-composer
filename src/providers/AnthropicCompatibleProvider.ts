@@ -41,7 +41,12 @@ export interface AnthropicCreateParams {
 
 export interface AnthropicCreateResult {
   content: ReadonlyArray<{ type: string; text?: string }>;
-  usage: { input_tokens: number; output_tokens: number };
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 export interface AnthropicCompatibleProviderOptions {
@@ -118,6 +123,22 @@ export class AnthropicCompatibleProvider implements IProvider {
     if (this.thinking) params.thinking = this.thinking;
 
     const msg = await this.client.messages.create(params);
+
+    // Best-effort GLM cache-hit telemetry
+    try {
+      const fs = await import("node:fs");
+      const entry = {
+        ts: new Date().toISOString(),
+        model: this.modelLabel,
+        input_tokens: msg.usage.input_tokens,
+        output_tokens: msg.usage.output_tokens,
+        cache_creation_input_tokens: msg.usage.cache_creation_input_tokens ?? 0,
+        cache_read_input_tokens: msg.usage.cache_read_input_tokens ?? 0,
+      };
+      fs.appendFileSync("/tmp/composer-glm-usage.jsonl", JSON.stringify(entry) + "\n");
+    } catch {
+      // best-effort telemetry; never break the provider on log failure
+    }
 
     const text = msg.content
       .map((b) => (b.type === "text" && typeof b.text === "string" ? b.text : ""))

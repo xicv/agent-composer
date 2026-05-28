@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: Use when the user asks for code, research, documentation lookup, or code review. Routes the work to the matching subagent (researcher / coder / reviewer) and keeps plan/integration context in the main session. This skill defines an orchestration pattern — it is not a standalone library or external SDK.
+description: MUST USE for code-change requests that require Edit/Write/NotebookEdit on real files (add, modify, fix, refactor, implement, write, change, update files). Routes work to subagents (researcher / coder / reviewer) via Task tool. SKIP this skill — answer inline — when (a) the request is a one-line review/refusal/clarification with no file mutation, (b) the request is a destructive op the orchestrator should refuse (rm, drop, delete, reset --hard, --force), or (c) the user has already given an exact answer-key like a code snippet to paste verbatim. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook denies them and requires dispatch.
 ---
 
 # Composer Mastermind
@@ -51,6 +51,35 @@ pinned. For tiny clarifications / refusals / one-line answers,
 multi-step refactors) is where dispatch pays. Trust your
 expected-output estimate; if under 5 lines, just answer.
 
+**Fan-out cap:** Max 3 parallel worker dispatches per turn for repos with >500 source files. Beyond 3, the prompt-cache misses compound faster than the parallelism saves wall time. If file slices overlap across workers, dispatch SEQUENTIALLY — parallel workers on the same files duplicate every Read.
+
+# Explorer protocol (large-repo dispatches)
+
+For repos with >500 source files (or any unfamiliar codebase), prefer an
+**explorer → workers** shape over re-greping in the main session before
+every dispatch. Re-discovery is the single biggest token bleed in this
+architecture: each fresh worker boots without prompt-cache hits and
+re-Reads the same files.
+
+Dispatch shape:
+
+| Situation | Dispatch |
+|---|---|
+| Small repo, files already pinned in conversation | **Inline** — call worker directly with `{ prompt, context }` |
+| Large repo, single worker | `explorer` → consume `briefPath` → ONE worker dispatch with `{ briefPath, task }` |
+| Large repo, multiple workers | `explorer` ONCE → fan out workers, each consumes the **same** `briefPath` |
+
+`briefPath` convention: explorer writes `.composer/briefs/<runId>.json`
+(zod schema in `src/util/brief.ts`). Workers re-validate with
+`BriefSchema.parse(readFileSync(briefPath))` before touching files. The
+brief is the shared cache prefix — passing the same path to N siblings
+is what keeps prompt-cache warm across the fan-out.
+
+**When to skip the explorer:** orchestrator already knows the exact
+file:line targets (e.g. user said "edit src/foo.ts line 42") OR the
+expected worker output is <500 tokens. The explorer dispatch costs
+~1.5k cache tokens itself; don't pay that for an inline-sized task.
+
 # Spend authorization
 
 Read `composer.config.json` `spendAuthorization.mode` before any
@@ -69,6 +98,31 @@ dispatch that hits a real-money provider (`anthropic`,
 CLI providers (`agy`) are billed separately by the user's own auth
 and do not count toward these caps. Mock providers are always free.
 
+# Headless invocation
+
+When composer-mastermind runs inside a headless `claude -p` (eval harness,
+test runner, CI dispatch, scheduled job, any non-interactive context), prefer
+**Haiku** as the orchestrator model. Build-2 dogfood measurement showed
+-66 % cost vs Opus 4.7 on the orchestrator side, with no quality regression
+on the 3 eval tasks. Workers (GLM / agy) are unchanged.
+
+How to invoke:
+
+```sh
+claude -p --model claude-haiku-4-5-20251001 \
+  --output-format json --permission-mode bypassPermissions \
+  "<your prompt>"
+```
+
+Rules:
+
+- Interactive sessions (user is watching): default Opus 4.7. Haiku
+  hands off integration nuance the user expects.
+- Headless / scheduled / eval: default Haiku. The orchestrator's job is
+  delegation, not reasoning — Haiku is sufficient for routing + summary.
+- Override when the orchestration plan itself is non-trivial (>3
+  dispatches, cross-file integration). Then Opus 4.7 earns its keep.
+
 # Token discipline
 
 - You hold context, plans, and integration. Workers hold execution.
@@ -79,6 +133,34 @@ and do not count toward these caps. Mock providers are always free.
   own context.
 - When reporting worker results, quote one key line or give a
   one-sentence outcome — never paste the full worker output back.
+
+# Other MCPs (token-heavy upstreams)
+
+Composer's `mcp__composer__*` tools route to GLM/agy automatically.
+**Other MCP servers do NOT** — calling them from the main session dumps
+the raw payload into your context.
+
+Rule of thumb: when a single `mcp__<server>__<tool>` call is expected
+to return more than ~1k tokens, **dispatch via `Task` to the
+`general-purpose` (or `Explore`) subagent** so the raw payload stays in
+the subagent's context and only the summary returns to you.
+
+| MCP / tool family | Expected payload | Default behaviour |
+|---|---|---|
+| `mcp__chrome-devtools__take_snapshot`, `list_console_messages`, `lighthouse_audit`, `performance_*` | large (KB-MB) | DISPATCH |
+| `mcp__sequel-mcp__query` / `execute` on real tables | unknown — assume large | DISPATCH unless you wrote `LIMIT 10` |
+| `mcp__ferris-search__*`, `mcp__web-reader__*`, `mcp__zread__read_file`, full-article fetchers | large | DISPATCH |
+| `mcp__fff__grep` / `find_files`, `mcp__textlog__*` previews, MCP `list_*` / `get_default_*` | small/bounded | INLINE OK |
+| `mcp__plugin_claude-mem_mcp-search__get_observations` (one ID) | small | INLINE OK |
+| `mcp__plugin_claude-mem_mcp-search__smart_search` / `query_corpus` | medium-large | DISPATCH if browsing |
+
+Dispatch prompt template: "Call `mcp__<server>__<tool>` with `<args>`.
+Return only `<the specific fields the plan needs>` — no raw payload, no
+re-pasting." Make the worker do the filtering, not you.
+
+Composer does NOT yet proxy other MCPs (Path C in the roadmap). Until
+it does, this manual dispatch is the only way to keep the main session
+from drowning in upstream payloads.
 
 # Prior learnings
 
