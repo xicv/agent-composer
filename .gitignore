@@ -31,3 +31,6 @@ coverage/
 # Auto-appended by learn.sh Stop hook — keeps PII out of commits
 .claude/learnings/2026-*.md
 .claude/worktrees/
+
+# Composer brief scratchpad (per-run worker dispatch maps)
+.composer/briefs/

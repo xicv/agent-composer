@@ -51,6 +51,35 @@ pinned. For tiny clarifications / refusals / one-line answers,
 multi-step refactors) is where dispatch pays. Trust your
 expected-output estimate; if under 5 lines, just answer.
 
+**Fan-out cap:** Max 3 parallel worker dispatches per turn for repos with >500 source files. Beyond 3, the prompt-cache misses compound faster than the parallelism saves wall time. If file slices overlap across workers, dispatch SEQUENTIALLY — parallel workers on the same files duplicate every Read.
+
+# Explorer protocol (large-repo dispatches)
+
+For repos with >500 source files (or any unfamiliar codebase), prefer an
+**explorer → workers** shape over re-greping in the main session before
+every dispatch. Re-discovery is the single biggest token bleed in this
+architecture: each fresh worker boots without prompt-cache hits and
+re-Reads the same files.
+
+Dispatch shape:
+
+| Situation | Dispatch |
+|---|---|
+| Small repo, files already pinned in conversation | **Inline** — call worker directly with `{ prompt, context }` |
+| Large repo, single worker | `explorer` → consume `briefPath` → ONE worker dispatch with `{ briefPath, task }` |
+| Large repo, multiple workers | `explorer` ONCE → fan out workers, each consumes the **same** `briefPath` |
+
+`briefPath` convention: explorer writes `.composer/briefs/<runId>.json`
+(zod schema in `src/util/brief.ts`). Workers re-validate with
+`BriefSchema.parse(readFileSync(briefPath))` before touching files. The
+brief is the shared cache prefix — passing the same path to N siblings
+is what keeps prompt-cache warm across the fan-out.
+
+**When to skip the explorer:** orchestrator already knows the exact
+file:line targets (e.g. user said "edit src/foo.ts line 42") OR the
+expected worker output is <500 tokens. The explorer dispatch costs
+~1.5k cache tokens itself; don't pay that for an inline-sized task.
+
 # Spend authorization
 
 Read `composer.config.json` `spendAuthorization.mode` before any
