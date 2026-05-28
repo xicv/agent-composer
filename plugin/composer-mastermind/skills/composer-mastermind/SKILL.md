@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: MUST USE for code-change requests that require Edit/Write/NotebookEdit on real files (add, modify, fix, refactor, implement, write, change, update files). Routes work to subagents (researcher / coder / reviewer) via Task tool. SKIP this skill — answer inline — when (a) the request is a one-line review/refusal/clarification with no file mutation, (b) the request is a destructive op the orchestrator should refuse (rm, drop, delete, reset --hard, --force), or (c) the user has already given an exact answer-key like a code snippet to paste verbatim. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook denies them and requires dispatch.
+description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer) via Task tool. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
 ---
 
 # Composer Mastermind

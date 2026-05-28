@@ -38,7 +38,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 TOOL="$(jq -r '.tool_name // empty' <<<"$INPUT" 2>/dev/null)"
-[[ "$TOOL" != "Task" ]] && exit 0
+[[ "$TOOL" != "Task" && "$TOOL" != "Agent" ]] && exit 0
 
 SUBAGENT="$(jq -r '.tool_input.subagent_type // empty' <<<"$INPUT" 2>/dev/null)"
 PROMPT="$(jq -r '.tool_input.prompt // empty' <<<"$INPUT" 2>/dev/null)"
