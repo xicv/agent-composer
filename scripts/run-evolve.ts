@@ -36,6 +36,7 @@ export interface ParsedArgs {
   lengthLambda?: number;
   forceOperator?: string;
   replicas: number;
+  tasksPath?: string;
 }
 
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
@@ -46,6 +47,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
   let lengthLambda: number | undefined;
   let forceOperator: string | undefined;
   let replicas = 1;
+  let tasksPath: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -99,6 +101,11 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
       if (isNaN(num) || num < 1) throw new Error(`--replicas: "${val}" must be a positive integer`);
       replicas = num;
       i++;
+    } else if (arg === "--tasks") {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error("--tasks requires a value");
+      tasksPath = val;
+      i++;
     } else {
       throw new Error(`unknown flag: ${arg}`);
     }
@@ -109,7 +116,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     maxRounds = 3;
   }
 
-  return { budgetUsd, maxRounds, evalMode, lengthLambda, forceOperator, replicas };
+  return { budgetUsd, maxRounds, evalMode, lengthLambda, forceOperator, replicas, tasksPath };
 }
 
 export function enforceSpendCap(config: ComposerConfig, budgetUsd: number): void {
@@ -339,6 +346,14 @@ export { extractToolUseDispatchSequence, extractMainSessionTokens, checkSuccess 
 export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>, replicas = 1) {
   return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: [] }> => {
     const results: TaskScore[] = [];
+    // Eval orchestrator must use the real Claude endpoint (Max5), NOT the z.ai
+    // base URL applyEnvJson set for the GLM reflection provider. Strip it so
+    // `claude -p --model sonnet` does not 400 on the GLM endpoint. The composer
+    // MCP the child spawns still reads its own .env.json for GLM creds.
+    const evalEnv: NodeJS.ProcessEnv = { ...process.env };
+    delete evalEnv.ANTHROPIC_BASE_URL;
+    delete evalEnv.ANTHROPIC_AUTH_TOKEN;
+    delete evalEnv.ANTHROPIC_MODEL;
 
     for (const task of tasks) {
       const replicaScores: number[] = [];
@@ -372,7 +387,7 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
               "0.25",
               task.description,
             ],
-            { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath, timeout: 180_000, killSignal: "SIGTERM" },
+            { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath, timeout: 180_000, killSignal: "SIGTERM", env: evalEnv },
             (error, stdout, stderr) => {
               if (error) {
                 const stderrTail = (stderr ?? "").toString().trim().split("\n").slice(-3).join(" | ");
@@ -557,7 +572,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const tasksPath = path.resolve(process.cwd(), "evals/tasks.jsonl");
+  const tasksPath = args.tasksPath ? path.resolve(args.tasksPath) : path.resolve(process.cwd(), "evals/tasks.jsonl");
   let tasks: ExtendedEvolveTask[];
   try {
     const raw = fs.readFileSync(tasksPath, "utf8");
