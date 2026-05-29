@@ -60,6 +60,7 @@ interface Args {
   budgetUsd: number;
   warmupRetries: number;
   composerEntry?: string;
+  runs: number;
 }
 
 function parseArgs(argv: ReadonlyArray<string>): Args {
@@ -68,6 +69,7 @@ function parseArgs(argv: ReadonlyArray<string>): Args {
   let budgetUsd = 0.5;
   let warmupRetries = 1;
   let composerEntry: string | undefined;
+  let runs = 1;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--model") {
@@ -94,11 +96,17 @@ function parseArgs(argv: ReadonlyArray<string>): Args {
       const v = argv[++i];
       if (v === undefined) throw new Error("--composer-entry requires a value");
       composerEntry = v;
+    } else if (a === "--runs") {
+      const v = argv[++i];
+      if (v === undefined) throw new Error("--runs requires a value");
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || n < 1) throw new Error(`--runs invalid: ${v}`);
+      runs = n;
     } else {
       throw new Error(`unknown flag: ${a}`);
     }
   }
-  return { model, taskFilter, budgetUsd, warmupRetries, composerEntry };
+  return { model, taskFilter, budgetUsd, warmupRetries, composerEntry, runs };
 }
 
 function resolveComposerEntry(repoRoot: string, override?: string): string {
@@ -333,7 +341,7 @@ async function main(): Promise<void> {
   const mcpConfigPath = `/tmp/composer-measure-mcp-${process.pid}.json`;
   fs.writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { composer: { command: "node", args: [composerEntry] } } }));
 
-  console.log(`# Live measure (TOTAL-CC scope) — brainModel=${args.model}, cap=$${args.budgetUsd}, warmupRetries=${args.warmupRetries}`);
+  console.log(`# Live measure (TOTAL-CC scope) — brainModel=${args.model}, cap=${args.budgetUsd}, warmupRetries=${args.warmupRetries}, runs=${args.runs}`);
   console.log(`# Composer MCP: node ${composerEntry} (direct, --strict-mcp-config)`);
   console.log(`# Score token-component on TOTAL CC tokens (all Claude models). GLM = off-CC offload, reported separately.`);
   console.log(`# Baselines: ${baselines.claudeModel ?? "?"} / CLI ${baselines.claudeCodeVersion ?? "?"}\n`);
@@ -346,23 +354,38 @@ async function main(): Promise<void> {
     const baseline = baselines.baselines[task.id];
     if (!baseline) { console.error(`skip ${task.id}: no baseline`); continue; }
     try {
-      const { outcome, ts, attempts } = await runWithWarmup(task, args, baseline.mainSessionTokens, mcpConfigPath);
-      scores.push(ts);
-      const savingsPct = ((1 - outcome.ccTotal / baseline.mainSessionTokens) * 100).toFixed(1);
-      console.log(`  [${task.id}] perModel: ${JSON.stringify(outcome.perModel)} | ccOut=${outcome.ccOutput} | glmOffloaded=${outcome.glmOffloaded}`);
+      const ccs: number[] = [];
+      const scoreVals: number[] = [];
+      let last: Awaited<ReturnType<typeof runWithWarmup>> | undefined;
+      let successes = 0;
+      let dispatchOks = 0;
+      for (let run = 0; run < args.runs; run++) {
+        const r = await runWithWarmup(task, args, baseline.mainSessionTokens, mcpConfigPath);
+        last = r;
+        ccs.push(r.outcome.ccTotal);
+        scoreVals.push(r.ts.score);
+        if (r.outcome.success) successes++;
+        if (r.outcome.dispatchedCorrectly) dispatchOks++;
+        console.log(`  [${task.id}] run ${run + 1}/${args.runs}: ccTotal=${r.outcome.ccTotal} score=${r.ts.score.toFixed(4)} success=${r.outcome.success} glmOff=${r.outcome.glmOffloaded}`);
+      }
+      const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+      const meanCc = Math.round(mean(ccs));
+      const meanScore = mean(scoreVals);
+      scores.push({ taskId: task.id, score: meanScore, components: last!.ts.components });
+      const savingsPct = ((1 - meanCc / baseline.mainSessionTokens) * 100).toFixed(1);
       const row = {
-        taskId: task.id, brainModel: args.model,
-        baselineCC: baseline.mainSessionTokens, ccTotal: outcome.ccTotal,
-        ccSavedPct: savingsPct, ccOutput: outcome.ccOutput, glmOff: outcome.glmOffloaded,
-        dispatchOK: outcome.dispatchedCorrectly, success: outcome.success,
-        mcpInit: outcome.composerInitStatus, attempts, score: ts.score.toFixed(4),
+        taskId: task.id, brainModel: args.model, runs: args.runs,
+        baselineCC: baseline.mainSessionTokens, ccTotalMean: meanCc,
+        ccMin: Math.min(...ccs), ccMax: Math.max(...ccs),
+        ccSavedPct: savingsPct, successRate: `${successes}/${args.runs}`,
+        dispatchRate: `${dispatchOks}/${args.runs}`, scoreMean: meanScore.toFixed(4),
       };
       rows.push(row);
-      fs.appendFileSync(logPath, JSON.stringify({ ...row, durationMs: outcome.durationMs, perModel: outcome.perModel }) + "\n");
+      fs.appendFileSync(logPath, JSON.stringify({ ...row, ccRuns: ccs }) + "\n");
     } catch (err) {
       console.error(`task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
       scores.push({ taskId: task.id, score: 0, components: { success: 0, token: 0, dispatch: 0 } });
-      rows.push({ taskId: task.id, brainModel: args.model, baselineCC: baseline.mainSessionTokens, ccTotal: "ERR", ccSavedPct: "-", ccOutput: "-", glmOff: "-", dispatchOK: false, success: false, mcpInit: "-", attempts: 0, score: "0.0000" });
+      rows.push({ taskId: task.id, brainModel: args.model, runs: args.runs, baselineCC: baseline.mainSessionTokens, ccTotalMean: "ERR", ccMin: "-", ccMax: "-", ccSavedPct: "-", successRate: "-", dispatchRate: "-", scoreMean: "0.0000" });
     }
   }
 

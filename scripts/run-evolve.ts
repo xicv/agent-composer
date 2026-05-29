@@ -35,6 +35,7 @@ export interface ParsedArgs {
   evalMode: "synthetic" | "real";
   lengthLambda?: number;
   forceOperator?: string;
+  replicas: number;
 }
 
 export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
@@ -44,6 +45,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
   let maxRoundsExplicit = false;
   let lengthLambda: number | undefined;
   let forceOperator: string | undefined;
+  let replicas = 1;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -90,6 +92,13 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
       }
       forceOperator = val;
       i++;
+    } else if (arg === "--replicas") {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error("--replicas requires a value");
+      const num = parseInt(val, 10);
+      if (isNaN(num) || num < 1) throw new Error(`--replicas: "${val}" must be a positive integer`);
+      replicas = num;
+      i++;
     } else {
       throw new Error(`unknown flag: ${arg}`);
     }
@@ -100,7 +109,7 @@ export function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
     maxRounds = 3;
   }
 
-  return { budgetUsd, maxRounds, evalMode, lengthLambda, forceOperator };
+  return { budgetUsd, maxRounds, evalMode, lengthLambda, forceOperator, replicas };
 }
 
 export function enforceSpendCap(config: ComposerConfig, budgetUsd: number): void {
@@ -327,12 +336,14 @@ function aggregateScore(scores: TaskScore[]): number {
 export type { ToolUseBlock };
 export { extractToolUseDispatchSequence, extractMainSessionTokens, checkSuccess };
 
-export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>) {
+export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>, replicas = 1) {
   return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: [] }> => {
     const results: TaskScore[] = [];
 
     for (const task of tasks) {
-      const worktreePath = `/tmp/composer-eval-${process.pid}-${task.id}`;
+      const replicaScores: number[] = [];
+      for (let replica = 0; replica < replicas; replica++) {
+      const worktreePath = `/tmp/composer-eval-${process.pid}-${task.id}-r${replica}`;
       try {
         await new Promise<void>((resolve, reject) => {
           execFile("git", ["worktree", "add", worktreePath, "HEAD", "--detach"], {}, (error) => {
@@ -472,15 +483,19 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
 
         const baseline = baselines[task.id]?.mainSessionTokens ?? 0;
         const taskScore = scoreTask(evalResult, baseline);
-        results.push(taskScore);
+        replicaScores.push(taskScore.score);
       } catch (err) {
-        console.error(`run-evolve: task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
-        results.push({ taskId: task.id, score: 0 });
+        console.error(`run-evolve: task ${task.id} failed (replica ${replica}): ${err instanceof Error ? err.message : String(err)}`);
+        replicaScores.push(0);
       } finally {
         await new Promise<void>((resolve) => {
           execFile("git", ["worktree", "remove", "--force", worktreePath], {}, () => resolve());
         });
       }
+      }
+      // N-replica averaging: mean per-task score reduces single-run variance.
+      const meanScore = replicaScores.reduce((a, b) => a + b, 0) / Math.max(1, replicaScores.length);
+      results.push({ taskId: task.id, score: meanScore });
     }
 
     return { score: aggregateScore(results), transcripts: [] };
@@ -573,7 +588,7 @@ async function main(): Promise<void> {
   const baselines = loadBaselines();
   const evaluate =
     args.evalMode === "real"
-      ? createRealEvaluate(skillPath, baselines)
+      ? createRealEvaluate(skillPath, baselines, args.replicas)
       : async (skill: string) => ({ score: syntheticScore(skill), transcripts: [] });
 
   // v1: no flakiness model — always confirm survival.
