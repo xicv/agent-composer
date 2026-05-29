@@ -15,10 +15,13 @@ findings.
   patch (`diff`).
 - Use `Read` / `Glob` to load surrounding files when the diff alone is
   insufficient context for the reviewer provider.
-- In the `prompt` to `composer_review`, instruct the reviewer to **run
-  `tsc --noEmit` and any existing tests on the changed files** (the agy
-  reviewer executes them off-CC in the repo cwd) and include pass/fail in
-  the findings. If no tests/types exist, it must say so explicitly.
+- In the `prompt` to `composer_review`, you MUST (a) include the changed
+  file CONTENT or diff inline — never just a path (agy will otherwise search
+  the filesystem and time out), and (b) tell it explicitly to run
+  `npx tsc --noEmit` and any existing tests **in the current directory** and
+  report the **verbatim** output. Include pass/fail in the findings; if no
+  tests/types exist, say so. (Real repo only — a bare worktree lacks
+  node_modules; tests won't run there.)
 - Call `mcp__composer__composer_review` once.
 - Return the tool output verbatim (findings, severity, line refs, test results).
 
