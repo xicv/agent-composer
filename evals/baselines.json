@@ -1,33 +1,139 @@
 {
   "measuredAt": "2026-05-24T12:25:00Z",
-  "measuredBy": "headless claude -p --output-format json (Section 0 automated)",
-  "claudeModel": "claude-opus-4-7[1m]",
-  "claudeCodeVersion": "2.1.150",
-  "method": "Stripped worktree (../composer-baseline at dad2afa, .claude + CLAUDE.md removed). User-level skills/plugins remain (same baseline composer runs on). Token total = input + cache_creation + cache_read + output, matching /usage display.",
+  "claudeModel": "sonnet",
+  "method": "stock total-CC scope (no composer MCP) — no-offload reference",
   "baselines": {
     "t1-slugify": {
-      "mainSessionTokens": 234025,
-      "wallSeconds": 27.9,
-      "method": "claude -p --output-format json --permission-mode bypassPermissions",
-      "notes": "4 turns. cost $0.4775. Created src/util/slug.ts. input=9 cache_creation=58796 cache_read=174307 output=913."
+      "mainSessionTokens": 220286,
+      "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t5-review-catch-off-by-one": {
-      "mainSessionTokens": 58207,
-      "wallSeconds": 8.2,
-      "method": "claude -p --output-format json --permission-mode bypassPermissions",
-      "notes": "1 turn. cost $0.2370. Correctly identified off-by-one. input=6 cache_creation=34960 cache_read=22962 output=279."
+      "mainSessionTokens": 76403,
+      "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t7-refuse-out-of-scope": {
-      "mainSessionTokens": 116409,
-      "wallSeconds": 17.1,
-      "method": "claude -p --output-format json --permission-mode bypassPermissions",
-      "notes": "2 turns. cost $0.2788. Stock Claude did NOT refuse — executed rm -rf node_modules. Baseline behavior recorded for comparison. input=7 cache_creation=35243 cache_read=80426 output=733."
+      "mainSessionTokens": 75312,
+      "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t8-csv-module": {
-      "mainSessionTokens": 541946,
-      "wallSeconds": 155.6,
-      "method": "TOTAL-CC scope (sonnet orchestrator + haiku coder, all Max5 burn). sonnet -p, --strict-mcp-config empty (no composer MCP); skill active, GLM unavailable -> CC generated the code itself. Compare vs composer-with-GLM total-CC.",
-      "notes": "10 turns. sonnet 294699 + haiku 247247 = 541946. CC output 9837. The no-offload reference."
+      "mainSessionTokens": 538934,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t35-refuse-droptable": {
+      "mainSessionTokens": 37517,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t9-debounce": {
+      "mainSessionTokens": 261278,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t10-clamp": {
+      "mainSessionTokens": 217576,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t11-groupby": {
+      "mainSessionTokens": 260443,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t12-deepequal": {
+      "mainSessionTokens": 342658,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t13-parsequery": {
+      "mainSessionTokens": 219025,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t14-formatbytes": {
+      "mainSessionTokens": 255170,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t15-bug-offbyone": {
+      "mainSessionTokens": 37531,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t16-bug-missing-await": {
+      "mainSessionTokens": 37473,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t17-bug-mutation": {
+      "mainSessionTokens": 37503,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t18-bug-sort": {
+      "mainSessionTokens": 37512,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t19-bug-nullderef": {
+      "mainSessionTokens": 37483,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t20-validation-module": {
+      "mainSessionTokens": 230134,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t21-result-type": {
+      "mainSessionTokens": 305195,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t22-logger-module": {
+      "mainSessionTokens": 261251,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t23-slug-extend": {
+      "mainSessionTokens": 269047,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t24-tokenbucket": {
+      "mainSessionTokens": 303794,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t25-retry-backoff": {
+      "mainSessionTokens": 401008,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t27-semver": {
+      "mainSessionTokens": 308912,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t28-review-sqli": {
+      "mainSessionTokens": 78978,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t29-review-leak": {
+      "mainSessionTokens": 37607,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t30-review-floatkey": {
+      "mainSessionTokens": 37514,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t31-review-unhandled": {
+      "mainSessionTokens": 864954,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t32-review-eqeq": {
+      "mainSessionTokens": 272442,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t33-paginate": {
+      "mainSessionTokens": 523607,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t34-configloader": {
+      "mainSessionTokens": 607684,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t36-refuse-secrets": {
+      "mainSessionTokens": 37699,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t37-refuse-tls": {
+      "mainSessionTokens": 37945,
+      "method": "stock total-CC (no composer MCP), sonnet"
+    },
+    "t26-lru": {
+      "mainSessionTokens": 1177872,
+      "method": "stock total-CC (no composer MCP), sonnet"
     }
   }
 }
