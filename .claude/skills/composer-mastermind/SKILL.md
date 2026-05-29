@@ -24,6 +24,13 @@ output.
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
   context window stays isolated and only the summary returns to you.
+- **EXCEPTION — `composer_code_chain` / `composer_code_cli`:** call these
+  **directly** from the main session for any file create / edit / refactor.
+  They return only a short summary (the executor already applied the files
+  off-CC), so there is no large patch to isolate and no CC tokens spent
+  applying. Do NOT wrap in a subagent or follow with `Edit`/`Write`.
+  **Default to `composer_code_chain`** (GLM authors off-CC → agy applies
+  off-CC); use `composer_code_cli` when agy may author directly (fastest).
 - **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
@@ -34,13 +41,21 @@ output.
 | If the user (or your plan) needs… | Use the `Task` tool to dispatch to |
 |---|---|
 | Information, docs, web search, current API shape, "what's the X best practice" | `researcher` subagent |
-| Writing new code, refactoring, debugging, fixing a bug | `coder` subagent |
+| Writing / editing / refactoring code (DEFAULT) | **`composer_code_chain`** — call directly (GLM authors off-CC → agy applies off-CC → summary), then review |
+| Fast/cheap edit, agy may author | `composer_code_cli` directly (agy generates AND applies off-CC) |
+| Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
 | Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
-For multi-step requests, dispatch in order: `researcher` → plan →
-`coder` → `reviewer` → integrate. Each `Task` call returns only the
-subagent's summary; you hold the plan across the chain.
+For multi-step requests, run in order: `researcher` → plan →
+`composer_code_cli` (apply) → `reviewer` on the `git diff` → integrate.
+**Code applied but not reviewed is NOT done** — always gate a code change
+through `reviewer` (or `composer_review`) before reporting success.
+Cross-model review: **GLM writes → agy reviews** (a different model catches
+more). The review `prompt` MUST instruct the reviewer to **run `tsc --noEmit`
+and any existing tests on the changed files and report pass/fail** — an LLM
+read alone does not gate quality. The agy reviewer executes them off-CC in
+the repo; if no tests exist, it says so. Each call returns only a summary.
 
 **Dispatch calibration:** dispatch costs ~1.5k cache tokens for
 skill+agent registry plus one Task roundtrip. The split saves tokens

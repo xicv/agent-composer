@@ -4,31 +4,54 @@
   "title": "Composer Configuration",
   "description": "Dependency Inversion at runtime: maps subagent role → provider impl. C0.2 — frozen Wave 0, append-only during Wave 1.",
   "type": "object",
-  "required": ["roles"],
+  "required": [
+    "roles"
+  ],
   "additionalProperties": false,
   "properties": {
     "roles": {
       "type": "object",
-      "required": ["researcher", "coder", "reviewer"],
+      "required": [
+        "researcher",
+        "coder",
+        "reviewer"
+      ],
       "additionalProperties": false,
       "properties": {
-        "researcher": { "$ref": "#/$defs/roleConfig" },
-        "coder": { "$ref": "#/$defs/roleConfig" },
-        "reviewer": { "$ref": "#/$defs/roleConfig" }
+        "researcher": {
+          "$ref": "#/$defs/roleConfig"
+        },
+        "coder": {
+          "$ref": "#/$defs/roleConfig"
+        },
+        "reviewer": {
+          "$ref": "#/$defs/roleConfig"
+        },
+        "coderCli": {
+          "$ref": "#/$defs/roleConfig"
+        }
       }
     },
-    "spendAuthorization": { "$ref": "#/$defs/spendAuthorization" }
+    "spendAuthorization": {
+      "$ref": "#/$defs/spendAuthorization"
+    }
   },
   "$defs": {
     "spendAuthorization": {
       "type": "object",
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "additionalProperties": false,
       "description": "Orchestrator behaviour when a real-money provider call is about to be made. Added 2026-05-24 after the first dogfood audit revealed the soft 'always ask' rule was inconsistent across sessions. Optional — omit for the default 'interactive' behaviour.",
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["interactive", "auto", "deny"],
+          "enum": [
+            "interactive",
+            "auto",
+            "deny"
+          ],
           "description": "interactive: ask the user 'go' before any priced call (legacy default). auto: proceed without asking, respect the maxUsd caps. deny: refuse all real-money calls; force tape replay / mock providers."
         },
         "maxUsdPerSession": {
@@ -45,15 +68,24 @@
     },
     "providerId": {
       "type": "string",
-      "enum": ["anthropic", "openai_compatible", "cli", "mock"],
+      "enum": [
+        "anthropic",
+        "openai_compatible",
+        "cli",
+        "mock"
+      ],
       "description": "Discriminator picked up by ProviderFactory. Must match IProvider.id."
     },
     "roleConfig": {
       "type": "object",
-      "required": ["provider"],
+      "required": [
+        "provider"
+      ],
       "additionalProperties": false,
       "properties": {
-        "provider": { "$ref": "#/$defs/providerId" },
+        "provider": {
+          "$ref": "#/$defs/providerId"
+        },
         "apiKeyEnv": {
           "type": "string",
           "description": "Name of the env var holding the API key. Resolved by ProviderFactory at startup; the key value itself is NEVER stored in this file."
@@ -69,7 +101,9 @@
         },
         "cli": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "description": "argv array for CLIProvider, e.g. [\"agy\",\"--dangerously-skip-permissions\",\"-p\"]. Passed to child_process.execFile — NEVER shell-interpolated."
         },
@@ -81,12 +115,17 @@
         "thinking": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "description": "Extended-thinking knob for Anthropic-compat providers (GLM glm-5.1, glm-4.6+, Claude). Ignored by other providers. Added 2026-05-25 for v0.1.3.",
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["enabled", "disabled"],
+              "enum": [
+                "enabled",
+                "disabled"
+              ],
               "description": "enabled: include the `thinking` block on every call. disabled: explicitly opt out."
             },
             "budgetTokens": {
