@@ -24,12 +24,13 @@ output.
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
   context window stays isolated and only the summary returns to you.
-- **EXCEPTION — `composer_code_cli`:** call it **directly** from the main
-  session for any file create / edit / refactor. The executor (agy)
-  generates AND applies the files itself and returns only a short summary,
-  so there is no large patch to isolate and no CC tokens spent applying.
-  Do NOT wrap it in a subagent and do NOT follow it with `Edit`/`Write` —
-  the files are already on disk.
+- **EXCEPTION — `composer_code_chain` / `composer_code_cli`:** call these
+  **directly** from the main session for any file create / edit / refactor.
+  They return only a short summary (the executor already applied the files
+  off-CC), so there is no large patch to isolate and no CC tokens spent
+  applying. Do NOT wrap in a subagent or follow with `Edit`/`Write`.
+  **Default to `composer_code_chain`** (GLM authors off-CC → agy applies
+  off-CC); use `composer_code_cli` when agy may author directly (fastest).
 - **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
@@ -40,8 +41,9 @@ output.
 | If the user (or your plan) needs… | Use the `Task` tool to dispatch to |
 |---|---|
 | Information, docs, web search, current API shape, "what's the X best practice" | `researcher` subagent |
-| Writing / creating / editing / refactoring files (apply to disk) | **`composer_code_cli`** — call directly (executor applies, returns summary), then review |
-| Generating a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
+| Writing / editing / refactoring code (DEFAULT) | **`composer_code_chain`** — call directly (GLM authors off-CC → agy applies off-CC → summary), then review |
+| Fast/cheap edit, agy may author | `composer_code_cli` directly (agy generates AND applies off-CC) |
+| Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
 | Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
