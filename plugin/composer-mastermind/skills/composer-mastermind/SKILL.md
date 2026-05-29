@@ -48,10 +48,12 @@ output.
 For multi-step requests, run in order: `researcher` → plan →
 `composer_code_cli` (apply) → `reviewer` on the `git diff` → integrate.
 **Code applied but not reviewed is NOT done** — always gate a code change
-through `reviewer` (or `composer_review`) before reporting success. For
-cross-model rigor, prefer a reviewer model DIFFERENT from the executor
-that wrote the code (e.g. agy writes → GLM reviews). Each call returns
-only a summary; you hold the plan across the chain.
+through `reviewer` (or `composer_review`) before reporting success.
+Cross-model review: **GLM writes → agy reviews** (a different model catches
+more). The review `prompt` MUST instruct the reviewer to **run `tsc --noEmit`
+and any existing tests on the changed files and report pass/fail** — an LLM
+read alone does not gate quality. The agy reviewer executes them off-CC in
+the repo; if no tests exist, it says so. Each call returns only a summary.
 
 **Dispatch calibration:** dispatch costs ~1.5k cache tokens for
 skill+agent registry plus one Task roundtrip. The split saves tokens
