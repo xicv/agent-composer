@@ -39,7 +39,7 @@ export const RoleConfigSchema = z
   .strict();
 export type RoleConfig = z.infer<typeof RoleConfigSchema>;
 
-export const RoleNameSchema = z.enum(["researcher", "coder", "reviewer"]);
+export const RoleNameSchema = z.enum(["researcher", "coder", "reviewer", "coderCli"]);
 export type RoleName = z.infer<typeof RoleNameSchema>;
 
 export const SpendAuthorizationModeSchema = z.enum([
@@ -65,6 +65,7 @@ export const ComposerConfigSchema = z
         researcher: RoleConfigSchema,
         coder: RoleConfigSchema,
         reviewer: RoleConfigSchema,
+        coderCli: RoleConfigSchema.optional(),
       })
       .strict(),
     spendAuthorization: SpendAuthorizationSchema.optional(),

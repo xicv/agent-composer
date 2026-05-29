@@ -47,7 +47,11 @@ export class ProviderRegistry {
   getProviderForRole(role: RoleName): IProvider {
     const cached = this.cache.get(role);
     if (cached) return cached;
-    const created = this.buildProvider(this.config.roles[role]);
+    const rc = this.config.roles[role];
+    if (!rc) {
+      throw new ProviderConfigError(role, "role not configured in composer.config.json roles");
+    }
+    const created = this.buildProvider(rc);
     this.cache.set(role, created);
     return created;
   }

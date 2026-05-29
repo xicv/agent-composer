@@ -12,6 +12,7 @@ import type { ProviderRegistry } from "./registry.js";
 export const COMPOSER_RESEARCH = "composer_research" as const;
 export const COMPOSER_CODE = "composer_code" as const;
 export const COMPOSER_REVIEW = "composer_review" as const;
+export const COMPOSER_CODE_CLI = "composer_code_cli" as const;
 
 const RESEARCH_DESCRIPTION =
   "MANDATORY for ALL research, documentation lookup, web search, and " +
@@ -22,6 +23,14 @@ const CODE_DESCRIPTION =
   "MANDATORY for ALL code writing, refactoring, debugging, and " +
   "implementation. The orchestrator MUST delegate implementation to this " +
   "tool. Do not write code in the main session.";
+
+const CODE_CLI_DESCRIPTION =
+  "Generate AND APPLY code changes directly to disk via the CLI executor " +
+  "(agy/Gemini), which runs in the server working directory and edits files " +
+  "itself. Returns ONLY a summary of what changed. Use this to offload BOTH " +
+  "generation and file-writing off the main session: the orchestrator does " +
+  "NOT call Edit/Write — the executor already applied the changes. Prefer " +
+  "this for multi-file or substantial edits to keep the main context lean.";
 
 const REVIEW_DESCRIPTION =
   "MANDATORY for ALL code review, diff critique, and finding bugs in " +
@@ -103,6 +112,29 @@ export function createComposerServer(registry: ProviderRegistry): McpServer {
     async ({ prompt, diff }) => {
       const provider = registry.getProviderForRole("reviewer");
       const result = await provider.execute({ prompt, context: diff });
+      return { content: [{ type: "text", text: result.text }] };
+    },
+  );
+
+  server.registerTool(
+    COMPOSER_CODE_CLI,
+    {
+      description: CODE_CLI_DESCRIPTION,
+      inputSchema: {
+        prompt: z.string().min(1),
+        context: z.string().optional(),
+      },
+      annotations: {
+        title: "Composer Code (CLI apply)",
+        readOnlyHint: false,
+        openWorldHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+      },
+    },
+    async ({ prompt, context }) => {
+      const provider = registry.getProviderForRole("coderCli");
+      const result = await provider.execute({ prompt, context });
       return { content: [{ type: "text", text: result.text }] };
     },
   );

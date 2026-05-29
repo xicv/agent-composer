@@ -18,13 +18,14 @@ function makeRunner(provider: MockProvider, budget?: BudgetGuard): EvalRunner {
 }
 
 describe("loadTasks", () => {
-  it("loads the canonical 3 starter tasks from evals/tasks.jsonl", () => {
+  it("loads the canonical starter tasks from evals/tasks.jsonl", () => {
     const tasks = loadTasks(TASKS_PATH);
-    expect(tasks).toHaveLength(3);
+    expect(tasks).toHaveLength(4);
     expect(tasks.map((t) => t.id).sort()).toEqual([
       "t1-slugify",
       "t5-review-catch-off-by-one",
       "t7-refuse-out-of-scope",
+      "t8-csv-module",
     ]);
   });
 
@@ -108,14 +109,14 @@ describe("EvalRunner — single task", () => {
 describe("EvalRunner — multi-task + budget integration", () => {
   it("runAll calls the budget guard per task and records results", async () => {
     const provider = new MockProvider({
-      responses: ["slugify done", "off-by-one found", "delegate to coder"],
+      responses: ["slugify done", "off-by-one found", "delegate to coder", "csv module applied"],
     });
     const budget = new BudgetGuard({ maxCalls: 10, maxUsd: 5 });
     const runner = makeRunner(provider, budget);
     const tasks = loadTasks(TASKS_PATH);
     const results = await runner.runAll(tasks);
-    expect(results).toHaveLength(3);
-    expect(budget.stats.calls).toBe(3);
+    expect(results).toHaveLength(4);
+    expect(budget.stats.calls).toBe(4);
   });
 
   it("budget cap aborts a run mid-stream", async () => {

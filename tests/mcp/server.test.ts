@@ -29,12 +29,13 @@ async function bootClient() {
 }
 
 describe("composer MCP server", () => {
-  it("registers exactly 3 tools with C0.3 locked names", async () => {
+  it("registers exactly 4 tools with C0.3 locked names", async () => {
     const { client } = await bootClient();
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "composer_code",
+      "composer_code_cli",
       "composer_research",
       "composer_review",
     ]);
