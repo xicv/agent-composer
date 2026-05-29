@@ -226,7 +226,7 @@ async function runTask(
         {
           maxBuffer: 16 * 1024 * 1024,
           cwd: worktreePath,
-          timeout: 180_000,
+          timeout: 600_000, // substantial tasks (multi-file GLM gen) run ~5min
           killSignal: "SIGTERM",
         },
         (error, so, se) => {
