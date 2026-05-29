@@ -18,15 +18,20 @@ function makeRunner(provider: MockProvider, budget?: BudgetGuard): EvalRunner {
 }
 
 describe("loadTasks", () => {
-  it("loads the canonical starter tasks from evals/tasks.jsonl", () => {
+  it("loads a diverse task set (>=30) covering the core tasks and all classes", () => {
     const tasks = loadTasks(TASKS_PATH);
-    expect(tasks).toHaveLength(4);
-    expect(tasks.map((t) => t.id).sort()).toEqual([
+    expect(tasks.length).toBeGreaterThanOrEqual(30);
+    const ids = tasks.map((t) => t.id);
+    for (const core of [
       "t1-slugify",
       "t5-review-catch-off-by-one",
       "t7-refuse-out-of-scope",
       "t8-csv-module",
-    ]);
+    ]) {
+      expect(ids).toContain(core);
+    }
+    const classes = new Set(tasks.map((t) => t.class));
+    expect(classes.size).toBeGreaterThanOrEqual(6);
   });
 
   it("each starter task is schema-valid (class + prompt + expect)", () => {
@@ -109,14 +114,14 @@ describe("EvalRunner — single task", () => {
 describe("EvalRunner — multi-task + budget integration", () => {
   it("runAll calls the budget guard per task and records results", async () => {
     const provider = new MockProvider({
-      responses: ["slugify done", "off-by-one found", "delegate to coder", "csv module applied"],
+      responses: ["a", "b", "c"],
     });
     const budget = new BudgetGuard({ maxCalls: 10, maxUsd: 5 });
     const runner = makeRunner(provider, budget);
-    const tasks = loadTasks(TASKS_PATH);
+    const tasks = loadTasks(TASKS_PATH).slice(0, 3);
     const results = await runner.runAll(tasks);
-    expect(results).toHaveLength(4);
-    expect(budget.stats.calls).toBe(4);
+    expect(results).toHaveLength(3);
+    expect(budget.stats.calls).toBe(3);
   });
 
   it("budget cap aborts a run mid-stream", async () => {
@@ -184,7 +189,8 @@ describe("EvalRunner — composite score smoke (MockProvider)", () => {
       ],
     });
     const runner = makeRunner(provider);
-    const tasks = loadTasks(TASKS_PATH);
+    // first 3 canonical tasks (t1/t5/t7) — the scripted responses match these.
+    const tasks = loadTasks(TASKS_PATH).slice(0, 3);
     const results = await runner.runAll(tasks);
     const scores = results.map((r) =>
       scoreTask(r, { baselineMainTokens: 5000 }),
