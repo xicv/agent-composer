@@ -102,12 +102,15 @@ export interface CLIProviderOptions {
   model?: string;
   timeoutMs?: number;
   maxBuffer?: number;
+  /** Retry attempts on transient failure (timeout / empty / rate-limit). Default 2. */
+  retries?: number;
   /** Override execFile for tests. */
   execFn?: ExecFileFn;
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000; // 5 min — matches tdd_plan.md §6 per-experiment budget cap.
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024; // 32 MB.
+const DEFAULT_RETRIES = 2; // agy/CLI agents occasionally "time out waiting for response" — retry transient failures.
 
 export class CLIProvider implements IProvider {
   readonly id: ProviderId = "cli";
@@ -117,6 +120,7 @@ export class CLIProvider implements IProvider {
   private readonly exec: ExecFileFn;
   private readonly timeoutMs: number;
   private readonly maxBuffer: number;
+  private readonly retries: number;
 
   constructor(opts: CLIProviderOptions) {
     if (!opts.cli || opts.cli.length === 0) {
@@ -128,6 +132,7 @@ export class CLIProvider implements IProvider {
     this.exec = opts.execFn ?? DEFAULT_EXEC;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
+    this.retries = opts.retries ?? DEFAULT_RETRIES;
   }
 
   async healthCheck(): Promise<boolean> {
@@ -149,11 +154,34 @@ export class CLIProvider implements IProvider {
     }
     const args = [...staticArgs, fullPrompt];
 
-    const { stdout } = await this.exec(bin, args, {
-      maxBuffer: this.maxBuffer,
-      timeout: this.timeoutMs,
-    });
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      try {
+        const { stdout } = await this.exec(bin, args, {
+          maxBuffer: this.maxBuffer,
+          timeout: this.timeoutMs,
+        });
+        if (CLIProvider.isTransientFailure(stdout)) {
+          lastError = new Error(
+            `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${stdout.trim().slice(0, 200)}`,
+          );
+          continue;
+        }
+        return { text: stdout };
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
+    }
+    throw (
+      lastError ??
+      new Error(`CLIProvider: '${bin}' failed after ${this.retries + 1} attempts`)
+    );
+  }
 
-    return { text: stdout };
+  /** Output signalling a retryable transient failure (timeout / rate-limit / empty). */
+  static isTransientFailure(stdout: string): boolean {
+    return /timed out waiting for response|rate limit|temporarily unavailable|ECONNRESET|overloaded|503\b/i.test(
+      stdout,
+    );
   }
 }

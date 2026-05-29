@@ -175,3 +175,62 @@ describe("CLIProvider (replay against recorded agy tape)", () => {
     },
   );
 });
+
+describe("CLIProvider retry-on-transient", () => {
+  function makeFlakyExec(
+    outcomes: Array<{ throw?: string; stdout?: string }>,
+  ): { fn: ExecFileFn; calls: () => number } {
+    let i = 0;
+    const fn = (async () => {
+      const o = outcomes[Math.min(i, outcomes.length - 1)]!;
+      i++;
+      if (o.throw) throw new Error(o.throw);
+      return { stdout: o.stdout ?? "", stderr: "" };
+    }) as ExecFileFn;
+    return { fn, calls: () => i };
+  }
+
+  it("retries after a thrown error and returns the next success", async () => {
+    const { fn, calls } = makeFlakyExec([
+      { throw: "CLIProvider: 'agy' timed out after 1000ms" },
+      { stdout: "review ok" },
+    ]);
+    const p = new CLIProvider({ cli: ["agy", "-p"], retries: 2, execFn: fn });
+    const out = await p.execute({ prompt: "review" });
+    expect(out.text).toBe("review ok");
+    expect(calls()).toBe(2);
+  });
+
+  it("retries when stdout signals a transient failure (agy timeout)", async () => {
+    const { fn, calls } = makeFlakyExec([
+      { stdout: "Error: timed out waiting for response" },
+      { stdout: "VERDICT: FAIL — TS2322" },
+    ]);
+    const p = new CLIProvider({ cli: ["agy", "-p"], retries: 2, execFn: fn });
+    const out = await p.execute({ prompt: "review" });
+    expect(out.text).toContain("TS2322");
+    expect(calls()).toBe(2);
+  });
+
+  it("throws after exhausting retries when every attempt is transient", async () => {
+    const { fn, calls } = makeFlakyExec([{ stdout: "rate limit exceeded" }]);
+    const p = new CLIProvider({ cli: ["agy", "-p"], retries: 1, execFn: fn });
+    await expect(p.execute({ prompt: "x" })).rejects.toThrow(/transient/i);
+    expect(calls()).toBe(2); // 1 + 1 retry
+  });
+
+  it("does not retry a clean success", async () => {
+    const { fn, calls } = makeFlakyExec([{ stdout: "clean output" }]);
+    const p = new CLIProvider({ cli: ["agy", "-p"], retries: 2, execFn: fn });
+    const out = await p.execute({ prompt: "x" });
+    expect(out.text).toBe("clean output");
+    expect(calls()).toBe(1);
+  });
+
+  it("isTransientFailure detects known patterns, ignores normal output", () => {
+    expect(CLIProvider.isTransientFailure("timed out waiting for response")).toBe(true);
+    expect(CLIProvider.isTransientFailure("503 Service overloaded")).toBe(true);
+    expect(CLIProvider.isTransientFailure("VERDICT: PASS")).toBe(false);
+    expect(CLIProvider.isTransientFailure("")).toBe(false);
+  });
+});
