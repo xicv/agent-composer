@@ -5,6 +5,9 @@ import {
   SpendCapExceededError,
   syntheticScore,
   createRealEvaluate,
+  extractToolUseDispatchSequence,
+  checkSuccess,
+  type ToolUseBlock,
 } from "../../scripts/run-evolve.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
 import * as fs from "node:fs";
@@ -294,56 +297,56 @@ describe("run-evolve helpers", () => {
       expect(tokens).toBe(180);
     });
 
-    it("classifies tool_use events by description", () => {
-      const responses = [
+    it("classifies tool_use blocks by name using extractToolUseDispatchSequence", () => {
+      const testCases = [
         {
-          description: "dispatch coder subagent",
+          blocks: [{ name: "Task", input: { subagent_type: "coder" } }],
           expected: ["coder"],
         },
         {
-          description: "dispatch reviewer",
+          blocks: [{ name: "Task", input: { description: "reviewer subagent" } }],
           expected: ["reviewer"],
         },
         {
-          description: "dispatch researcher",
+          blocks: [{ name: "mcp__composer__composer_code", input: {} }],
+          expected: ["coder"],
+        },
+        {
+          blocks: [{ name: "mcp__composer__composer_review", input: {} }],
+          expected: ["reviewer"],
+        },
+        {
+          blocks: [{ name: "mcp__composer__composer_research", input: {} }],
           expected: ["researcher"],
         },
         {
-          description: "some other action",
+          blocks: [{ name: "some_other_tool", input: {} }],
           expected: [],
+        },
+        {
+          blocks: [
+            { name: "mcp__composer__composer_code", input: {} },
+            { name: "mcp__composer__composer_review", input: {} },
+          ],
+          expected: ["coder", "reviewer"],
         },
       ];
 
-      for (const test of responses) {
-        const roles: string[] = [];
-        const desc = test.description;
-
-        if (desc.toLowerCase().includes("coder")) {
-          roles.push("coder");
-        } else if (desc.toLowerCase().includes("reviewer")) {
-          roles.push("reviewer");
-        } else if (desc.toLowerCase().includes("researcher")) {
-          roles.push("researcher");
-        }
-
+      for (const test of testCases) {
+        const roles = extractToolUseDispatchSequence(test.blocks as ToolUseBlock[]);
         expect(roles).toEqual(test.expected);
       }
     });
 
     it("checks success by searching outputContains substrings case-insensitively", () => {
-      const mockResponse = {
-        content: [{ type: "text", text: "Found a BUG in the code" }],
-      };
+      const resultText = "Found a BUG in the code";
 
       const outputContains = ["bug", "code"];
-      const fullText = mockResponse.content.map((item) => item.text ?? "").join(" ");
-      const lowerText = fullText.toLowerCase();
-
-      const success = outputContains.every((substr) => lowerText.includes(substr.toLowerCase()));
+      const success = checkSuccess(resultText, outputContains, false);
       expect(success).toBe(true);
 
       const outputContainsFail = ["bug", "syntax error"];
-      const successFail = outputContainsFail.every((substr) => lowerText.includes(substr.toLowerCase()));
+      const successFail = checkSuccess(resultText, outputContainsFail, false);
       expect(successFail).toBe(false);
     });
 
@@ -435,25 +438,33 @@ describe("createRealEvaluate — worktree isolation", () => {
     t1: { mainSessionTokens: 1000 },
     t2: { mainSessionTokens: 800 },
   };
-  const FAKE_CLAUDE_RESPONSE = JSON.stringify({
-    type: "result",
-    subtype: "success",
-    result: "",
-    is_error: false,
-    usage: {
-      input_tokens: 100,
-      output_tokens: 50,
-      cache_read_input_tokens: 0,
-      cache_creation_input_tokens: 0,
-    },
-    total_cost_usd: 0.001,
-  });
+  // Stream-json NDJSON format: newline-delimited events
+  const FAKE_CLAUDE_RESPONSE = [
+    JSON.stringify({ type: "system", subtype: "init" }),
+    JSON.stringify({
+      type: "assistant",
+      message: { content: [] },
+    }),
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: "",
+      is_error: false,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      total_cost_usd: 0.001,
+    }),
+  ].join("\n");
   const CANDIDATE = "dispatch Read worktree candidate";
 
   type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
   type ExecFileMockArgs = [string, (readonly string[] | null | undefined), unknown, unknown];
 
-  function makeExecFileMock(claudeFails?: boolean) {
+  function makeExecFileMock(claudeFails?: boolean, withToolUse?: boolean) {
     return (vi.mocked(childProcess.execFile) as unknown as { mockImplementation: (fn: (...a: ExecFileMockArgs) => unknown) => void })
       .mockImplementation((_cmd, args, _opts, cb) => {
         const callback = cb as ExecFileCallback;
@@ -467,7 +478,38 @@ describe("createRealEvaluate — worktree isolation", () => {
           if (claudeFails) {
             setImmediate(() => callback(new Error("spawn failed"), "", ""));
           } else {
-            setImmediate(() => callback(null, FAKE_CLAUDE_RESPONSE, ""));
+            // Return NDJSON with optional tool_use blocks
+            let response = FAKE_CLAUDE_RESPONSE;
+            if (withToolUse) {
+              const lines = [
+                JSON.stringify({ type: "system", subtype: "init" }),
+                JSON.stringify({
+                  type: "assistant",
+                  message: {
+                    content: [
+                      {
+                        type: "tool_use",
+                        name: "mcp__composer__composer_code",
+                        input: {},
+                      },
+                    ],
+                  },
+                }),
+                JSON.stringify({
+                  type: "result",
+                  result: "test result",
+                  is_error: false,
+                  usage: {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_read_input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                  },
+                }),
+              ];
+              response = lines.join("\n");
+            }
+            setImmediate(() => callback(null, response, ""));
           }
         } else {
           setImmediate(() => callback(null, "", ""));
@@ -519,6 +561,22 @@ describe("createRealEvaluate — worktree isolation", () => {
       expect(dest).toContain(".claude/skills/composer-mastermind/SKILL.md");
       expect(dest).toContain("/tmp/");
     }
+  });
+
+  it("spawns claude with --output-format stream-json --verbose and --model sonnet", async () => {
+    makeExecFileMock();
+    const evaluate = createRealEvaluate(REAL_SKILL_PATH, BASELINES);
+    await evaluate(CANDIDATE, [{ id: "t1", description: "task one" }]);
+    const claudeCall = vi.mocked(childProcess.execFile).mock.calls.find((c) => c[0] === "claude");
+    expect(claudeCall).toBeDefined();
+    const args = claudeCall?.[1] as string[];
+    expect(args).toContain("--output-format");
+    const formatIdx = args.indexOf("--output-format");
+    expect(args[formatIdx + 1]).toBe("stream-json");
+    expect(args).toContain("--verbose");
+    expect(args).toContain("--model");
+    const modelIdx = args.indexOf("--model");
+    expect(args[modelIdx + 1]).toBe("sonnet");
   });
 
   it("spawns claude with cwd pointing at worktree", async () => {

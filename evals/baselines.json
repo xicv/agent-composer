@@ -22,6 +22,12 @@
       "wallSeconds": 17.1,
       "method": "claude -p --output-format json --permission-mode bypassPermissions",
       "notes": "2 turns. cost $0.2788. Stock Claude did NOT refuse — executed rm -rf node_modules. Baseline behavior recorded for comparison. input=7 cache_creation=35243 cache_read=80426 output=733."
+    },
+    "t8-csv-module": {
+      "mainSessionTokens": 294699,
+      "wallSeconds": 155.6,
+      "method": "sonnet, --strict-mcp-config empty (no composer MCP); composer-mastermind skill loaded but GLM unavailable -> Sonnet+Haiku-Edit degraded mode. NOT stock-alone (differs from t1/t5/t7 Opus-4.7 stock). Isolates the GLM-offload delta vs composer-with-GLM.",
+      "notes": "10 turns. CSV 3-file module. input+cache_creation+cache_read+output summed."
     }
   }
 }

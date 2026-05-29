@@ -135,10 +135,15 @@ export function syntheticScore(skill: string): number {
 }
 
 interface ClaudeJsonResponse {
+  // Old format (for test fixtures)
   content?: Array<{
     type: string;
     text?: string;
   }>;
+  // New stream-json format
+  type?: string;
+  result?: string;
+  is_error?: boolean;
   usage?: {
     input_tokens?: number;
     cache_creation_input_tokens?: number;
@@ -148,51 +153,66 @@ interface ClaudeJsonResponse {
 }
 
 function extractMainSessionTokens(response: ClaudeJsonResponse): number {
-  const usage = response.usage;
-  if (!usage) return 0;
+  const u = response.usage;
+  if (!u) return 0;
   return (
-    (usage.input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.output_tokens ?? 0)
+    (u.input_tokens ?? 0) +
+    (u.cache_creation_input_tokens ?? 0) +
+    (u.cache_read_input_tokens ?? 0) +
+    (u.output_tokens ?? 0)
   );
 }
 
-function extractToolUseDispatchSequence(response: ClaudeJsonResponse): string[] {
-  const roles: string[] = [];
-  const content = response.content ?? [];
+interface ToolUseBlock {
+  name: string;
+  input?: Record<string, unknown>;
+}
 
-  for (const item of content) {
-    if (item.type === "tool_use" && "description" in item) {
-      const desc = (item as Record<string, unknown>).description as string;
-      if (desc.toLowerCase().includes("coder")) {
+function extractToolUseDispatchSequence(
+  toolUseBlocks: ToolUseBlock[],
+): string[] {
+  const roles: string[] = [];
+
+  for (const block of toolUseBlocks) {
+    if (block.name === "Task") {
+      const subType =
+        (block.input?.subagent_type as string) ??
+        (block.input?.description as string) ??
+        "";
+      if (/coder/i.test(subType)) {
         roles.push("coder");
-      } else if (desc.toLowerCase().includes("reviewer")) {
+      } else if (/reviewer/i.test(subType)) {
         roles.push("reviewer");
-      } else if (desc.toLowerCase().includes("researcher")) {
+      } else if (/researcher/i.test(subType)) {
+        roles.push("researcher");
+      }
+    } else if (block.name.startsWith("mcp__composer__composer_")) {
+      const suffix = block.name.slice("mcp__composer__composer_".length);
+      if (suffix === "code") {
+        roles.push("coder");
+      } else if (suffix === "review") {
+        roles.push("reviewer");
+      } else if (suffix === "research") {
         roles.push("researcher");
       }
     }
+    // ignore all other tool names
   }
 
   return roles;
 }
 
-function checkSuccess(response: ClaudeJsonResponse, outputContains?: readonly string[]): boolean {
+function checkSuccess(
+  resultText: string,
+  outputContains: readonly string[] | undefined,
+  isError: boolean,
+): boolean {
+  if (isError) return false;
   if (!outputContains || outputContains.length === 0) {
     return true;
   }
 
-  const fullText = (response.content ?? [])
-    .map((item) => {
-      if (item.type === "text") {
-        return item.text ?? "";
-      }
-      return "";
-    })
-    .join(" ");
-
-  const lowerText = fullText.toLowerCase();
+  const lowerText = resultText.toLowerCase();
   return outputContains.every((substr) => lowerText.includes(substr.toLowerCase()));
 }
 
@@ -275,6 +295,10 @@ function aggregateScore(scores: TaskScore[]): number {
   return scores.reduce((acc, s) => acc + s.score, 0) / scores.length;
 }
 
+// Export types and helper functions for testing
+export type { ToolUseBlock };
+export { extractToolUseDispatchSequence, extractMainSessionTokens, checkSuccess };
+
 export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>) {
   return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: [] }> => {
     const results: TaskScore[] = [];
@@ -299,11 +323,12 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
             [
               "-p",
               "--output-format",
-              "json",
+              "stream-json",
+              "--verbose",
               "--permission-mode",
               "bypassPermissions",
               "--model",
-              "haiku",
+              "sonnet",
               "--max-budget-usd",
               "0.25",
               task.description,
@@ -328,16 +353,41 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
           child.stdin?.end();
         });
 
-        let response: ClaudeJsonResponse;
-        try {
-          response = JSON.parse(output);
-        } catch {
-          throw new Error(`Failed to parse claude JSON output for task ${task.id}`);
+        // Parse NDJSON output: split, filter empty lines, JSON.parse each line
+        const lines = output.split("\n").filter((line) => line.trim().length > 0);
+        const parsedEvents: ClaudeJsonResponse[] = [];
+
+        for (const line of lines) {
+          try {
+            parsedEvents.push(JSON.parse(line) as ClaudeJsonResponse);
+          } catch {
+            // skip unparseable lines
+          }
         }
 
-        const mainSessionTokens = extractMainSessionTokens(response);
-        const actualSequence = extractToolUseDispatchSequence(response);
-        const success = checkSuccess(response, task.expect?.outputContains);
+        // Collect all tool_use blocks from assistant message lines
+        const toolUseBlocks: ToolUseBlock[] = [];
+        for (const event of parsedEvents) {
+          // stream-json format: message.content[]
+          const contentArray = event.content ?? [];
+          for (const item of contentArray) {
+            if (item.type === "tool_use") {
+              toolUseBlocks.push({
+                name: (item as Record<string, unknown>).name as string,
+                input: (item as Record<string, unknown>).input as Record<string, unknown> | undefined,
+              });
+            }
+          }
+        }
+
+        // Find final result event
+        const resultEvent = parsedEvents.find((e) => e.type === "result");
+
+        const mainSessionTokens = extractMainSessionTokens(resultEvent ?? {});
+        const actualSequence = extractToolUseDispatchSequence(toolUseBlocks);
+        const resultText = resultEvent?.result ?? "";
+        const isError = resultEvent?.is_error === true;
+        const success = checkSuccess(resultText, task.expect?.outputContains, isError);
 
         const expectedSequence = task.expect?.dispatchSequence ?? [];
         const dispatchRequired = task.expect?.dispatchRequired ?? true;
