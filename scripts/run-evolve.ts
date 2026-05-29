@@ -142,14 +142,42 @@ interface ClaudeJsonResponse {
   }>;
   // New stream-json format
   type?: string;
+  subtype?: string;
   result?: string;
   is_error?: boolean;
+  message?: { content?: Array<Record<string, unknown>> };
   usage?: {
     input_tokens?: number;
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
     output_tokens?: number;
   };
+  modelUsage?: Record<
+    string,
+    {
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheCreationInputTokens?: number;
+    }
+  >;
+}
+
+// TOTAL CC tokens across ALL Claude models (orchestrator + subagents) = real
+// Max5 burn — the correct scope (orchestrator-only hides the subagent savings).
+function ccTotalFromModelUsage(
+  mu: ClaudeJsonResponse["modelUsage"],
+): number {
+  if (!mu) return 0;
+  let total = 0;
+  for (const u of Object.values(mu)) {
+    total +=
+      (u.inputTokens ?? 0) +
+      (u.outputTokens ?? 0) +
+      (u.cacheReadInputTokens ?? 0) +
+      (u.cacheCreationInputTokens ?? 0);
+  }
+  return total;
 }
 
 function extractMainSessionTokens(response: ClaudeJsonResponse): number {
@@ -368,13 +396,13 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
         // Collect all tool_use blocks from assistant message lines
         const toolUseBlocks: ToolUseBlock[] = [];
         for (const event of parsedEvents) {
-          // stream-json format: message.content[]
-          const contentArray = event.content ?? [];
-          for (const item of contentArray) {
-            if (item.type === "tool_use") {
+          // stream-json: assistant events carry message.content[]; old fixtures used content[]
+          const contentArray = event.message?.content ?? event.content ?? [];
+          for (const item of contentArray as Array<Record<string, unknown>>) {
+            if (item.type === "tool_use" && typeof item.name === "string") {
               toolUseBlocks.push({
-                name: (item as Record<string, unknown>).name as string,
-                input: (item as Record<string, unknown>).input as Record<string, unknown> | undefined,
+                name: item.name,
+                input: item.input as Record<string, unknown> | undefined,
               });
             }
           }
@@ -383,11 +411,44 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
         // Find final result event
         const resultEvent = parsedEvents.find((e) => e.type === "result");
 
-        const mainSessionTokens = extractMainSessionTokens(resultEvent ?? {});
+        const mainSessionTokens = resultEvent?.modelUsage
+          ? ccTotalFromModelUsage(resultEvent.modelUsage)
+          : extractMainSessionTokens(resultEvent ?? {});
         const actualSequence = extractToolUseDispatchSequence(toolUseBlocks);
         const resultText = resultEvent?.result ?? "";
         const isError = resultEvent?.is_error === true;
-        const success = checkSuccess(resultText, task.expect?.outputContains, isError);
+        const outputOk = checkSuccess(resultText, task.expect?.outputContains, isError);
+
+        // #4 correctness gate: run tsc on the generated code (off-CC, in worktree).
+        // node_modules is gitignored -> symlink the repo's so tsc can resolve.
+        let correctnessOk = true;
+        try {
+          fs.symlinkSync(
+            path.join(process.cwd(), "node_modules"),
+            path.join(worktreePath, "node_modules"),
+          );
+        } catch {
+          /* already linked or unavailable */
+        }
+        await new Promise<void>((resolveTsc) => {
+          execFile(
+            path.join(worktreePath, "node_modules/.bin/tsc"),
+            ["--noEmit"],
+            { cwd: worktreePath, timeout: 120_000 },
+            (tscErr) => {
+              if (tscErr) {
+                const code = (tscErr as NodeJS.ErrnoException).code;
+                if (code === "ENOENT") {
+                  // tsc unavailable — cannot check, do not penalise
+                } else {
+                  correctnessOk = false; // tsc ran and found type errors
+                }
+              }
+              resolveTsc();
+            },
+          );
+        });
+        const success = outputOk && correctnessOk;
 
         const expectedSequence = task.expect?.dispatchSequence ?? [];
         const dispatchRequired = task.expect?.dispatchRequired ?? true;

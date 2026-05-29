@@ -472,7 +472,8 @@ describe("createRealEvaluate — worktree isolation", () => {
         const isWorktreeAdd = _cmd === "git" && a[1] === "add";
         const isClaude = _cmd === "claude";
         const isWorktreeRemove = _cmd === "git" && a[1] === "remove";
-        if (isWorktreeAdd || isWorktreeRemove) {
+        const isTsc = typeof _cmd === "string" && _cmd.endsWith("tsc");
+        if (isWorktreeAdd || isWorktreeRemove || isTsc) {
           setImmediate(() => callback(null, "", ""));
         } else if (isClaude) {
           if (claudeFails) {
