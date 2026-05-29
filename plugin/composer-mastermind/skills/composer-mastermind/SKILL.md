@@ -24,6 +24,12 @@ output.
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
   context window stays isolated and only the summary returns to you.
+- **EXCEPTION — `composer_code_cli`:** call it **directly** from the main
+  session for any file create / edit / refactor. The executor (agy)
+  generates AND applies the files itself and returns only a short summary,
+  so there is no large patch to isolate and no CC tokens spent applying.
+  Do NOT wrap it in a subagent and do NOT follow it with `Edit`/`Write` —
+  the files are already on disk.
 - **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
@@ -34,13 +40,18 @@ output.
 | If the user (or your plan) needs… | Use the `Task` tool to dispatch to |
 |---|---|
 | Information, docs, web search, current API shape, "what's the X best practice" | `researcher` subagent |
-| Writing new code, refactoring, debugging, fixing a bug | `coder` subagent |
+| Writing / creating / editing / refactoring files (apply to disk) | **`composer_code_cli`** — call directly (executor applies, returns summary), then review |
+| Generating a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
 | Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
-For multi-step requests, dispatch in order: `researcher` → plan →
-`coder` → `reviewer` → integrate. Each `Task` call returns only the
-subagent's summary; you hold the plan across the chain.
+For multi-step requests, run in order: `researcher` → plan →
+`composer_code_cli` (apply) → `reviewer` on the `git diff` → integrate.
+**Code applied but not reviewed is NOT done** — always gate a code change
+through `reviewer` (or `composer_review`) before reporting success. For
+cross-model rigor, prefer a reviewer model DIFFERENT from the executor
+that wrote the code (e.g. agy writes → GLM reviews). Each call returns
+only a summary; you hold the plan across the chain.
 
 **Dispatch calibration:** dispatch costs ~1.5k cache tokens for
 skill+agent registry plus one Task roundtrip. The split saves tokens
