@@ -5,19 +5,13 @@
 //   tsx evals/scripts/measure.ts [--model sonnet] [--task t1-slugify]
 //        [--budget-usd 0.5] [--warmup-retries 1] [--composer-entry <path>]
 //
-// Reuses test-covered parsing helpers from run-evolve.ts and scoring helpers
-// from tests/eval/metric.ts so the metric matches /evolve exactly.
-//
-// Three eval-validity guards:
-//   A. CLEAN_BEFORE strips committed eval-target artifacts from the throwaway
-//      worktree so a task like "add slugify" is not a no-op.
-//   B. Composer MCP is launched DIRECT-NODE via --mcp-config + --strict-mcp-config.
-//      Default `npx -y agent-composer` is "pending" at init in headless `claude
-//      -p` (Finding-1 race) and never connects, so dispatch falls back to a
-//      non-GLM Haiku Edit. Direct-node connects at init. Creds (.env.json)
-//      resolve via the loader's global fallback (~/.config/composer/.env.json).
-//   C. Capture composer init status; for dispatch-required tasks that produced
-//      no dispatch while composer was not connected, retry up to --warmup-retries.
+// METRIC SCOPE (critical): scores on TOTAL CC TOKENS = every Claude model in
+// the run's modelUsage (orchestrator + subagents), because all of them burn
+// the user's CC/Max5 quota. GLM work is tracked SEPARATELY (off-CC, via the
+// composer GLM telemetry log) — it is the offload target, not a CC cost.
+// Counting only the orchestrator (the old `usage` envelope) hides the win:
+// when GLM generates code, the CC coder subagent only APPLIES it (cheap) vs
+// GENERATING it (expensive) — the saving lives in the subagent, not the brain.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -25,7 +19,6 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import {
   extractToolUseDispatchSequence,
-  extractMainSessionTokens,
   checkSuccess,
   type ToolUseBlock,
 } from "../../scripts/run-evolve.js";
@@ -43,13 +36,12 @@ import {
 } from "../../tests/eval/schema.js";
 import baselinesJson from "../baselines.json" with { type: "json" };
 
-// Guard A — committed artifacts to remove from the worktree before a task runs.
 const CLEAN_BEFORE: Record<string, ReadonlyArray<string>> = {
   "t1-slugify": ["src/util/slug.ts"],
 };
-
 const INSTALLED_ENTRY =
   "/opt/homebrew/lib/node_modules/agent-composer/dist/index.js";
+const GLM_LOG = "/tmp/composer-glm-usage.jsonl";
 
 interface BaselineEntry {
   mainSessionTokens: number;
@@ -117,22 +109,70 @@ function resolveComposerEntry(repoRoot: string, override?: string): string {
   if (fs.existsSync(INSTALLED_ENTRY)) return INSTALLED_ENTRY;
   const local = path.resolve(repoRoot, "dist/index.js");
   if (fs.existsSync(local)) return local;
-  throw new Error(
-    `no composer entry found (tried ${INSTALLED_ENTRY} and ${local}); pass --composer-entry`,
-  );
+  throw new Error(`no composer entry found; pass --composer-entry`);
 }
 
+interface ModelUsageEntry {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
 interface ResultEvent {
   type?: string;
   result?: string;
   is_error?: boolean;
-  usage?: {
-    input_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    output_tokens?: number;
-  };
-  modelUsage?: Record<string, unknown>;
+  modelUsage?: Record<string, ModelUsageEntry>;
+}
+
+// Total CC tokens across ALL Claude models (orchestrator + subagents) — the
+// real Max5/CC burn — plus the expensive output-only tier.
+function ccFromModelUsage(mu: Record<string, ModelUsageEntry> | undefined): {
+  ccTotal: number;
+  ccOutput: number;
+  perModel: Record<string, number>;
+} {
+  let ccTotal = 0;
+  let ccOutput = 0;
+  const perModel: Record<string, number> = {};
+  for (const [model, u] of Object.entries(mu ?? {})) {
+    const t =
+      (u.inputTokens ?? 0) +
+      (u.outputTokens ?? 0) +
+      (u.cacheReadInputTokens ?? 0) +
+      (u.cacheCreationInputTokens ?? 0);
+    ccTotal += t;
+    ccOutput += u.outputTokens ?? 0;
+    perModel[model] = t;
+  }
+  return { ccTotal, ccOutput, perModel };
+}
+
+function glmLogLineCount(): number {
+  try {
+    return fs.readFileSync(GLM_LOG, "utf8").trim().split("\n").filter((l) => l.trim()).length;
+  } catch {
+    return 0;
+  }
+}
+// Sum input+output tokens of GLM rows appended since `sinceLine` (off-CC work).
+function glmOffloadedSince(sinceLine: number): number {
+  let lines: string[];
+  try {
+    lines = fs.readFileSync(GLM_LOG, "utf8").trim().split("\n").filter((l) => l.trim());
+  } catch {
+    return 0;
+  }
+  let sum = 0;
+  for (const l of lines.slice(sinceLine)) {
+    try {
+      const o = JSON.parse(l) as { input_tokens?: number; output_tokens?: number };
+      sum += (o.input_tokens ?? 0) + (o.output_tokens ?? 0);
+    } catch {
+      /* skip */
+    }
+  }
+  return sum;
 }
 
 function parseStream(stdout: string): {
@@ -155,19 +195,14 @@ function parseStream(stdout: string): {
     if (obj.type === "system" && obj.subtype === "init") {
       const servers = Array.isArray(obj.mcp_servers) ? obj.mcp_servers : [];
       for (const s of servers as Array<Record<string, unknown>>) {
-        if (s.name === "composer" && typeof s.status === "string") {
-          composerInitStatus = s.status;
-        }
+        if (s.name === "composer" && typeof s.status === "string") composerInitStatus = s.status;
       }
     } else if (obj.type === "assistant") {
       const msg = obj.message as { content?: unknown } | undefined;
       const content = Array.isArray(msg?.content) ? msg.content : [];
       for (const item of content as Array<Record<string, unknown>>) {
         if (item.type === "tool_use" && typeof item.name === "string") {
-          blocks.push({
-            name: item.name,
-            input: item.input as Record<string, unknown> | undefined,
-          });
+          blocks.push({ name: item.name, input: item.input as Record<string, unknown> | undefined });
         }
       }
     } else if (obj.type === "result") {
@@ -179,6 +214,10 @@ function parseStream(stdout: string): {
 
 interface RunOutcome extends EvalResult {
   composerInitStatus: string;
+  ccTotal: number;
+  ccOutput: number;
+  glmOffloaded: number;
+  perModel: Record<string, number>;
 }
 
 async function runTask(
@@ -189,17 +228,13 @@ async function runTask(
 ): Promise<RunOutcome> {
   const worktreePath = `/tmp/composer-measure-${process.pid}-${task.id}`;
   const start = Date.now();
+  const glmBefore = glmLogLineCount();
   try {
     await new Promise<void>((resolve, reject) => {
-      execFile(
-        "git",
-        ["worktree", "add", worktreePath, "HEAD", "--detach"],
-        {},
-        (e) => (e ? reject(new Error(`git worktree add: ${e.message}`)) : resolve()),
+      execFile("git", ["worktree", "add", worktreePath, "HEAD", "--detach"], {}, (e) =>
+        e ? reject(new Error(`git worktree add: ${e.message}`)) : resolve(),
       );
     });
-
-    // Guard A — strip committed eval-target artifacts so the task is real work.
     for (const rel of CLEAN_BEFORE[task.id] ?? []) {
       fs.rmSync(path.join(worktreePath, rel), { force: true });
     }
@@ -208,34 +243,18 @@ async function runTask(
       const child = execFile(
         "claude",
         [
-          "-p",
-          "--output-format",
-          "stream-json",
-          "--verbose",
-          "--permission-mode",
-          "bypassPermissions",
-          "--mcp-config",
-          mcpConfigPath,
-          "--strict-mcp-config",
-          "--model",
-          model,
-          "--max-budget-usd",
-          String(budgetUsd),
+          "-p", "--output-format", "stream-json", "--verbose",
+          "--permission-mode", "bypassPermissions",
+          "--mcp-config", mcpConfigPath, "--strict-mcp-config",
+          "--model", model, "--max-budget-usd", String(budgetUsd),
           task.prompt,
         ],
-        {
-          maxBuffer: 16 * 1024 * 1024,
-          cwd: worktreePath,
-          timeout: 600_000, // substantial tasks (multi-file GLM gen) run ~5min
-          killSignal: "SIGTERM",
-        },
+        { maxBuffer: 16 * 1024 * 1024, cwd: worktreePath, timeout: 600_000, killSignal: "SIGTERM" },
         (error, so, se) => {
           if (error) {
             const tail = (se ?? "").toString().trim().split("\n").slice(-3).join(" | ");
             reject(new Error(`${error.message}${tail ? ` [stderr: ${tail}]` : ""}`));
-          } else {
-            resolve(so);
-          }
+          } else resolve(so);
         },
       );
       child.stdin?.end();
@@ -243,13 +262,10 @@ async function runTask(
 
     const { blocks, final, composerInitStatus } = parseStream(stdout);
     const durationMs = Date.now() - start;
-    const mainSessionTokens = extractMainSessionTokens({ usage: final?.usage });
+    const { ccTotal, ccOutput, perModel } = ccFromModelUsage(final?.modelUsage);
+    const glmOffloaded = glmOffloadedSince(glmBefore);
     const actualSequence = extractToolUseDispatchSequence(blocks) as SubagentRole[];
-    const success = checkSuccess(
-      final?.result ?? "",
-      task.expect.outputContains,
-      final?.is_error ?? false,
-    );
+    const success = checkSuccess(final?.result ?? "", task.expect.outputContains, final?.is_error ?? false);
     const dispatchedCorrectly = evaluateDispatch({
       actualSequence,
       expectedSequence: task.expect.dispatchSequence ?? [],
@@ -257,19 +273,19 @@ async function runTask(
       success,
     });
 
-    if (final?.modelUsage) {
-      console.log(`  [${task.id}] modelUsage: ${JSON.stringify(final.modelUsage)}`);
-    }
-
     return {
       taskId: task.id,
       success,
-      mainSessionTokens,
+      mainSessionTokens: ccTotal, // score on TOTAL CC tokens
       dispatchedCorrectly,
       durationMs,
       workerCalls: actualSequence.length,
       workerTextSample: (final?.result ?? "").slice(0, 200),
       composerInitStatus,
+      ccTotal,
+      ccOutput,
+      glmOffloaded,
+      perModel,
     };
   } finally {
     await new Promise<void>((resolve) => {
@@ -278,8 +294,6 @@ async function runTask(
   }
 }
 
-// Guard C — for a dispatch-required task that produced no dispatch while
-// composer was not connected, retry. Keep the highest-scoring attempt.
 async function runWithWarmup(
   task: EvalTask,
   args: Args,
@@ -294,16 +308,11 @@ async function runWithWarmup(
     const outcome = await runTask(task, args.model, args.budgetUsd, mcpConfigPath);
     const ts = scoreTask(outcome, { baselineMainTokens });
     if (!best || ts.score > best.ts.score) best = { outcome, ts };
-
     const raceSuspected =
-      dispatchRequired &&
-      !outcome.dispatchedCorrectly &&
-      outcome.composerInitStatus !== "connected";
+      dispatchRequired && !outcome.dispatchedCorrectly && outcome.composerInitStatus !== "connected";
     if (!raceSuspected) break;
     if (attempt < args.warmupRetries) {
-      console.log(
-        `  [${task.id}] retry ${attempt + 1}/${args.warmupRetries} — composer "${outcome.composerInitStatus}" at init, no dispatch`,
-      );
+      console.log(`  [${task.id}] retry ${attempt + 1}/${args.warmupRetries} — composer "${outcome.composerInitStatus}", no dispatch`);
     }
   }
   return { outcome: best!.outcome, ts: best!.ts, attempts };
@@ -311,43 +320,23 @@ async function runWithWarmup(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "../..");
   const tasksPath = path.resolve(here, "../tasks.jsonl");
   const allTasks: EvalTask[] = fs
-    .readFileSync(tasksPath, "utf8")
-    .trim()
-    .split("\n")
+    .readFileSync(tasksPath, "utf8").trim().split("\n")
     .map((line) => EvalTaskSchema.parse(JSON.parse(line)));
+  const tasks = args.taskFilter ? allTasks.filter((t) => t.id === args.taskFilter) : allTasks;
+  if (tasks.length === 0) throw new Error(`no task matches --task ${args.taskFilter}`);
 
-  const tasks = args.taskFilter
-    ? allTasks.filter((t) => t.id === args.taskFilter)
-    : allTasks;
-  if (tasks.length === 0) {
-    throw new Error(`no task matches --task ${args.taskFilter}`);
-  }
-
-  // Guard B — write a direct-node composer MCP config for the eval spawns.
   const composerEntry = resolveComposerEntry(repoRoot, args.composerEntry);
   const mcpConfigPath = `/tmp/composer-measure-mcp-${process.pid}.json`;
-  fs.writeFileSync(
-    mcpConfigPath,
-    JSON.stringify({
-      mcpServers: { composer: { command: "node", args: [composerEntry] } },
-    }),
-  );
+  fs.writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { composer: { command: "node", args: [composerEntry] } } }));
 
-  console.log(
-    `# Live measure — brainModel=${args.model}, perTaskCap=$${args.budgetUsd}, warmupRetries=${args.warmupRetries}`,
-  );
+  console.log(`# Live measure (TOTAL-CC scope) — brainModel=${args.model}, cap=$${args.budgetUsd}, warmupRetries=${args.warmupRetries}`);
   console.log(`# Composer MCP: node ${composerEntry} (direct, --strict-mcp-config)`);
-  console.log(
-    `# Baselines: ${baselines.claudeModel ?? "?"} / CLI ${baselines.claudeCodeVersion ?? "?"} (stock Claude alone)`,
-  );
-  console.log(
-    `# NOTE: a brainModel != baseline model is a PROXY comparison (model drift).\n`,
-  );
+  console.log(`# Score token-component on TOTAL CC tokens (all Claude models). GLM = off-CC offload, reported separately.`);
+  console.log(`# Baselines: ${baselines.claudeModel ?? "?"} / CLI ${baselines.claudeCodeVersion ?? "?"}\n`);
 
   const logPath = "/tmp/composer-measure.jsonl";
   const rows: Array<Record<string, unknown>> = [];
@@ -355,65 +344,25 @@ async function main(): Promise<void> {
 
   for (const task of tasks) {
     const baseline = baselines.baselines[task.id];
-    if (!baseline) {
-      console.error(`skip ${task.id}: no baseline entry`);
-      continue;
-    }
+    if (!baseline) { console.error(`skip ${task.id}: no baseline`); continue; }
     try {
-      const { outcome, ts, attempts } = await runWithWarmup(
-        task,
-        args,
-        baseline.mainSessionTokens,
-        mcpConfigPath,
-      );
+      const { outcome, ts, attempts } = await runWithWarmup(task, args, baseline.mainSessionTokens, mcpConfigPath);
       scores.push(ts);
-      const savingsPct = (
-        (1 - outcome.mainSessionTokens / baseline.mainSessionTokens) *
-        100
-      ).toFixed(1);
+      const savingsPct = ((1 - outcome.ccTotal / baseline.mainSessionTokens) * 100).toFixed(1);
+      console.log(`  [${task.id}] perModel: ${JSON.stringify(outcome.perModel)} | ccOut=${outcome.ccOutput} | glmOffloaded=${outcome.glmOffloaded}`);
       const row = {
-        taskId: task.id,
-        brainModel: args.model,
-        baseline: baseline.mainSessionTokens,
-        measured: outcome.mainSessionTokens,
-        savingsPct,
-        dispatchOK: outcome.dispatchedCorrectly,
-        success: outcome.success,
-        mcpInit: outcome.composerInitStatus,
-        attempts,
-        score: ts.score.toFixed(4),
+        taskId: task.id, brainModel: args.model,
+        baselineCC: baseline.mainSessionTokens, ccTotal: outcome.ccTotal,
+        ccSavedPct: savingsPct, ccOutput: outcome.ccOutput, glmOff: outcome.glmOffloaded,
+        dispatchOK: outcome.dispatchedCorrectly, success: outcome.success,
+        mcpInit: outcome.composerInitStatus, attempts, score: ts.score.toFixed(4),
       };
       rows.push(row);
-      fs.appendFileSync(
-        logPath,
-        JSON.stringify({
-          ...row,
-          baselineModel: baselines.claudeModel ?? null,
-          durationMs: outcome.durationMs,
-          workerCalls: outcome.workerCalls,
-        }) + "\n",
-      );
+      fs.appendFileSync(logPath, JSON.stringify({ ...row, durationMs: outcome.durationMs, perModel: outcome.perModel }) + "\n");
     } catch (err) {
-      console.error(
-        `task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      scores.push({
-        taskId: task.id,
-        score: 0,
-        components: { success: 0, token: 0, dispatch: 0 },
-      });
-      rows.push({
-        taskId: task.id,
-        brainModel: args.model,
-        baseline: baseline.mainSessionTokens,
-        measured: "ERR",
-        savingsPct: "-",
-        dispatchOK: false,
-        success: false,
-        mcpInit: "-",
-        attempts: 0,
-        score: "0.0000",
-      });
+      console.error(`task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      scores.push({ taskId: task.id, score: 0, components: { success: 0, token: 0, dispatch: 0 } });
+      rows.push({ taskId: task.id, brainModel: args.model, baselineCC: baseline.mainSessionTokens, ccTotal: "ERR", ccSavedPct: "-", ccOutput: "-", glmOff: "-", dispatchOK: false, success: false, mcpInit: "-", attempts: 0, score: "0.0000" });
     }
   }
 
