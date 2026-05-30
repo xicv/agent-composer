@@ -15,17 +15,18 @@ const CLEAN_BEFORE: Record<string, ReadonlyArray<string>> = {
   "t1-slugify": ["src/util/slug.ts"],
 };
 
-interface Args { model: string; budgetUsd: number; taskFilter?: string }
+interface Args { model: string; budgetUsd: number; taskFilter?: string; runs: number }
 function parseArgs(argv: ReadonlyArray<string>): Args {
-  let model = "sonnet"; let budgetUsd = 0.5; let taskFilter: string | undefined;
+  let model = "sonnet"; let budgetUsd = 0.5; let taskFilter: string | undefined; let runs = 1;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--model") { const v = argv[++i]; if (v === undefined) throw new Error("--model needs value"); model = v; }
     else if (a === "--budget-usd") { const v = argv[++i]; if (v === undefined) throw new Error("--budget-usd needs value"); budgetUsd = parseFloat(v); }
     else if (a === "--task") { const v = argv[++i]; if (v === undefined) throw new Error("--task needs value"); taskFilter = v; }
+    else if (a === "--runs") { const v = argv[++i]; if (v === undefined) throw new Error("--runs needs value"); runs = parseInt(v, 10); if (Number.isNaN(runs) || runs < 1) throw new Error(`--runs invalid: ${v}`); }
     else throw new Error(`unknown flag: ${a}`);
   }
-  return { model, budgetUsd, taskFilter };
+  return { model, budgetUsd, taskFilter, runs };
 }
 
 interface MU { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }
@@ -63,6 +64,12 @@ async function runStock(task: EvalTask, model: string, budgetUsd: number, mcpCfg
   }
 }
 
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : Math.round((s[m - 1]! + s[m]!) / 2);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -81,9 +88,19 @@ async function main(): Promise<void> {
   for (let i = 0; i < sel.length; i++) {
     const task = sel[i]!;
     try {
-      const cc = await runStock(task, args.model, args.budgetUsd, mcpCfg);
-      baselines[task.id] = { mainSessionTokens: cc, method: `stock total-CC (no composer MCP), ${args.model}` };
-      console.log(`[${i + 1}/${sel.length}] ${task.id}: ${cc}`);
+      const ccs: number[] = [];
+      for (let r = 0; r < args.runs; r++) {
+        try {
+          ccs.push(await runStock(task, args.model, args.budgetUsd, mcpCfg));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message.slice(0, 120) : String(e);
+          console.error(`  ${task.id} run ${r + 1}/${args.runs} failed (skipped): ${msg}`);
+        }
+      }
+      if (ccs.length === 0) throw new Error('all runs failed');
+      const cc = median(ccs);
+      baselines[task.id] = { mainSessionTokens: cc, method: `stock total-CC (no composer MCP), ${args.model}, median of ${args.runs}` };
+      console.log(`[${i + 1}/${sel.length}] ${task.id}: median=${cc} runs=[${ccs.join(",")}]`);
     } catch (err) {
       console.error(`[${i + 1}/${sel.length}] ${task.id} FAILED: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -16,8 +16,8 @@
       "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t8-csv-module": {
-      "mainSessionTokens": 538934,
-      "method": "stock total-CC (no composer MCP), sonnet"
+      "mainSessionTokens": 926408,
+      "method": "stock total-CC (no composer MCP), sonnet, median of 3"
     },
     "t35-refuse-droptable": {
       "mainSessionTokens": 37517,
@@ -108,20 +108,20 @@
       "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t31-review-unhandled": {
-      "mainSessionTokens": 864954,
-      "method": "stock total-CC (no composer MCP), sonnet"
+      "mainSessionTokens": 238692,
+      "method": "stock total-CC (no composer MCP), sonnet, median of 3"
     },
     "t32-review-eqeq": {
       "mainSessionTokens": 272442,
       "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t33-paginate": {
-      "mainSessionTokens": 523607,
-      "method": "stock total-CC (no composer MCP), sonnet"
+      "mainSessionTokens": 415840,
+      "method": "stock total-CC (no composer MCP), sonnet, median of 3"
     },
     "t34-configloader": {
-      "mainSessionTokens": 607684,
-      "method": "stock total-CC (no composer MCP), sonnet"
+      "mainSessionTokens": 829577,
+      "method": "stock total-CC (no composer MCP), sonnet, median of 3"
     },
     "t36-refuse-secrets": {
       "mainSessionTokens": 37699,
@@ -132,8 +132,8 @@
       "method": "stock total-CC (no composer MCP), sonnet"
     },
     "t26-lru": {
-      "mainSessionTokens": 1177872,
-      "method": "stock total-CC (no composer MCP), sonnet"
+      "mainSessionTokens": 529148,
+      "method": "stock total-CC (no composer MCP), sonnet, median of 3"
     }
   }
 }
