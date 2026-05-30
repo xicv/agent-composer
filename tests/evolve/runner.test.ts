@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { runEvolve, rotateHoldout } from "../../src/evolve/runner.js";
 import type { EvolveDeps, EvolveTask } from "../../src/evolve/runner.js";
+import { addCounterexample } from "../../src/evolve/operators.js";
 import type { IProvider } from "../../src/providers/IProvider.js";
 
 function silentProvider(reply: string = ""): IProvider {
@@ -110,9 +111,49 @@ describe("runEvolve — orchestrator integration", () => {
       reRunSamples: 3,
     });
     expect(result.winner).toBe("## Skill\n");
-    expect(evalCalls).toBe(0);
+    // parentEval runs once per round (needed for transcripts), but the no-op
+    // candidate is skipped before any CANDIDATE eval -> 3 evals (parent only),
+    // never promoted.
+    expect(evalCalls).toBe(3);
     expect(result.history.length).toBe(3);
     expect(result.history.every((h) => h.promoted === false && /no-op/.test(h.reason))).toBe(true);
+  });
+
+  it("routes a failing transcript into add_counterexample -> candidate mutates + promotes", async () => {
+    const failTask = "t-fail";
+    const deps: EvolveDeps = {
+      reflectionProvider: silentProvider("x"),
+      researchProvider: silentProvider("snap"),
+      // parent (no counterexample) fails; candidate (with one) passes
+      evaluate: async (skill) => {
+        const hasCex = skill.includes("Counterexamples");
+        return {
+          score: hasCex ? 0.95 : 0.1,
+          transcripts: [
+            { task: failTask, outcome: hasCex ? "pass" : "fail: wrong output" },
+          ],
+        };
+      },
+      reReplicate: async () => true,
+      skillDomain: "test",
+      pickOperator: () => ({
+        name: "add_counterexample",
+        keepRate: 1,
+        apply: async (sk: string, c) => addCounterexample(sk, c),
+      }),
+      postflightOverride: async () => ({ accept: true, reason: "test" }),
+    };
+    const result = await runEvolve({
+      parent: "## Skill\n",
+      tasks,
+      deps,
+      maxRounds: 1,
+      reRunSamples: 3,
+    });
+    // the failing-task note was routed into ctx.counterexample and applied
+    expect(result.winner).toContain("Counterexamples");
+    expect(result.winner).toContain(failTask);
+    expect(result.history.some((h) => h.promoted)).toBe(true);
   });
 
   it("budget exhaustion stops the loop early", async () => {

@@ -144,12 +144,34 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
   for (let round = 0; round < maxRounds; round++) {
     const split = rotateHoldout(tasks, round);
     const op = (deps.pickOperator ?? pickOperator)(round);
+    // Evaluate the parent FIRST so the mutation operators + reflection learn
+    // from THIS round's failing-task transcripts (the GEPA reflective loop).
+    const parentEval = await deps.evaluate(winner, split.trainVal);
+    try {
+      charge();
+    } catch (e) {
+      if (e instanceof EvolveBudgetExceededError) {
+        stoppedAt = "budget";
+        break;
+      }
+      throw e;
+    }
+    const failing = parentEval.transcripts.filter((t) =>
+      t.outcome.startsWith("fail"),
+    );
+    const failNote =
+      failing.length > 0
+        ? `Task "${failing[0]!.task}" failed — ${failing[0]!.outcome}`
+        : undefined;
     const ctx: OperatorContext = {
       currentEcosystem: preflight.text,
+      counterexample: failNote,
+      constraint: failNote,
+      negativeExample: failNote,
       reflect: (text) =>
         reflectViaProvider(deps.reflectionProvider, {
           parent: text,
-          taskTranscripts: [],
+          taskTranscripts: failing,
           currentEcosystem: preflight.text,
         }),
     };
@@ -184,11 +206,6 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
       continue;
     }
 
-    const parentEval = await deps.evaluate(winner, split.trainVal);
-    try { charge(); } catch (e) {
-      if (e instanceof EvolveBudgetExceededError) { stoppedAt = "budget"; break; }
-      throw e;
-    }
     const candEval = await deps.evaluate(candidate, split.trainVal);
     try { charge(); } catch (e) {
       if (e instanceof EvolveBudgetExceededError) { stoppedAt = "budget"; break; }

@@ -15,6 +15,7 @@ import { loadConfig } from "../src/config/loader.js";
 import { type ComposerConfig } from "../src/config/schema.js";
 import { applyEnvJson, getEnv } from "../src/config/env.js";
 import { EvalTaskSchema, type EvalTaskExpect } from "../tests/eval/schema.js";
+import type { TaskTranscript } from "../src/evolve/reflection.js";
 
 interface ExtendedEvolveTask {
   id: string;
@@ -344,8 +345,9 @@ export type { ToolUseBlock };
 export { extractToolUseDispatchSequence, extractMainSessionTokens, checkSuccess };
 
 export function createRealEvaluate(_skillPath: string, baselines: Record<string, { mainSessionTokens: number }>, replicas = 1) {
-  return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: [] }> => {
+  return async (skill: string, tasks: ReadonlyArray<ExtendedEvolveTask>): Promise<{ score: number; transcripts: TaskTranscript[] }> => {
     const results: TaskScore[] = [];
+    const transcripts: TaskTranscript[] = [];
     // Eval orchestrator must use the real Claude endpoint (Max5), NOT the z.ai
     // base URL applyEnvJson set for the GLM reflection provider. Strip it so
     // `claude -p --model sonnet` does not 400 on the GLM endpoint. The composer
@@ -357,6 +359,7 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
 
     for (const task of tasks) {
       const replicaScores: number[] = [];
+      let taskOutcome = "fail: no successful run";
       for (let replica = 0; replica < replicas; replica++) {
       const worktreePath = `/tmp/composer-eval-${process.pid}-${task.id}-r${replica}`;
       try {
@@ -475,6 +478,9 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
           );
         });
         const success = outputOk && correctnessOk;
+        taskOutcome = success
+          ? "pass"
+          : `fail: ${(resultText || "no output").trim().slice(0, 180)}`;
 
         const expectedSequence = task.expect?.dispatchSequence ?? [];
         const dispatchRequired = task.expect?.dispatchRequired ?? true;
@@ -501,6 +507,7 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
         replicaScores.push(taskScore.score);
       } catch (err) {
         console.error(`run-evolve: task ${task.id} failed (replica ${replica}): ${err instanceof Error ? err.message : String(err)}`);
+        taskOutcome = `fail: ${(err instanceof Error ? err.message : String(err)).slice(0, 180)}`;
         replicaScores.push(0);
       } finally {
         await new Promise<void>((resolve) => {
@@ -511,9 +518,10 @@ export function createRealEvaluate(_skillPath: string, baselines: Record<string,
       // N-replica averaging: mean per-task score reduces single-run variance.
       const meanScore = replicaScores.reduce((a, b) => a + b, 0) / Math.max(1, replicaScores.length);
       results.push({ taskId: task.id, score: meanScore });
+      transcripts.push({ task: task.id, outcome: taskOutcome });
     }
 
-    return { score: aggregateScore(results), transcripts: [] };
+    return { score: aggregateScore(results), transcripts };
   };
 }
 
