@@ -84,6 +84,37 @@ describe("runEvolve — orchestrator integration", () => {
     expect(result.history.length).toBeGreaterThan(0);
   });
 
+  it("skips a no-op mutation (operator returned skill unchanged) — no variance-driven promotion", async () => {
+    let evalCalls = 0;
+    const deps: EvolveDeps = {
+      reflectionProvider: silentProvider("x"),
+      researchProvider: silentProvider("snap"),
+      // would return wildly different scores if ever called — but the no-op
+      // candidate must be skipped BEFORE any eval, so this must run 0 times.
+      evaluate: async () => {
+        evalCalls++;
+        return { score: evalCalls % 2 === 0 ? 0.9 : 0.1, transcripts: [] };
+      },
+      reReplicate: async () => true,
+      skillDomain: "test",
+      // force an operator that returns the skill unchanged (the real
+      // add_counterexample no-ops when ctx has no counterexample)
+      pickOperator: () => ({ name: "noop", keepRate: 1, apply: async (sk: string) => sk }),
+      postflightOverride: async () => ({ accept: true, reason: "test" }),
+    };
+    const result = await runEvolve({
+      parent: "## Skill\n",
+      tasks,
+      deps,
+      maxRounds: 3,
+      reRunSamples: 3,
+    });
+    expect(result.winner).toBe("## Skill\n");
+    expect(evalCalls).toBe(0);
+    expect(result.history.length).toBe(3);
+    expect(result.history.every((h) => h.promoted === false && /no-op/.test(h.reason))).toBe(true);
+  });
+
   it("budget exhaustion stops the loop early", async () => {
     const deps: EvolveDeps = {
       reflectionProvider: silentProvider("## X"),

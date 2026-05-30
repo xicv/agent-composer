@@ -166,6 +166,24 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
       throw e;
     }
 
+    // No-op guard: data-driven operators (add_counterexample / add_constraint /
+    // add_negative_example) return the skill unchanged when the runner has not
+    // supplied their input (counterexample / constraint / negativeExample —
+    // which requires failing-task transcripts). Evaluating an identical
+    // candidate only yields variance-driven false promotions, so skip it and
+    // surface the starved operator in history.
+    if (candidate === winner) {
+      history.push({
+        round,
+        operator: op.name,
+        parentScore: 0,
+        candidateScore: 0,
+        promoted: false,
+        reason: "no-op mutation (operator input data missing — needs failing-task transcript) — skipped",
+      });
+      continue;
+    }
+
     const parentEval = await deps.evaluate(winner, split.trainVal);
     try { charge(); } catch (e) {
       if (e instanceof EvolveBudgetExceededError) { stoppedAt = "budget"; break; }
