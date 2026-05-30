@@ -1,6 +1,6 @@
 {
   "name": "agent-composer",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "type": "module",
   "description": "Multi-agent orchestration MCP server. Claude orchestrates; GLM and agy do the work.",
   "bin": {
