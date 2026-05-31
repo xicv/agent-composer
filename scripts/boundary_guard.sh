@@ -80,7 +80,7 @@ case "$TOOL" in
   Bash|Edit|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "DENY: dispatch Task(subagent_type=\"coder\"); no Bash workaround."
+    emit_deny "DENY (main thread): route Edit/Write via Task(subagent_type=\"coder\"). Coder applies the patch and may use Bash to verify."
     ;;
 esac
 
