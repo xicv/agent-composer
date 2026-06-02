@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Composer dispatch_guard — PreToolUse hook for the Task tool.
+# Composer dispatch_guard — PreToolUse hook for Task/Agent dispatches.
 #
 # Two-phase design:
 #   Phase 1 (observability): log every Task dispatch to
@@ -24,6 +24,14 @@ emit_deny() {
   jq -nc --arg r "$reason" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"deny", permissionDecisionReason:$r}}' 2>/dev/null \
     || printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
+  exit 0
+}
+
+emit_hint() {
+  local hint="$1"
+  jq -nc --arg h "$hint" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$h}}' 2>/dev/null \
+    || printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$hint"
   exit 0
 }
 
@@ -69,6 +77,36 @@ jq -nc \
   '{ts:$ts, subagent_type:$subagent, description:$description, prompt_len:$prompt_len, has_file_ref:$has_file_ref, has_destructive:$has_destructive}' \
   >> "$LOG" 2>/dev/null || true
 
+# Phase 2 hint: best-effort deterministic sizing/routing signal. This is
+# advisory only; failure to compute or parse it must not affect permission.
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+if [[ -z "$PROJECT_DIR" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  PROJECT_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
+fi
+
+HINT_JSON=""
+if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/dist/cli/dispatch-hint.js" ]]; then
+  HINT_JSON="$(printf '%s' "$INPUT" | node "$PROJECT_DIR/dist/cli/dispatch-hint.js" 2>/dev/null || true)"
+fi
+if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v npx >/dev/null 2>&1; then
+  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && npx --no-install tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
+fi
+if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v node >/dev/null 2>&1; then
+  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && node --import tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
+fi
+
+HINT_VALID="false"
+if [[ -n "$HINT_JSON" ]] && jq -e . >/dev/null 2>&1 <<<"$HINT_JSON"; then
+  HINT_VALID="true"
+  jq -nc \
+    --arg ts "$TS" \
+    --arg subagent "$SUBAGENT" \
+    --argjson hint "$HINT_JSON" \
+    '{ts:$ts, kind:"hint", subagent_type:$subagent, hint:$hint}' \
+    >> "$LOG" 2>/dev/null || true
+fi
+
 # Phase 2 deny rule: destructive-op refusals must NOT be dispatched.
 # SKILL frontmatter already declares this inline; hook is the backstop
 # when the orchestrator's pre-load reasoning drifts. Narrow scope: only
@@ -82,5 +120,21 @@ case "$SUBAGENT" in
     ;;
 esac
 
-# Default: allow.
+# Default: allow, with a compact deterministic hint for the orchestrator.
+if [[ "$HINT_VALID" == "true" ]]; then
+  HINT_TEXT="$(
+    jq -er '
+      select((.tier | type == "string") and
+        (.promptSize | type == "string") and
+        (.reasoning | type == "string") and
+        (.recommendDispatch | type == "boolean"))
+      | "dispatch-hint: tier=\(.tier) size=\(.promptSize) reasoning=\(.reasoning) recommendDispatch=\(.recommendDispatch)"
+    ' <<<"$HINT_JSON" 2>/dev/null || true
+  )"
+  if [[ -n "$HINT_TEXT" ]]; then
+    emit_hint "$HINT_TEXT"
+  fi
+fi
+
+# Fail-open if the optional TS hint path is unavailable.
 exit 0

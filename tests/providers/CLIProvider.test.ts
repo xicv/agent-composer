@@ -8,9 +8,15 @@ import {
 import { TapeProvider, loadTape } from "../util/recorder.js";
 
 describe("CLIProvider (execFile injected)", () => {
-  function makeExec(stdout: string, stderr = "", capture: Array<{ bin: string; args: ReadonlyArray<string> }> = []): ExecFileFn {
-    return (async (bin: string, args: ReadonlyArray<string>) => {
-      capture.push({ bin, args: [...args] });
+  type CapturedExec = {
+    bin: string;
+    args: ReadonlyArray<string>;
+    options: { cwd?: string; maxBuffer?: number; timeout?: number };
+  };
+
+  function makeExec(stdout: string, stderr = "", capture: CapturedExec[] = []): ExecFileFn {
+    return (async (bin: string, args: ReadonlyArray<string>, options) => {
+      capture.push({ bin, args: [...args], options });
       return { stdout, stderr };
     }) as ExecFileFn;
   }
@@ -36,13 +42,52 @@ describe("CLIProvider (execFile injected)", () => {
     );
   });
 
+  it("refuses explicitly unsandboxed codex exec configs by default", () => {
+    const previous = process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"];
+    delete process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"];
+    try {
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["codex", "exec", "--sandbox", "danger-full-access"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: [
+              "codex",
+              "--search",
+              "--ask-for-approval",
+              "never",
+              "exec",
+              "--sandbox",
+              "danger-full-access",
+            ],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
+    } finally {
+      if (previous === undefined) delete process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"];
+      else process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"] = previous;
+    }
+  });
+
   it("healthCheck returns true (does not spawn)", async () => {
     const p = new CLIProvider({ cli: ["agy"], execFn: makeExec("") });
     await expect(p.healthCheck()).resolves.toBe(true);
   });
 
   it("execute() spawns the binary with static args + prompt as LAST arg", async () => {
-    const captured: Array<{ bin: string; args: ReadonlyArray<string> }> = [];
+    const captured: CapturedExec[] = [];
     const p = new CLIProvider({
       cli: ["agy", "--dangerously-skip-permissions", "-p"],
       execFn: makeExec("agy reply text", "", captured),
@@ -58,8 +103,77 @@ describe("CLIProvider (execFile injected)", () => {
     expect(out.text).toBe("agy reply text");
   });
 
+  it("supports codex exec as a CLI executor preset", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    const out = await p.execute({ prompt: "edit src/server.ts" });
+    expect(p.modelLabel).toBe("codex-cli");
+    expect(captured[0]?.bin).toBe("codex");
+    expect(captured[0]?.args.slice(0, 3)).toEqual(["exec", "--sandbox", "workspace-write"]);
+    expect(captured[0]?.args).toContain("--output-last-message");
+    expect(captured[0]?.args[captured[0]!.args.length - 1]).toBe("edit src/server.ts");
+    expect(out.text).toBe("codex summary");
+  });
+
+  it("supports codex global flags before exec for web-search research", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: [
+        "codex",
+        "--search",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--sandbox",
+        "read-only",
+      ],
+      model: "codex-search",
+      execFn: makeExec("research summary", "", captured),
+    });
+    const out = await p.execute({ prompt: "research current MCP patterns" });
+    expect(p.modelLabel).toBe("codex-search");
+    expect(captured[0]?.args.slice(0, 6)).toEqual([
+      "--search",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+    expect(captured[0]?.args).toContain("--output-last-message");
+    expect(captured[0]?.args[captured[0]!.args.length - 1]).toBe("research current MCP patterns");
+    expect(out.text).toBe("research summary");
+  });
+
+  it("returns codex --output-last-message content when the file is written", async () => {
+    const captured: CapturedExec[] = [];
+    const exec: ExecFileFn = async (bin, args, options) => {
+      captured.push({ bin, args: [...args], options });
+      const flagIndex = args.indexOf("--output-last-message");
+      const outputPath = args[flagIndex + 1];
+      if (typeof outputPath === "string") {
+        fs.writeFileSync(outputPath, "final codex summary", "utf8");
+      }
+      return { stdout: "{\"type\":\"event\"}\n", stderr: "" };
+    };
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      execFn: exec,
+    });
+    const out = await p.execute({ prompt: "change files" });
+    expect(out.text).toBe("final codex summary");
+    const flagIndex = captured[0]?.args.indexOf("--output-last-message") ?? -1;
+    const outputPath = captured[0]?.args[flagIndex + 1];
+    expect(typeof outputPath).toBe("string");
+    expect(fs.existsSync(path.dirname(outputPath as string))).toBe(false);
+  });
+
   it("execute() prepends context block when provided", async () => {
-    const captured: Array<{ bin: string; args: ReadonlyArray<string> }> = [];
+    const captured: CapturedExec[] = [];
     const p = new CLIProvider({
       cli: ["agy", "-p"],
       execFn: makeExec("ok", "", captured),
@@ -72,6 +186,17 @@ describe("CLIProvider (execFile injected)", () => {
     expect(lastArg).toContain("T");
   });
 
+  it("execute() passes cwd from input to the spawned process", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      cwd: "/default-root",
+      execFn: makeExec("ok", "", captured),
+    });
+    await p.execute({ prompt: "x", cwd: "/project-root" });
+    expect(captured[0]?.options.cwd).toBe("/project-root");
+  });
+
   it("execute() returns stdout verbatim as text", async () => {
     const p = new CLIProvider({
       cli: ["agy", "-p"],
@@ -79,6 +204,36 @@ describe("CLIProvider (execFile injected)", () => {
     });
     const out = await p.execute({ prompt: "x" });
     expect(out.text).toBe("line1\nline2\n");
+  });
+
+  it("execute() leaves small stdout unchanged when result bounding is enabled by default", async () => {
+    const stdout = "small worker result\n";
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      execFn: makeExec(stdout),
+    });
+
+    const out = await p.execute({ prompt: "x" });
+
+    expect(out.text).toBe(stdout);
+  });
+
+  it("execute() bounds stdout larger than maxResultChars before returning text", async () => {
+    const stdout = Array.from(
+      { length: 400 },
+      (_, index) => `worker-line-${index} ${"x".repeat(60)}`,
+    ).join("\n");
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      execFn: makeExec(stdout),
+      maxResultChars: 16_000,
+    });
+
+    const out = await p.execute({ prompt: "x" });
+
+    expect(out.text.length).toBeLessThan(stdout.length);
+    expect(out.text).toContain("… [elided ");
+    expect(out.text).toMatch(/elided \d+ chars \/ \d+ lines/);
   });
 
   it("execute() passes timeout + maxBuffer to execFile options", async () => {
