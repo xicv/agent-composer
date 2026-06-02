@@ -1,0 +1,1 @@
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__composer__composer_handoff_create", "tool_input": { "objective": "share context" }, "session_id": "test-session" }

@@ -35,11 +35,21 @@ export const RoleConfigSchema = z
     cli: z.array(z.string().min(1)).min(1).optional(),
     maxTokens: z.number().int().min(1).optional(),
     thinking: ThinkingConfigSchema.optional(),
+    timeoutMs: z.number().int().min(1).optional(),
+    maxBuffer: z.number().int().min(1).optional(),
+    retries: z.number().int().min(0).optional(),
+    maxResultChars: z.number().int().min(0).optional(),
   })
   .strict();
 export type RoleConfig = z.infer<typeof RoleConfigSchema>;
 
-export const RoleNameSchema = z.enum(["researcher", "coder", "reviewer", "coderCli"]);
+export const RoleNameSchema = z.enum([
+  "researcher",
+  "coder",
+  "reviewer",
+  "reviewerClaude",
+  "coderCli",
+]);
 export type RoleName = z.infer<typeof RoleNameSchema>;
 
 export const SpendAuthorizationModeSchema = z.enum([
@@ -65,6 +75,7 @@ export const ComposerConfigSchema = z
         researcher: RoleConfigSchema,
         coder: RoleConfigSchema,
         reviewer: RoleConfigSchema,
+        reviewerClaude: RoleConfigSchema.optional(),
         coderCli: RoleConfigSchema.optional(),
       })
       .strict(),

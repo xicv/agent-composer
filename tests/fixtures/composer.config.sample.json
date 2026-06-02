@@ -12,7 +12,33 @@
     },
     "reviewer": {
       "provider": "cli",
-      "cli": ["agy", "--dangerously-skip-permissions", "-p"]
+      "cli": ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
+      "timeoutMs": 120000,
+      "retries": 0
+    },
+    "reviewerClaude": {
+      "provider": "cli",
+      "model": "claude-opus-review",
+      "cli": [
+        "claude",
+        "-p",
+        "--model",
+        "opus",
+        "--permission-mode",
+        "bypassPermissions",
+        "--setting-sources",
+        "project",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--max-budget-usd",
+        "0.50",
+        "--tools",
+        "Read,Glob,Grep,Bash",
+        "--allowedTools",
+        "Read,Glob,Grep,Bash(npx tsc --noEmit),Bash(npm test),Bash(npm run test:*),Bash(npx vitest*)"
+      ],
+      "timeoutMs": 300000,
+      "retries": 0
     }
   }
 }

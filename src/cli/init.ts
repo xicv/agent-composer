@@ -41,9 +41,48 @@ export interface InitResult {
 
 const DEFAULT_COMPOSER_CONFIG = {
   roles: {
-    researcher: { provider: "cli", cli: ["agy", "--dangerously-skip-permissions", "-p"] },
+    researcher: {
+      provider: "cli",
+      cli: ["codex", "--search", "--ask-for-approval", "never", "exec", "--ephemeral", "--sandbox", "read-only"],
+      timeoutMs: 180000,
+      retries: 0,
+    },
     coder: { provider: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", apiKeyEnv: "ANTHROPIC_AUTH_TOKEN" },
-    reviewer: { provider: "cli", cli: ["agy", "--dangerously-skip-permissions", "-p"] },
+    coderCli: {
+      provider: "cli",
+      cli: ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""],
+      retries: 0,
+    },
+    reviewer: {
+      provider: "cli",
+      cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
+      timeoutMs: 120000,
+      retries: 0,
+    },
+    reviewerClaude: {
+      provider: "cli",
+      model: "claude-opus-review",
+      cli: [
+        "claude",
+        "-p",
+        "--model",
+        "opus",
+        "--permission-mode",
+        "bypassPermissions",
+        "--setting-sources",
+        "project",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--max-budget-usd",
+        "0.50",
+        "--tools",
+        "Read,Glob,Grep,Bash",
+        "--allowedTools",
+        "Read,Glob,Grep,Bash(npx tsc --noEmit),Bash(npm test),Bash(npm run test:*),Bash(npx vitest*)",
+      ],
+      timeoutMs: 300000,
+      retries: 0,
+    },
   },
   spendAuthorization: {
     mode: "interactive",

@@ -93,6 +93,10 @@ export class ProviderRegistry {
         return new CLIProvider({
           cli: roleConfig.cli,
           model: roleConfig.model,
+          timeoutMs: roleConfig.timeoutMs,
+          maxBuffer: roleConfig.maxBuffer,
+          retries: roleConfig.retries,
+          maxResultChars: roleConfig.maxResultChars,
         });
       }
 

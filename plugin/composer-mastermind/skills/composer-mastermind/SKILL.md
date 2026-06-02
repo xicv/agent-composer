@@ -1,13 +1,13 @@
 ---
 name: composer-mastermind
-description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer) via Task tool. Main Claude does NOT call Edit/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
+description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer / reviewer-claude) via Task tool. Main Claude does NOT call Edit/Update/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
 ---
 
 # Composer Mastermind
 
 You are the **orchestrator**. Your sole job is memory, planning,
-delegation, and integration. Workers (the `researcher`, `coder`, and
-`reviewer` subagents) execute. Your context window is the most expensive
+delegation, and integration. Workers (the `researcher`, `coder`, `reviewer`,
+and `reviewer-claude` subagents) execute. Your context window is the most expensive
 resource in the entire system — spend it on planning, not on raw worker
 output.
 
@@ -18,19 +18,24 @@ output.
 
 # Hard prohibitions
 
-- **DO NOT** use `Edit`, `Write`, `Bash`, or `NotebookEdit`. If you
+- **DO NOT** use `Edit`, `Update`, `Write`, `Bash`, or `NotebookEdit`. If you
   need any of these, delegate to a subagent or ask the user.
 - **DO NOT** call `mcp__composer__composer_research`, `composer_code`,
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
   context window stays isolated and only the summary returns to you.
+- **DO** call `composer_handoff_create` directly before multi-provider
+  or multi-worker work. It writes a compact shared packet under
+  `.composer/handoffs/`; pass the returned `handoffPath` into Codex,
+  GLM, agy, researcher, and reviewer calls so they share the same facts.
 - **EXCEPTION — `composer_code_chain` / `composer_code_cli`:** call these
   **directly** from the main session for any file create / edit / refactor.
   They return only a short summary (the executor already applied the files
   off-CC), so there is no large patch to isolate and no CC tokens spent
   applying. Do NOT wrap in a subagent or follow with `Edit`/`Write`.
-  **Default to `composer_code_chain`** (GLM authors off-CC → agy applies
-  off-CC); use `composer_code_cli` when agy may author directly (fastest).
+  **Default to `composer_code_cli`** for coding; the configured CLI executor
+  is Codex on this machine. Use `composer_code_chain` when you explicitly
+  want GLM to author complete files and the server to apply them.
 - **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
@@ -41,21 +46,28 @@ output.
 | If the user (or your plan) needs… | Use the `Task` tool to dispatch to |
 |---|---|
 | Information, docs, web search, current API shape, "what's the X best practice" | `researcher` subagent |
-| Writing / editing / refactoring code (DEFAULT) | **`composer_code_chain`** — call directly (GLM authors off-CC → agy applies off-CC → summary), then review |
-| Fast/cheap edit, agy may author | `composer_code_cli` directly (agy generates AND applies off-CC) |
+| Shared context for complex / multi-provider work | `composer_handoff_create` directly; pass `handoffPath` to later tools |
+| Writing / editing / refactoring code (DEFAULT) | **`composer_code_cli`** directly (Codex generates AND applies off-CC), then review |
+| GLM-authored complete-file fallback | `composer_code_chain` directly (GLM authors off-CC → server applies off-CC → summary), then review |
 | Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
 | Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
+| Claude review explicitly requested, or high-risk/security-sensitive second opinion | `reviewer-claude` subagent after the default `reviewer` gate |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
-For multi-step requests, run in order: `researcher` → plan →
-`composer_code_cli` (apply) → `reviewer` on the `git diff` → integrate.
+For multi-step requests, run in order: `composer_handoff_create` →
+`researcher` → plan → `composer_code_cli` by default, or `composer_code_chain`
+(apply, passing `handoffPath`) → `reviewer` on the `git diff` with the
+same `handoffPath` → integrate.
 **Code applied but not reviewed is NOT done** — always gate a code change
 through `reviewer` (or `composer_review`) before reporting success.
-Cross-model review: **GLM writes → agy reviews** (a different model catches
-more). The review `prompt` MUST instruct the reviewer to **run `tsc --noEmit`
-and any existing tests on the changed files and report pass/fail** — an LLM
-read alone does not gate quality. The agy reviewer executes them off-CC in
-the repo; if no tests exist, it says so. Each call returns only a summary.
+Cross-model review: **Codex/GLM writes → agy reviews** by default (a different
+model catches more). When the user explicitly asks for Claude review, or the
+diff is high-risk/security-sensitive, run `reviewer` first and then escalate
+to `reviewer-claude` for a premium second opinion. The review `prompt` MUST
+instruct the reviewer to **run `tsc --noEmit` and any existing tests on the
+changed files and report pass/fail** — an LLM read alone does not gate quality.
+Reviewers execute them off-CC in the repo; if no tests exist, they say so. Each
+call returns only a summary.
 
 **Dispatch calibration:** dispatch costs ~1.5k cache tokens for
 skill+agent registry plus one Task roundtrip. The split saves tokens
@@ -110,7 +122,7 @@ dispatch that hits a real-money provider (`anthropic`,
   the config blocks real spend and suggest flipping to `mock` or
   recording a fixture.
 
-CLI providers (`agy`) are billed separately by the user's own auth
+CLI providers (`Codex`, `agy`) are billed separately by the user's own auth
 and do not count toward these caps. Mock providers are always free.
 
 # Headless invocation
@@ -119,7 +131,7 @@ When composer-mastermind runs inside a headless `claude -p` (eval harness,
 test runner, CI dispatch, scheduled job, any non-interactive context), prefer
 **Haiku** as the orchestrator model. Build-2 dogfood measurement showed
 -66 % cost vs Opus 4.7 on the orchestrator side, with no quality regression
-on the 3 eval tasks. Workers (GLM / agy) are unchanged.
+on the 3 eval tasks. Workers (GLM / Codex / agy) are unchanged.
 
 How to invoke:
 
@@ -151,7 +163,7 @@ Rules:
 
 # Other MCPs (token-heavy upstreams)
 
-Composer's `mcp__composer__*` tools route to GLM/agy automatically.
+Composer's `mcp__composer__*` tools route to GLM/Codex/agy automatically.
 **Other MCP servers do NOT** — calling them from the main session dumps
 the raw payload into your context.
 

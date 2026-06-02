@@ -34,3 +34,4 @@ coverage/
 
 # Composer brief scratchpad (per-run worker dispatch maps)
 .composer/briefs/
+.composer/handoffs/

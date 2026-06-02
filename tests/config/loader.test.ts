@@ -84,6 +84,109 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
     ).not.toThrow();
   });
 
+  it("accepts optional coderCli role for Codex CLI execution", () => {
+    const cfg = parseConfig({
+      roles: {
+        ...VALID.roles,
+        coderCli: {
+          provider: "cli",
+          cli: ["codex", "exec", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""],
+        },
+      },
+    });
+    expect(cfg.roles.coderCli?.cli?.[0]).toBe("codex");
+  });
+
+  it("accepts optional reviewerClaude role for premium Claude review", () => {
+    const cfg = parseConfig({
+      roles: {
+        ...VALID.roles,
+        reviewerClaude: {
+          provider: "cli",
+          model: "claude-opus-review",
+          cli: [
+            "claude",
+            "-p",
+            "--model",
+            "opus",
+            "--permission-mode",
+            "bypassPermissions",
+          ],
+        },
+      },
+    });
+    expect(cfg.roles.reviewerClaude?.cli?.[0]).toBe("claude");
+    expect(cfg.roles.reviewerClaude?.model).toBe("claude-opus-review");
+  });
+
+  it("accepts optional CLI execution controls on role config", () => {
+    const cfg = parseConfig({
+      roles: {
+        ...VALID.roles,
+        reviewer: {
+          provider: "cli",
+          cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
+          timeoutMs: 120000,
+          maxBuffer: 1048576,
+          retries: 0,
+          maxResultChars: 8000,
+        },
+      },
+    });
+    expect(cfg.roles.reviewer.timeoutMs).toBe(120000);
+    expect(cfg.roles.reviewer.maxBuffer).toBe(1048576);
+    expect(cfg.roles.reviewer.retries).toBe(0);
+    expect(cfg.roles.reviewer.maxResultChars).toBe(8000);
+  });
+
+  it("rejects invalid CLI execution controls", () => {
+    expect(() =>
+      parseConfig({
+        roles: {
+          ...VALID.roles,
+          reviewer: {
+            provider: "cli",
+            cli: ["agy", "-p"],
+            timeoutMs: 0,
+          },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseConfig({
+        roles: {
+          ...VALID.roles,
+          reviewer: {
+            provider: "cli",
+            cli: ["agy", "-p"],
+            retries: -1,
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts Codex web-search CLI for the researcher role", () => {
+    const cfg = parseConfig({
+      roles: {
+        ...VALID.roles,
+        researcher: {
+          provider: "cli",
+          cli: ["codex", "--search", "--ask-for-approval", "never", "exec", "--sandbox", "read-only"],
+        },
+      },
+    });
+    expect(cfg.roles.researcher.cli).toEqual([
+      "codex",
+      "--search",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+  });
+
   it("returns a typed config preserving values", () => {
     const cfg = parseConfig(VALID);
     expect(cfg.roles.coder.provider).toBe("anthropic");

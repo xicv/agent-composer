@@ -17,10 +17,10 @@ Verified against the latest Anthropic docs (see [Skills explained](https://claud
 
 | Layer | Purpose | Where Composer uses it |
 |-------|---------|----------------------|
-| **MCP server** | Connectivity to external systems / providers | `composer-mcp` exposes `composer_research`, `composer_code`, `composer_review` tools — each routed to a pluggable provider |
+| **MCP server** | Connectivity to external systems / providers | `composer-mcp` exposes `composer_research`, `composer_code`, `composer_review`, and optional escalation tools — each routed to a pluggable provider |
 | **Skills** (`.claude/skills/<name>/SKILL.md`) | Reusable expertise, progressive disclosure, unbounded knowledge | `composer-mastermind` (router behavior), `composer-evolve` (self-improvement) |
 | **Agent** (main session) | Orchestration, memory, planning, thinking | Claude (Opus 4.7) — never writes code itself |
-| **Subagents** (`.claude/agents/<role>.md`) | Isolated context window, scoped tool access, separate model selection | `researcher.md`, `coder.md`, `reviewer.md` — each gets one MCP tool and nothing else |
+| **Subagents** (`.claude/agents/<role>.md`) | Isolated context window, scoped tool access, separate model selection | `researcher.md`, `coder.md`, `reviewer.md`, `reviewer-claude.md` — each gets one MCP tool and nothing else |
 | **Hooks** (`settings.json → hooks`) | Deterministic enforcement (cannot hallucinate) | `PreToolUse` blocks Bash/Edit/Write at the system level |
 | **Agent Teams** | Experimental peer-to-peer Claude sessions | *Not used in v2* — token-expensive, session-resumption issues |
 | **Channels** | MCP push messages into session | *Not used in v2* — research preview only as of April 2026 |
@@ -37,6 +37,7 @@ The role names are deliberately provider-agnostic — Composer never says "Gemin
 | Researcher | `composer_research` | `agy` CLI (Gemini 3.1, `--print` mode) | Kimi / Perplexity / web-search MCP |
 | Coder | `composer_code` | GLM 5.1 via Anthropic-compatible endpoint (decided 2026-05-23) | Kimi / MiniMax / DeepSeek (via OpenAI-compat adapter) |
 | Reviewer | `composer_review` | `agy` CLI (Gemini 3.1, `--print` mode) | GLM / Kimi / Claude-Haiku |
+| Premium reviewer | `composer_review_claude` | bounded `claude -p` CLI | Opus / Sonnet |
 | Final integrator | Claude (main session) | Anthropic Opus 4.7 | — |
 
 **Confirmed assumptions (user, 2026-05-23):**
@@ -157,6 +158,7 @@ Per MCP SDK 1.29 (verified via context7 query and [MCP tool annotations blog](ht
 | `composer_research` | **true** — returns research notes | false | false (web state may shift) | **true** — talks to web/agy |
 | `composer_code` | false — returns *new code text*, but does not modify repo state | false | false | false — LLM-only, no I/O |
 | `composer_review` | **true** — returns findings only | false | **true** — same diff → same findings | false |
+| `composer_review_claude` | **true** — returns findings only | false | **true** — same diff → same findings | false |
 
 These annotations are append-only per ADR 0001 — they may be tightened in a Wave-2 amendment if real-traffic data shows mis-routing.
 
@@ -171,7 +173,8 @@ Per Anthropic's May-2026 skill-engineering guidance ([9 Tips for Building Claude
   "roles": {
     "researcher": { "provider": "cli",       "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
     "coder":      { "provider": "anthropic", "baseUrl": "https://open.bigmodel.cn/api/anthropic", "apiKeyEnv": "GLM_API_KEY", "model": "glm-4.6" },
-    "reviewer":   { "provider": "cli",       "cli": ["agy", "--dangerously-skip-permissions", "-p"] }
+    "reviewer":   { "provider": "cli",       "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
+    "reviewerClaude": { "provider": "cli",   "cli": ["claude", "-p", "--model", "opus", "--max-budget-usd", "0.50"] }
   }
 }
 ```
@@ -221,7 +224,8 @@ Anthropic's `deny` permission has had two known enforcement bugs in 2026 ([#1884
       "Task",
       "mcp__composer__composer_research",
       "mcp__composer__composer_code",
-      "mcp__composer__composer_review"
+      "mcp__composer__composer_review",
+      "mcp__composer__composer_review_claude"
     ]
   },
   "hooks": {
@@ -307,7 +311,8 @@ composer/
 │   ├── agents/
 │   │   ├── researcher.md
 │   │   ├── coder.md
-│   │   └── reviewer.md
+│   │   ├── reviewer.md
+│   │   └── reviewer-claude.md
 │   └── skills/
 │       ├── composer-mastermind/
 │       │   └── SKILL.md

@@ -30,11 +30,12 @@ export interface InstallPluginOptions {
 
 /**
  * Copy plugin assets into Claude Code user-level directories so they
- * auto-load in every project. Idempotent — never overwrites a present file.
+ * auto-load in every project. User-authored SKILL.md stays preserved; packaged
+ * agents, commands, and hooks refresh so stale installs pick up tool allowlists.
  *
  * Layout written:
  *   <claudeHome>/skills/composer-mastermind/SKILL.md
- *   <claudeHome>/agents/{coder,researcher,reviewer}.md
+ *   <claudeHome>/agents/{coder,researcher,reviewer,reviewer-claude}.md
  *   <claudeHome>/commands/evolve.md
  *   <claudeHome>/hooks/composer-boundary_guard.sh
  *   <claudeHome>/settings.json — patched with PreToolUse entry
@@ -58,6 +59,7 @@ export function installPluginAssets(opts: InstallPluginOptions): InitStep[] {
         join(agentsSrc, file),
         join(claudeHome, "agents", file),
         `agent ${file}`,
+        { overwrite: true },
       ));
     }
   }
@@ -70,6 +72,7 @@ export function installPluginAssets(opts: InstallPluginOptions): InitStep[] {
         join(commandsSrc, file),
         join(claudeHome, "commands", file),
         `command /${file.replace(/\.md$/, "")}`,
+        { overwrite: true },
       ));
     }
   }
@@ -77,20 +80,29 @@ export function installPluginAssets(opts: InstallPluginOptions): InitStep[] {
   // Boundary hook — copy script + register in settings.json
   const hookSrc = join(src, "hooks", "boundary_guard.sh");
   const hookDest = join(claudeHome, "hooks", "composer-boundary_guard.sh");
-  steps.push(copyOne(hookSrc, hookDest, "composer boundary_guard.sh hook script", { exec: true }));
+  steps.push(copyOne(hookSrc, hookDest, "composer boundary_guard.sh hook script", { exec: true, overwrite: true }));
   steps.push(wireBoundaryHook(claudeHome, hookDest));
 
   return steps;
 }
 
-interface CopyOpts { exec?: boolean }
+interface CopyOpts { exec?: boolean; overwrite?: boolean }
 
 function copyOne(srcPath: string, destPath: string, label: string, opts: CopyOpts = {}): InitStep {
   if (!existsSync(srcPath)) {
     return { name: label, status: "skipped", reason: `source missing: ${srcPath}` };
   }
   if (existsSync(destPath)) {
-    return { name: label, status: "skipped", path: destPath, reason: "already present; not overwritten" };
+    if (!opts.overwrite) {
+      return { name: label, status: "skipped", path: destPath, reason: "already present; not overwritten" };
+    }
+    if (readFileSync(destPath, "utf8") === readFileSync(srcPath, "utf8")) {
+      if (opts.exec) chmodSync(destPath, 0o755);
+      return { name: label, status: "skipped", path: destPath, reason: "already current" };
+    }
+    copyFileSync(srcPath, destPath);
+    if (opts.exec) chmodSync(destPath, 0o755);
+    return { name: label, status: "updated", path: destPath, reason: "refreshed from packaged plugin asset" };
   }
   mkdirSync(dirname(destPath), { recursive: true });
   copyFileSync(srcPath, destPath);
@@ -104,7 +116,7 @@ function copyOne(srcPath: string, destPath: string, label: string, opts: CopyOpt
  */
 function wireBoundaryHook(claudeHome: string, hookScriptPath: string): InitStep {
   const settingsPath = join(claudeHome, "settings.json");
-  const matcher = "Bash|Edit|Write|NotebookEdit";
+  const matcher = "Bash|Edit|Update|Write|NotebookEdit";
   const entry = {
     matcher,
     hooks: [{ type: "command", command: hookScriptPath }],

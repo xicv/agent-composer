@@ -167,6 +167,20 @@ describe("ProviderRegistry — cli (Day 2)", () => {
     expect(p.id).toBe("cli");
   });
 
+  it("forwards CLI execution controls to CLIProvider", async () => {
+    const reg = new ProviderRegistry(
+      makeConfig({
+        provider: "cli",
+        cli: ["node", "-e", "process.stdout.write('x'.repeat(200))"],
+        timeoutMs: 1000,
+        retries: 0,
+        maxResultChars: 40,
+      }),
+    );
+    const out = await reg.getProviderForRole("coder").execute({ prompt: "ignored" });
+    expect(out.text).toContain("[elided ");
+  });
+
   it("throws ProviderConfigError when cli argv missing (schema reject would also catch)", () => {
     // Bypass schema validation to test the registry's own guard.
     const cfg = {

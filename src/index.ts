@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Wave 1 F2.1 — runtime entry point. Loads composer.config.json, wires the
-// registry, and serves the three composer_* MCP tools over stdio.
+// registry, and serves the composer_* MCP tools over stdio.
 //
 // Override config path via COMPOSER_CONFIG env var.
 // Errors at startup → exit 1 (fail-fast, instead of crashing mid-request).

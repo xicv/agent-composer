@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse hook: auto-lint after Edit/Write/NotebookEdit. Fail-soft.
+# PostToolUse hook: auto-lint after Edit/Update/Write/NotebookEdit. Fail-soft.
 set -u
 command -v jq >/dev/null 2>&1 || exit 0
 INPUT="$(cat || true)"

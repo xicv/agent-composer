@@ -13,7 +13,7 @@ emit_deny() {
   local reason="$1"
   # Claude Code v2.1.150+ requires the decision wrapped in hookSpecificOutput.
   # Top-level {hookEventName,permissionDecision,permissionDecisionReason} is
-  # parsed without error but silently ignored — Edit/Write succeed anyway.
+  # parsed without error but silently ignored — Edit/Update/Write succeed anyway.
   jq -nc --arg r "$reason" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"deny", permissionDecisionReason:$r}}' 2>/dev/null \
     || printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
@@ -62,25 +62,28 @@ if [[ -e "$STOP_FILE" ]] && [[ "$TOOL" == mcp__composer__* ]]; then
 fi
 
 # 3.7. Subagent context bypass.
-#   Composer's coder subagent must Edit/Write to apply GLM's patch output.
+#   Composer's coder subagent must Edit/Update/Write to apply GLM's patch output.
 #   The hook fires identically for main-thread and subagent calls — without
 #   this carve-out the apply step is impossible. Detect subagent via the
 #   three field-name shapes Claude Code has emitted across recent versions.
 TRANSCRIPT="$(jq -r '.transcript_path // empty' <<<"$INPUT" 2>/dev/null)"
 AGENT_ID="$(jq -r '.agent_id // .agentId // empty' <<<"$INPUT" 2>/dev/null)"
+AGENT_NAME="$(jq -r '.agent_name // .agentName // .subagent_type // .subagentType // .tool_input.subagent_type // empty' <<<"$INPUT" 2>/dev/null)"
 SIDECHAIN="$(jq -r '.is_sidechain // .isSidechain // empty' <<<"$INPUT" 2>/dev/null)"
 if [[ "$TRANSCRIPT" == */subagents/* ]] \
+   || [[ "$TRANSCRIPT" == */agents/* ]] \
    || [[ -n "$AGENT_ID" ]] \
+   || [[ -n "$AGENT_NAME" ]] \
    || [[ "$SIDECHAIN" == "true" ]]; then
   exit 0
 fi
 
 # 4. Block list — native dangerous tools + MCP-prefixed variants.
 case "$TOOL" in
-  Bash|Edit|Write|NotebookEdit \
+  Bash|Edit|Update|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "DENY (main thread): route Edit/Write via Task(subagent_type=\"coder\"). Coder applies the patch and may use Bash to verify."
+    emit_deny "DENY (main thread): route Edit/Update/Write via Task(subagent_type=\"coder\"). Coder applies the patch and may use Bash to verify."
     ;;
 esac
 

@@ -28,6 +28,35 @@ describe("composer init --global", () => {
     runGlobalInit({ globalDir, claudeHome, verbose: false });
     const cfg = JSON.parse(readFileSync(join(globalDir, "composer.config.json"), "utf8"));
     expect(cfg.roles.coder.provider).toBe("anthropic");
+    expect(cfg.roles.researcher.provider).toBe("cli");
+    expect(cfg.roles.researcher.cli).toEqual([
+      "codex",
+      "--search",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--ephemeral",
+      "--sandbox",
+      "read-only",
+    ]);
+    expect(cfg.roles.researcher.timeoutMs).toBe(180000);
+    expect(cfg.roles.researcher.retries).toBe(0);
+    expect(cfg.roles.coderCli.provider).toBe("cli");
+    expect(cfg.roles.coderCli.cli).toEqual([
+      "codex",
+      "exec",
+      "--ephemeral",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      "approval_policy=\"never\"",
+    ]);
+    expect(cfg.roles.coderCli.retries).toBe(0);
+    expect(cfg.roles.reviewerClaude).toBeDefined();
+    expect(cfg.roles.reviewerClaude?.provider).toBe("cli");
+    expect(cfg.roles.reviewerClaude?.cli).toContain("claude");
+    expect(cfg.roles.reviewerClaude?.timeoutMs).toBe(300000);
+    expect(cfg.roles.reviewerClaude?.retries).toBe(0);
     expect(cfg.spendAuthorization.mode).toBe("interactive");
   });
 

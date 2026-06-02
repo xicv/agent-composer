@@ -1,18 +1,22 @@
 # composer-mastermind
 
-> Multi-agent orchestrator plugin for Claude Code. Claude orchestrates; GLM and agy execute.
+> Multi-agent orchestrator plugin for Claude Code. Claude orchestrates; GLM, Codex, and agy execute. Claude Code CLI is available as a premium review escalation.
 
 ## What it is
 
-Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code, runs bash, or edits files directly — instead it dispatches work through three subagents wired to the `agent-composer` MCP server:
+Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code, runs bash, or edits files directly — instead it dispatches work through subagents and direct apply tools wired to the `agent-composer` MCP server:
 
 | Subagent | Tool | Role |
 |---|---|---|
-| `coder` | `mcp__composer__composer_code` | Writes code via GLM (Anthropic-compatible endpoint) |
-| `researcher` | `mcp__composer__composer_research` | Docs lookup + research via `agy` CLI (Gemini) |
+| direct | `mcp__composer__composer_handoff_create` | Writes shared context packets for multi-provider work |
+| direct | `mcp__composer__composer_code_cli` | Default coding path; CLI executor applies code directly from the MCP server root; configure as Codex or agy |
+| direct | `mcp__composer__composer_code_chain` | GLM-authored fallback; server applies complete-file blocks deterministically |
+| `coder` | `mcp__composer__composer_code` | Patch-only legacy path via GLM (Anthropic-compatible endpoint) |
+| `researcher` | `mcp__composer__composer_research` | Docs lookup + web research via Codex CLI search in read-only mode |
 | `reviewer` | `mcp__composer__composer_review` | Code review via `agy` CLI |
+| `reviewer-claude` | `mcp__composer__composer_review_claude` | Premium Claude second-opinion review for explicit/risky cases |
 
-The orchestrator's allowed-tool surface is enforced by `boundary_guard.sh` — `Edit`, `Write`, `Bash`, `NotebookEdit` are denied; only the three composer MCP tools plus `Read`/`Glob` pass.
+The orchestrator's allowed-tool surface is enforced by `boundary_guard.sh` — `Edit`, `Update`, `Write`, `Bash`, `NotebookEdit` are denied; composer MCP tools plus `Read`/`Glob` pass.
 
 ## What's inside
 
@@ -23,7 +27,8 @@ composer-mastermind/
 ├── agents/                                  # haiku-wrapped subagent defs
 │   ├── coder.md
 │   ├── researcher.md
-│   └── reviewer.md
+│   ├── reviewer.md
+│   └── reviewer-claude.md
 ├── commands/
 │   └── evolve.md                            # /evolve slash command (GEPA loop)
 └── hooks/

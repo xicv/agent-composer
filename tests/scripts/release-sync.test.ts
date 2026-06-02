@@ -27,12 +27,13 @@ describe("release-sync script", () => {
     }
   });
 
-  it("--check lists all 7 sync pairs", () => {
+  it("--check lists all 8 sync pairs", () => {
     const r = runScript(["--check"]);
     expect(r.stdout).toContain(".claude/skills/composer-mastermind/SKILL.md");
     expect(r.stdout).toContain(".claude/agents/coder.md");
     expect(r.stdout).toContain(".claude/agents/researcher.md");
     expect(r.stdout).toContain(".claude/agents/reviewer.md");
+    expect(r.stdout).toContain(".claude/agents/reviewer-claude.md");
     expect(r.stdout).toContain(".claude/commands/evolve.md");
     expect(r.stdout).toContain("scripts/boundary_guard.sh");
     expect(r.stdout).toContain("scripts/learn.sh");

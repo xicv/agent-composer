@@ -29,6 +29,13 @@ describe("installPluginAssets", () => {
     expect(existsSync(join(claudeHome, "agents/coder.md"))).toBe(true);
     expect(existsSync(join(claudeHome, "agents/researcher.md"))).toBe(true);
     expect(existsSync(join(claudeHome, "agents/reviewer.md"))).toBe(true);
+    expect(existsSync(join(claudeHome, "agents/reviewer-claude.md"))).toBe(true);
+  });
+
+  it("installs coder with Bash and Update tools", () => {
+    installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
+    const coder = readFileSync(join(claudeHome, "agents/coder.md"), "utf8");
+    expect(coder).toContain("tools: mcp__composer__composer_code, Read, Glob, Edit, Update, Write, Bash");
   });
 
   it("copies slash commands to ~/.claude/commands/", () => {
@@ -78,6 +85,20 @@ describe("installPluginAssets", () => {
     writeFileSync(join(claudeHome, "skills/composer-mastermind/SKILL.md"), "USER-EDITED-SKILL", "utf8");
     installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
     expect(readFileSync(join(claudeHome, "skills/composer-mastermind/SKILL.md"), "utf8")).toBe("USER-EDITED-SKILL");
+  });
+
+  it("refreshes stale packaged agent files on reinstall", () => {
+    mkdirSync(join(claudeHome, "agents"), { recursive: true });
+    writeFileSync(
+      join(claudeHome, "agents/coder.md"),
+      "---\nname: coder\ntools: mcp__composer__composer_code, Read, Glob\n---\n",
+      "utf8",
+    );
+    const steps = installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
+    expect(steps.find((s) => s.name === "agent coder.md")?.status).toBe("updated");
+    const coder = readFileSync(join(claudeHome, "agents/coder.md"), "utf8");
+    expect(coder).toContain("Bash");
+    expect(coder).toContain("Update");
   });
 
   it("does NOT duplicate the boundary hook entry on second run", () => {

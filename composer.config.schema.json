@@ -27,6 +27,9 @@
         "reviewer": {
           "$ref": "#/$defs/roleConfig"
         },
+        "reviewerClaude": {
+          "$ref": "#/$defs/roleConfig"
+        },
         "coderCli": {
           "$ref": "#/$defs/roleConfig"
         }
@@ -105,7 +108,7 @@
             "type": "string"
           },
           "minItems": 1,
-          "description": "argv array for CLIProvider, e.g. [\"agy\",\"--dangerously-skip-permissions\",\"-p\"]. Passed to child_process.execFile — NEVER shell-interpolated."
+          "description": "argv array for CLIProvider, e.g. [\"codex\",\"exec\",\"--sandbox\",\"workspace-write\",\"-c\",\"approval_policy=\\\"never\\\"\"] for coding, [\"codex\",\"--search\",\"--ask-for-approval\",\"never\",\"exec\",\"--sandbox\",\"read-only\"] for research, or [\"agy\",\"--dangerously-skip-permissions\",\"-p\"] for agy. The prompt is appended as the final argv item — NEVER shell-interpolated. For `codex exec`, including Codex global flags before `exec`, CLIProvider auto-captures the final message with --output-last-message unless the flag is already present."
         },
         "maxTokens": {
           "type": "integer",
@@ -134,6 +137,26 @@
               "description": "Max tokens the model may spend on internal reasoning. Required when type=enabled. Anthropic SDK minimum is 1024."
             }
           }
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "CLIProvider wall-clock timeout in milliseconds for one attempt. Ignored by non-CLI providers."
+        },
+        "maxBuffer": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "CLIProvider stdout/stderr buffer cap in characters before the child process is terminated. Ignored by non-CLI providers."
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CLIProvider retry count after transient failures. Use 0 for fail-fast dispatches such as reviewers."
+        },
+        "maxResultChars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "CLIProvider result projection cap in characters. Set 0 to disable result projection. Ignored by non-CLI providers."
         }
       }
     }

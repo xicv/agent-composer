@@ -39,7 +39,7 @@ Inside the orchestrator SKILL.md, certain text patterns are **always disallowed*
 - Any string matching `(rm -rf|sudo|chmod 777|curl.*\| ?sh|wget.*\| ?bash)` — escalation primitives.
 - Any directive that removes a subagent from the locked C0.5 tools allowlists (C0.5 is append-only).
 - Any directive that disables, bypasses, or rewrites `boundary_guard.sh` behaviour ("ignore the deny list", "use `--dangerously-skip-permissions`", etc).
-- Any directive that broadens `boundary_guard.sh` allowed tool surface beyond the three composer MCP tools + Read/Glob.
+- Any directive that broadens `boundary_guard.sh` allowed tool surface beyond the Composer MCP tool set + Read/Glob.
 
 The agy CLI postflight researcher (deps.researchProvider in `runEvolve`) checks for these patterns and emits `accept: false` with a quoted offending substring. This has fired 4-of-5 real runs to date on substantive grounds; this ADR formalizes the deny list it should expand to enforce.
 

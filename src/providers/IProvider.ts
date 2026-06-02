@@ -7,6 +7,7 @@ export interface IProviderExecuteInput {
   prompt: string;
   context?: string;
   maxTokens?: number;
+  cwd?: string;
 }
 
 export interface IProviderExecuteOutput {

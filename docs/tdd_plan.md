@@ -105,6 +105,7 @@ export interface IProvider {
 - `composer_research(prompt: string, context?: string)`
 - `composer_code(prompt: string, context?: string)`
 - `composer_review(prompt: string, diff: string)`
+- `composer_review_claude(prompt: string, diff: string)` (optional premium escalation)
 
 Subagent `tools:` allowlists and `boundary_guard.sh` regex both reference these.
 
@@ -135,7 +136,7 @@ No row reads or writes another row's code. Each can be assigned to a separate wo
 | F1.4 | `ProviderFactory` + config loader | C0.1 + C0.2 | Pure unit, no I/O | 45min |
 | F1.5 | `scripts/boundary_guard.sh` | C0.4 | Hook fixtures (~12) | 1h |
 | F1.6 | `.claude/settings.json` template | C0.3 + C0.4 | JSON-schema-validated by CI | 15min |
-| F1.7 | `researcher.md` / `coder.md` / `reviewer.md` | C0.3 + C0.5 | Lint frontmatter + manual smoke | 30min |
+| F1.7 | `researcher.md` / `coder.md` / `reviewer.md` / `reviewer-claude.md` | C0.3 + C0.5 | Lint frontmatter + manual smoke | 30min |
 | F1.8 | `.claude/skills/composer-mastermind/SKILL.md` (negative-style) | C0.3 | Read-aloud check + Tier-3 eval later | 30min |
 | F1.9 | `tests/hooks/*` fixtures + harness | C0.4 | Self-testing | 30min |
 | F1.10 | `ccusage` install + npm script | none | `npm run usage` outputs report | 10min |

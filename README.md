@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/badge/npm-agent--composer-blue)](#install) [![tests](https://img.shields.io/badge/vitest-376%20passing-brightgreen)](#contributing) [![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 
-> **Claude orchestrates. GLM and `agy` execute — and *apply* — off your Claude quota.** Composer is an MCP server + Claude Code plugin that lets the most-capable model hold the plan while cheaper models generate *and write* the code in their own context. Because the executors apply files themselves (instead of returning text the main session must re-ingest), composer measurably cuts Claude Max5 token burn (~64–71% on substantial multi-file tasks) while keeping the orchestrator's context lean and every change reviewable.
+> **Claude orchestrates. GLM, Codex, and `agy` execute — and *apply* — off your Claude quota.** Composer is an MCP server + Claude Code plugin that lets the most-capable model hold the plan while worker models generate *and write* the code in their own context. Because the executors apply files themselves (instead of returning text the main session must re-ingest), composer keeps the orchestrator's context lean and every change reviewable.
 
 ## What it is
 
@@ -10,24 +10,26 @@ Two coordinated artefacts:
 
 | Artefact | Purpose |
 |---|---|
-| **`agent-composer`** (this npm package) | MCP server exposing `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`. Wraps GLM (via Anthropic-compatible endpoint) and the `agy` CLI (Gemini). |
-| **`composer-mastermind`** (Claude Code plugin) | Orchestrator skill + three haiku-wrapped subagents (`coder`, `researcher`, `reviewer`) + `boundary_guard` PreToolUse hook + `/evolve` slash command. |
+| **`agent-composer`** (this npm package) | MCP server exposing `composer_handoff_create`, `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`, and `composer_review_claude`. Wraps GLM (via Anthropic-compatible endpoint) and CLI executors such as Codex, `agy`, or bounded `claude -p`. |
+| **`composer-mastermind`** (Claude Code plugin) | Orchestrator skill + haiku-wrapped subagents (`coder`, `researcher`, `reviewer`, optional `reviewer-claude`) + `boundary_guard` PreToolUse hook + `/evolve` slash command. |
 
-Combined, they turn the main Claude session into a coordinator that never writes code, runs bash, or edits files directly. Work is dispatched through the three MCP tools; the boundary hook fails closed if a denied tool is requested.
+Combined, they turn the main Claude session into a coordinator that never writes code, runs bash, or edits files directly. Work is dispatched through Composer MCP tools; the boundary hook fails closed if a denied tool is requested.
 
 ## Tools
 
-Five MCP tools, all routing work off the main Claude session:
+Seven MCP tools, all routing work off the main Claude session:
 
 | Tool | Executor | What it does |
 |---|---|---|
-| `composer_code_chain` | GLM authors → server applies | **Default for substantial edits.** GLM writes the complete files off-CC (`FILE: <path>` + fenced blocks); the MCP server applies them deterministically off-CC; the orchestrator only relays a summary. ~71% fewer total-CC tokens on multi-file tasks. |
-| `composer_code_cli` | agy (Gemini CLI) | agy generates **and applies** the files itself off-CC, returns a summary. ~64% fewer total-CC tokens. |
+| `composer_handoff_create` | Composer server | Writes a compact shared packet under `.composer/handoffs/`; pass `handoffPath` to Codex, GLM, agy, researcher, and reviewer calls so every worker shares the same objective and constraints. |
+| `composer_code_cli` | Codex CLI or agy | **Default for substantial edits.** The configured CLI executor generates **and applies** the files itself off-CC, from the MCP server root, then returns a summary. Use Codex here for complex coding work. |
+| `composer_code_chain` | GLM authors → server applies | GLM fallback. GLM writes the complete files off-CC (`FILE: <path>` + fenced blocks); the MCP server applies them deterministically off-CC; the orchestrator only relays a summary. ~71% fewer total-CC tokens on multi-file tasks. |
 | `composer_code` | GLM | Returns a patch as text; the caller integrates it (patch-only / legacy). |
-| `composer_research` | agy | Research, docs, web lookup → structured summary. |
+| `composer_research` | Codex CLI search | Research, docs, web lookup → structured summary. Runs Codex with live web search and a read-only sandbox. |
 | `composer_review` | agy | Reviews the diff **and runs `tsc`/tests off-CC**; use a reviewer model different from the author for cross-model rigor (e.g. GLM writes → agy reviews). |
+| `composer_review_claude` | Claude Code CLI | Premium second-opinion review for high-risk/security-sensitive diffs or explicit user requests. Default config runs bounded `claude -p --model opus` with read/test tools only and `--max-budget-usd 0.50`. |
 
-**Why "off-CC" matters:** GLM (z.ai) and agy (Gemini) run on *separate* quotas. Generating and *applying* code in their own context — not returning text the main Claude session must re-ingest — is what actually preserves your Max5 quota. The eval harness scores on **total-CC tokens** (every Claude model in a run = real Max5 burn), with a correctness gate (tsc/tests) and N-run averaging.
+**Why "off-CC" matters:** GLM (z.ai), Codex, and agy run on *separate* quotas. Generating and *applying* code in their own context — not returning text the main Claude session must re-ingest — is what actually preserves your Max5 quota. The eval harness scores on **total-CC tokens** (every Claude model in a run = real Max5 burn), with a correctness gate (tsc/tests) and N-run averaging.
 
 ## Install
 
@@ -73,10 +75,17 @@ Two files at the consumer-project root, both gitignored or partially gitignored:
 ```json
 {
   "roles": {
-    "researcher": { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
+    "researcher": { "provider": "cli", "cli": ["codex", "--search", "--ask-for-approval", "never", "exec", "--ephemeral", "--sandbox", "read-only"], "timeoutMs": 180000, "retries": 0 },
     "coder":      { "provider": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic", "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN" },
-    "coderCli":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] },
-    "reviewer":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "-p"] }
+    "coderCli":   { "provider": "cli", "cli": ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""], "retries": 0 },
+    "reviewer":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"], "timeoutMs": 120000, "retries": 0 },
+    "reviewerClaude": {
+      "provider": "cli",
+      "model": "claude-opus-review",
+      "cli": ["claude", "-p", "--model", "opus", "--permission-mode", "bypassPermissions", "--setting-sources", "project", "--disable-slash-commands", "--no-session-persistence", "--max-budget-usd", "0.50", "--tools", "Read,Glob,Grep,Bash", "--allowedTools", "Read,Glob,Grep,Bash(npx tsc --noEmit),Bash(npm test),Bash(npm run test:*),Bash(npx vitest*)"],
+      "timeoutMs": 300000,
+      "retries": 0
+    }
   },
   "spendAuthorization": {
     "mode": "interactive",
@@ -85,6 +94,19 @@ Two files at the consumer-project root, both gitignored or partially gitignored:
   }
 }
 ```
+
+For the old agy-only coding path, set `coderCli.cli` back to
+`["agy", "--dangerously-skip-permissions", "-p"]`. For the old agy-only
+research path, set `researcher.cli` to the same agy argv. The provider
+contract does not change; Codex is piloted as the existing CLI executor.
+When `coderCli` or `researcher` use `codex ... exec`, Composer captures
+Codex's final message with `--output-last-message` automatically, so the
+main session receives a short outcome instead of raw event output. Composer
+refuses explicit `codex exec --sandbox danger-full-access` and
+`--dangerously-bypass-approvals-and-sandbox` configs by default; set
+`COMPOSER_ALLOW_DANGEROUS_CODEX=1` only inside an external sandbox.
+Keep `reviewer` as the default gate. Use `reviewerClaude` only when the user
+asks for Claude review or when a risky diff needs an expensive second opinion.
 
 **`.env.json`** (NEVER commit) — credentials only:
 
@@ -106,14 +128,39 @@ User asks for code work
    ↓
 Composer-mastermind SKILL.md picks a subagent
    ↓
-Task → coder.md / researcher.md / reviewer.md
+Task → coder.md / researcher.md / reviewer.md / reviewer-claude.md
    ↓
 Subagent calls mcp__composer__composer_code (etc.)
    ↓
-MCP server routes to GLM (anthropic) or agy CLI (cli) per composer.config.json
+MCP server routes to GLM (anthropic) or Codex/agy CLI (cli) per composer.config.json
    ↓
 Subagent returns summary; orchestrator integrates
 ```
+
+## Measuring trust
+
+Composer's route-confidence harness compares the same tasks across direct
+Claude, GLM-chain, and Codex-CLI routes. The `cc-only` route removes the
+worktree-local `.claude/` directory before running so the project plugin does
+not bias the baseline. It writes JSONL records with
+success, route adherence, typecheck status, changed-file count, wall time,
+and **total Claude Code tokens** from `modelUsage`.
+
+```bash
+# Build first so the MCP server entry exists.
+npm run build
+
+# Run one representative task across all routes, three replicas each.
+npm run eval:routes -- --task t8-csv-module --runs 3
+
+# Re-summarize an existing JSONL file without spending more tokens.
+npm run eval:routes -- --summary-only --input /tmp/composer-route-runs.jsonl
+```
+
+The headline checks are: `composer-codex-cli` should preserve or improve
+success/typecheck rate while lowering median total-CC tokens versus
+`cc-only`; `routeHonored` must stay high enough to prove the orchestrator is
+actually using the route under test.
 
 Five resilience layers ensure unattended `/evolve` runs cannot damage the host repo:
 
@@ -128,7 +175,7 @@ Five resilience layers ensure unattended `/evolve` runs cannot damage the host r
 - **`agent-composer` publish surface**: `dist/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). 34 KB tarball.
 - **Spend caps**: per-call (`maxUsdPerCall`, default $0.50) and per-session (`maxUsdPerSession`, default $5.00) enforced in the runner before any external API call. Configurable per project.
 - **Self-evolution scope** (see ADR 0003): five layers gate any SKILL.md mutation — diff-path regex, text deny-list, stat gate, human-promote-only, audit trail. Auto-promote is permanently off the table.
-- **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Write`/`Bash`/`NotebookEdit` in the orchestrator session. The C0.5 subagent tools allowlist is append-only.
+- **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Update`/`Write`/`Bash`/`NotebookEdit` in the orchestrator session. The C0.5 subagent tools allowlist is append-only.
 
 ## Contributing
 

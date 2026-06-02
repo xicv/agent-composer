@@ -69,7 +69,8 @@ composer-mastermind/
 ├── agents/
 │   ├── researcher.md         # haiku-wrapped, C0.5 locked tools
 │   ├── coder.md
-│   └── reviewer.md
+│   ├── reviewer.md
+│   └── reviewer-claude.md
 ├── commands/
 │   └── evolve.md             # /evolve slash command
 └── hooks/
@@ -83,7 +84,7 @@ composer-mastermind/
 {
   "name": "composer-mastermind",
   "version": "0.1.0",
-  "description": "Multi-agent orchestrator: Claude as brain, GLM/agy as executors",
+  "description": "Multi-agent orchestrator: Claude as brain, GLM/Codex/agy as executors",
   "claudeCodeVersion": ">=4.6",
   "requires": ["@composer-mcp/server"],
   "settings": {
