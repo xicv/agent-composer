@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Multi-agent orchestration MCP server. Claude orchestrates; GLM, Codex, and agy do the work.",
   "bin": {
-    "agent-composer": "./dist/index.js"
+    "agent-composer": "dist/index.js"
   },
   "files": [
     "dist/",
