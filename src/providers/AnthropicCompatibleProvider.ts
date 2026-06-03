@@ -122,7 +122,9 @@ export class AnthropicCompatibleProvider implements IProvider {
     };
     if (this.thinking) params.thinking = this.thinking;
 
+    const startedAt = Date.now();
     const msg = await this.client.messages.create(params);
+    const durationMs = Date.now() - startedAt;
 
     // Best-effort GLM cache-hit telemetry
     try {
@@ -134,6 +136,7 @@ export class AnthropicCompatibleProvider implements IProvider {
         output_tokens: msg.usage.output_tokens,
         cache_creation_input_tokens: msg.usage.cache_creation_input_tokens ?? 0,
         cache_read_input_tokens: msg.usage.cache_read_input_tokens ?? 0,
+        duration_ms: durationMs,
       };
       fs.appendFileSync("/tmp/composer-glm-usage.jsonl", JSON.stringify(entry) + "\n");
     } catch {

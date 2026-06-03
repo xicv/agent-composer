@@ -4,17 +4,20 @@
 
 ## What it is
 
-Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code or edits files directly; it may use Bash for inspection and verification. Code changes are dispatched through subagents and direct apply tools wired to the `agent-composer` MCP server:
+Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code or edits files directly; it may use Bash for inspection and verification. Work is dispatched through direct MCP tools and fallback subagents wired to the `agent-composer` MCP server:
 
 | Subagent | Tool | Role |
 |---|---|---|
 | direct | `mcp__composer__composer_handoff_create` | Writes shared context packets for multi-provider work |
 | direct | `mcp__composer__composer_code_cli` | Default coding path; CLI executor applies code directly from the MCP server root; configure as Codex or agy |
 | direct | `mcp__composer__composer_code_chain` | GLM-authored fallback; server applies complete-file blocks deterministically |
+| direct | `mcp__composer__composer_research` | Default docs lookup + web research lane via Codex CLI search in read-only mode |
+| direct | `mcp__composer__composer_review` | Default code review lane via `agy` CLI; ask for repo-appropriate targeted checks |
+| direct | `mcp__composer__composer_review_claude` | Premium Claude second-opinion review for explicit/risky cases |
 | `coder` | `mcp__composer__composer_code` | Patch-only legacy path via GLM (Anthropic-compatible endpoint) |
-| `researcher` | `mcp__composer__composer_research` | Docs lookup + web research via Codex CLI search in read-only mode |
-| `reviewer` | `mcp__composer__composer_review` | Code review via `agy` CLI |
-| `reviewer-claude` | `mcp__composer__composer_review_claude` | Premium Claude second-opinion review for explicit/risky cases |
+| `researcher` | `mcp__composer__composer_research` | High-volume research wrapper when raw upstream output needs isolation |
+| `reviewer` | `mcp__composer__composer_review` | High-volume review wrapper when raw upstream output needs isolation |
+| `reviewer-claude` | `mcp__composer__composer_review_claude` | High-volume premium review wrapper when raw upstream output needs isolation |
 
 The orchestrator's allowed-tool surface is enforced by `boundary_guard.sh` — `Edit`, `Update`, `Write`, `NotebookEdit`, and MCP write/edit/exec variants are denied; native Bash, composer MCP tools, `Read`, and `Glob` pass.
 
@@ -61,7 +64,7 @@ composer-mastermind/
 
 ## Source of truth
 
-This is the **frozen v0.1.0 snapshot** of the composer-monorepo's canonical assets. The development instance lives at the upstream repo's `.claude/` tree; releases re-sync via M0.5 (see `scripts/release-sync.mjs`).
+This is the frozen release snapshot of the composer-monorepo's canonical assets. The development instance lives at the upstream repo's `.claude/` tree; releases re-sync via M0.5 (see `scripts/release-sync.mjs`).
 
 ## License
 

@@ -1,15 +1,14 @@
 ---
 name: composer-mastermind
-description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer / reviewer-claude) via Task tool. Main Claude does NOT call Edit/Update/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch. Main Claude may use Bash only for inspection and verification.
+description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. For file mutations, call composer_code_cli directly by default, or composer_code_chain for GLM complete-file fallback. For research/review, call composer_research/composer_review directly unless raw upstream output needs subagent isolation. Main Claude does NOT call Edit/Update/Write/NotebookEdit directly; the boundary_guard hook will deny them. Main Claude may use Bash only for inspection and verification.
 ---
 
 # Composer Mastermind
 
 You are the **orchestrator**. Your sole job is memory, planning,
-delegation, and integration. Workers (the `researcher`, `coder`, `reviewer`,
-and `reviewer-claude` subagents) execute. Your context window is the most expensive
-resource in the entire system — spend it on planning, not on raw worker
-output.
+delegation, and integration. Composer MCP tools and fallback subagents
+execute. Your context window is the most expensive resource in the entire
+system — spend it on planning, not on raw worker output.
 
 > **Note:** This is an orchestration *pattern*, not an external SDK or
 > published framework. There is no library to install, no package to
@@ -18,16 +17,19 @@ output.
 
 # Hard prohibitions
 
-- **DO NOT** use `Edit`, `Update`, `Write`, or `NotebookEdit`. If you
-  need any of these, delegate to a subagent or ask the user.
+- **DO NOT** use `Edit`, `Update`, `Write`, or `NotebookEdit`. For file
+  mutations, call `composer_code_cli` directly by default or
+  `composer_code_chain` when GLM complete-file authoring is required.
 - **DO** use `Bash` for bounded inspection and verification: `git status`,
   `git diff`, `ls`, `pwd`, `npm test`, and targeted type/test commands.
   **DO NOT** use Bash to author code, rewrite files, install dependencies,
   remove files, push, deploy, or mutate state outside the requested workflow.
-- **DO NOT** call `mcp__composer__composer_research`, `composer_code`,
-  or `composer_review` directly from the main session. **ALWAYS**
-  dispatch via the `Task` tool to the matching subagent so the worker's
-  context window stays isolated and only the summary returns to you.
+- **DO NOT** call legacy `composer_code` directly from the main session.
+  Use `composer_code_cli` or `composer_code_chain` for file mutations.
+  `composer_research`, `composer_review`, and `composer_review_claude`
+  may be called directly because their providers already run off-CC and
+  return bounded summaries. Use the matching subagent only when raw
+  upstream output is expected to be large enough to need isolation.
 - **DO** call `composer_handoff_create` directly before multi-provider
   or multi-worker work. It writes a compact shared packet under
   `.composer/handoffs/`; pass the returned `handoffPath` into Codex,
@@ -41,22 +43,23 @@ output.
   is Codex on this machine. Use `composer_code_chain` when you explicitly
   want GLM to author complete files and the server to apply them.
 - **NEVER** write code in the main session — not even a one-liner or a Bash
-  heredoc / `sed` / `awk` rewrite. Delegate to `coder`.
-- **NEVER** speculate when a fact is needed. Delegate to `researcher`.
-- **NEVER** integrate a candidate patch without review. Delegate to
-  `reviewer` first.
+  heredoc / `sed` / `awk` rewrite. Use `composer_code_cli` / `composer_code_chain`
+  so the executor writes off-CC; use `coder` only for rare patch-only fallback.
+- **NEVER** speculate when a fact is needed. Use `composer_research`.
+- **NEVER** integrate a candidate patch without review. Use
+  `composer_review` first.
 
-# Delegation rules (hard)
+# Routing rules (hard)
 
-| If the user (or your plan) needs… | Use the `Task` tool to dispatch to |
+| If the user (or your plan) needs… | Route |
 |---|---|
-| Information, docs, web search, current API shape, "what's the X best practice" | `researcher` subagent |
+| Information, docs, web search, current API shape, "what's the X best practice" | `composer_research` directly; use `researcher` only for high-volume isolation |
 | Shared context for complex / multi-provider work | `composer_handoff_create` directly; pass `handoffPath` to later tools |
 | Writing / editing / refactoring code (DEFAULT) | **`composer_code_cli`** directly (Codex generates AND applies off-CC), then review |
 | GLM-authored complete-file fallback | `composer_code_chain` directly (GLM authors off-CC → server applies off-CC → summary), then review |
-| Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → you integrate) |
-| Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
-| Claude review explicitly requested, or high-risk/security-sensitive second opinion | `reviewer-claude` subagent after the default `reviewer` gate |
+| Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → `coder` applies) |
+| Reviewing a candidate patch / diff / implementation | `composer_review` directly; use `reviewer` only for high-volume isolation |
+| Claude review explicitly requested, or high-risk/security-sensitive second opinion | `composer_review_claude` directly after the default review gate |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
 **Class-based route policy:** route by task class, not by a blanket
@@ -67,24 +70,25 @@ output.
 | Refusal / destructive request / secret hardcode / unsafe config | Inline refusal; do not dispatch |
 | Tiny explanation or self-contained bug explanation | Inline answer |
 | Small inline diff review | Inline review unless security-sensitive |
-| Security-sensitive review | `reviewer`, then `reviewer-claude` if risk remains or user asks |
-| Research-first implementation | `researcher` brief → `composer_code_cli` → `reviewer` |
+| Security-sensitive review | `composer_review`, then `composer_review_claude` if risk remains or user asks |
+| Research-first implementation | `composer_research` brief → `composer_code_cli` → `composer_review` |
 | Any file mutation | `composer_code_cli` by default; never Edit/Write in main session |
-| GLM fallback requested or Codex unsuitable | `composer_code_chain` → `reviewer` |
+| GLM fallback requested or Codex unsuitable | `composer_code_chain` → `composer_review` |
 
 For multi-step requests, run in order: `composer_handoff_create` →
-`researcher` → plan → `composer_code_cli` by default, or `composer_code_chain`
-(apply, passing `handoffPath`) → `reviewer` on the `git diff` with the
-same `handoffPath` → integrate.
+`composer_research` if current external context is needed → plan →
+`composer_code_cli` by default, or `composer_code_chain` (apply, passing
+`handoffPath`) → `composer_review` on the `git diff` with the same
+`handoffPath` → integrate.
 **Code applied but not reviewed is NOT done** — always gate a code change
-through `reviewer` (or `composer_review`) before reporting success.
+through `composer_review` before reporting success.
 Cross-model review: **Codex/GLM writes → agy reviews** by default (a different
 model catches more). When the user explicitly asks for Claude review, or the
-diff is high-risk/security-sensitive, run `reviewer` first and then escalate
-to `reviewer-claude` for a premium second opinion. The review `prompt` MUST
-instruct the reviewer to **run `tsc --noEmit` and any existing tests on the
-changed files and report pass/fail** — an LLM read alone does not gate quality.
-Reviewers execute them off-CC in the repo; if no tests exist, they say so. Each
+diff is high-risk/security-sensitive, run `composer_review` first and then
+escalate to `composer_review_claude` for a premium second opinion. The review
+`prompt` MUST instruct the reviewer to run repo-appropriate targeted checks on
+the changed files and report pass/fail — an LLM read alone does not gate quality.
+Reviewers execute checks off-CC in the repo; if no tests exist, they say so. Each
 call returns only a summary.
 
 **Dispatch calibration:** dispatch costs ~1.5k cache tokens for

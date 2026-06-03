@@ -28,14 +28,15 @@ export const COMPOSER_CODE_CHAIN = "composer_code_chain" as const;
 export const COMPOSER_HANDOFF_CREATE = "composer_handoff_create" as const;
 
 const RESEARCH_DESCRIPTION =
-  "MANDATORY for ALL research, documentation lookup, web search, and " +
-  "context gathering. The orchestrator MUST delegate research questions " +
-  "to this tool. Do not search or hypothesise in the main session.";
+  "Default off-CC research lane for documentation lookup, web search, " +
+  "current API shape, and external context. Returns a bounded summary; call " +
+  "directly unless raw upstream output needs separate subagent isolation.";
 
 const CODE_DESCRIPTION =
-  "MANDATORY for ALL code writing, refactoring, debugging, and " +
-  "implementation. The orchestrator MUST delegate implementation to this " +
-  "tool. Do not write code in the main session.";
+  "LEGACY patch-only GLM authoring lane. Use only when you explicitly need " +
+  "GLM to return a diff/text WITHOUT applying files. For normal code writing, " +
+  "refactoring, debugging, and implementation, prefer composer_code_cli " +
+  "(default) or composer_code_chain (GLM complete-file fallback).";
 
 const CODE_CHAIN_DESCRIPTION =
   "Preferred for substantial code: GLM AUTHORS the code (off-CC), then the " +
@@ -54,14 +55,15 @@ const CODE_CLI_DESCRIPTION =
   "this for multi-file or substantial edits to keep the main context lean.";
 
 const REVIEW_DESCRIPTION =
-  "MANDATORY for ALL code review, diff critique, and finding bugs in " +
-  "candidate patches. The orchestrator MUST delegate review to this tool " +
-  "before integrating worker output.";
+  "Default off-CC review lane for diff critique and bug-finding before " +
+  "integration. Provide the diff inline and ask for repo-appropriate targeted " +
+  "checks. Returns a bounded summary; call directly unless raw output needs " +
+  "separate subagent isolation.";
 
 const REVIEW_CLAUDE_DESCRIPTION =
   "Premium Claude review lane for high-risk diffs, security-sensitive changes, " +
   "or when the user explicitly asks for Claude review. Keep composer_review " +
-  "as the default gate; use this as a second-opinion escalation.";
+  "as the default gate; call this directly as a second-opinion escalation.";
 
 const HANDOFF_CREATE_DESCRIPTION =
   "Create a shared, provider-neutral handoff packet under .composer/handoffs. " +

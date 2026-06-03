@@ -59,6 +59,29 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("marks composer_code as legacy and composer_code_cli as the default coding lane", async () => {
+    const { client } = await bootClient();
+    const { tools } = await client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+
+    expect(byName["composer_code"]?.description).toContain("LEGACY");
+    expect(byName["composer_code"]?.description).not.toContain("MANDATORY");
+    expect(byName["composer_code_cli"]?.description).toContain("Generate AND APPLY");
+    expect(byName["composer_code_cli"]?.description).toContain("Prefer");
+  });
+
+  it("marks research and review tools as direct bounded off-CC lanes", async () => {
+    const { client } = await bootClient();
+    const { tools } = await client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+
+    expect(byName["composer_research"]?.description).toContain("Default off-CC research lane");
+    expect(byName["composer_research"]?.description).toContain("bounded summary");
+    expect(byName["composer_review"]?.description).toContain("Default off-CC review lane");
+    expect(byName["composer_review"]?.description).toContain("bounded summary");
+    expect(byName["composer_review_claude"]?.description).toContain("call this directly");
+  });
+
   it("declares correct tool annotations (advisor pass 2026-05-23)", async () => {
     const { client } = await bootClient();
     const { tools } = await client.listTools();

@@ -171,18 +171,28 @@ export class CLIProvider implements IProvider {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt);
+      const startedAt = Date.now();
       try {
         const { stdout } = await this.exec(bin, execution.args, {
           cwd,
           maxBuffer: this.maxBuffer,
           timeout: this.timeoutMs,
         });
+        const durationMs = Date.now() - startedAt;
         const text = execution.finalMessagePath
           ? CLIProvider.readFinalMessage(execution.finalMessagePath) ?? stdout
           : stdout;
-        if (CLIProvider.isTransientFailure(stdout)) {
+        CLIProvider.logUsage({
+          bin,
+          model: this.modelLabel,
+          durationMs,
+          stdoutChars: stdout.length,
+          textChars: text.length,
+          attempt: attempt + 1,
+        });
+        if (CLIProvider.isTransientFailure(text)) {
           lastError = new Error(
-            `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${stdout.trim().slice(0, 200)}`,
+            `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${text.trim().slice(0, 200)}`,
           );
           continue;
         }
@@ -255,6 +265,32 @@ export class CLIProvider implements IProvider {
       throw new Error(
         "CLIProvider: refusing unsafe Codex exec sandbox. Use --sandbox workspace-write, or set COMPOSER_ALLOW_DANGEROUS_CODEX=1 only inside an external sandbox.",
       );
+    }
+  }
+
+  private static logUsage(entry: {
+    bin: string;
+    model: string;
+    durationMs: number;
+    stdoutChars: number;
+    textChars: number;
+    attempt: number;
+  }): void {
+    try {
+      fs.appendFileSync(
+        "/tmp/composer-cli-usage.jsonl",
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          bin: path.basename(entry.bin),
+          model: entry.model,
+          duration_ms: entry.durationMs,
+          stdout_chars: entry.stdoutChars,
+          text_chars: entry.textChars,
+          attempt: entry.attempt,
+        }) + "\n",
+      );
+    } catch {
+      // Best-effort telemetry; never break provider execution.
     }
   }
 
