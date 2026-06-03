@@ -13,7 +13,7 @@ Two coordinated artefacts:
 | **`agent-composer`** (this npm package) | MCP server exposing `composer_handoff_create`, `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`, and `composer_review_claude`. Wraps GLM (via Anthropic-compatible endpoint) and CLI executors such as Codex, `agy`, or bounded `claude -p`. |
 | **`composer-mastermind`** (Claude Code plugin) | Orchestrator skill + haiku-wrapped subagents (`coder`, `researcher`, `reviewer`, optional `reviewer-claude`) + `boundary_guard` PreToolUse hook + `/evolve` slash command. |
 
-Combined, they turn the main Claude session into a coordinator that never writes code, runs bash, or edits files directly. Work is dispatched through Composer MCP tools; the boundary hook fails closed if a denied tool is requested.
+Combined, they turn the main Claude session into a coordinator that never writes code or edits files directly. The main session may use Bash for inspection and verification, while code changes are dispatched through Composer MCP tools. The boundary hook fails closed if a denied file-mutating tool is requested.
 
 ## Tools
 
@@ -119,6 +119,27 @@ asks for Claude review or when a risky diff needs an expensive second opinion.
 
 The MCP server reads `.env.json` via `fs.readFileSync` — it is **never** exposed to the orchestrator session.
 
+### Soft-disable Composer
+
+Composer hooks can be disabled without editing Claude Code settings:
+
+```bash
+# Disable for one launch
+COMPOSER_ENABLED=0 claude
+
+# Disable globally for already-configured hooks
+touch ~/.claude/composer.disabled
+
+# Re-enable globally
+rm -f ~/.claude/composer.disabled
+```
+
+Project-local disable is also supported with `touch .composer-disabled`.
+For scripts or tests, set `COMPOSER_DISABLED_FILE=/path/to/sentinel`.
+This disables Composer hooks immediately. To fully suppress skill autoload,
+also set `"composer-mastermind": "off"` in Claude Code `skillOverrides` and
+restart CC.
+
 ## How dispatch works
 
 Inside a Claude Code session, dispatch flow:
@@ -136,6 +157,21 @@ MCP server routes to GLM (anthropic) or Codex/agy CLI (cli) per composer.config.
    ↓
 Subagent returns summary; orchestrator integrates
 ```
+
+Composer also emits a deterministic dispatch hint for `Task`/`Agent` calls
+when `scripts/dispatch_guard.sh` is installed. The hint classifies the
+request before the worker starts, so the orchestrator can choose a cheaper
+lane when the task is simple and reserve expensive paths for the cases that
+need isolation or extra reasoning.
+
+| Task shape | Default route |
+|---|---|
+| Tiny rename/comment/non-mutating request | Inline |
+| Small self-contained diff review | Inline review |
+| File mutation with path references | `composer_code_cli` |
+| Research-first implementation | Researcher brief, then `composer_code_cli` |
+| Security or large review | `composer_review` first |
+| Explicit premium/Claude review | `composer_review_claude` |
 
 ## Measuring trust
 
@@ -175,7 +211,7 @@ Five resilience layers ensure unattended `/evolve` runs cannot damage the host r
 - **`agent-composer` publish surface**: `dist/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). 34 KB tarball.
 - **Spend caps**: per-call (`maxUsdPerCall`, default $0.50) and per-session (`maxUsdPerSession`, default $5.00) enforced in the runner before any external API call. Configurable per project.
 - **Self-evolution scope** (see ADR 0003): five layers gate any SKILL.md mutation — diff-path regex, text deny-list, stat gate, human-promote-only, audit trail. Auto-promote is permanently off the table.
-- **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Update`/`Write`/`Bash`/`NotebookEdit` in the orchestrator session. The C0.5 subagent tools allowlist is append-only.
+- **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Update`/`Write`/`NotebookEdit` in the orchestrator session, plus MCP write/edit/exec variants. Native Bash is allowed for inspection and verification. The C0.5 subagent tools allowlist is append-only.
 
 ## Contributing
 

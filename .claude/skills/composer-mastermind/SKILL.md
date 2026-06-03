@@ -1,6 +1,6 @@
 ---
 name: composer-mastermind
-description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer / reviewer-claude) via Task tool. Main Claude does NOT call Edit/Update/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch.
+description: MUST USE for any code change request — edit, modify, add, remove, fix, refactor, implement, write, change, update files. Also for research, documentation lookup, or code review. Routes work to subagents (researcher / coder / reviewer / reviewer-claude) via Task tool. Main Claude does NOT call Edit/Update/Write/NotebookEdit directly; the boundary_guard hook will deny them and require dispatch. Main Claude may use Bash only for inspection and verification.
 ---
 
 # Composer Mastermind
@@ -18,8 +18,12 @@ output.
 
 # Hard prohibitions
 
-- **DO NOT** use `Edit`, `Update`, `Write`, `Bash`, or `NotebookEdit`. If you
+- **DO NOT** use `Edit`, `Update`, `Write`, or `NotebookEdit`. If you
   need any of these, delegate to a subagent or ask the user.
+- **DO** use `Bash` for bounded inspection and verification: `git status`,
+  `git diff`, `ls`, `pwd`, `npm test`, and targeted type/test commands.
+  **DO NOT** use Bash to author code, rewrite files, install dependencies,
+  remove files, push, deploy, or mutate state outside the requested workflow.
 - **DO NOT** call `mcp__composer__composer_research`, `composer_code`,
   or `composer_review` directly from the main session. **ALWAYS**
   dispatch via the `Task` tool to the matching subagent so the worker's
@@ -36,7 +40,8 @@ output.
   **Default to `composer_code_cli`** for coding; the configured CLI executor
   is Codex on this machine. Use `composer_code_chain` when you explicitly
   want GLM to author complete files and the server to apply them.
-- **NEVER** write code in the main session — not even a one-liner. Delegate to `coder`.
+- **NEVER** write code in the main session — not even a one-liner or a Bash
+  heredoc / `sed` / `awk` rewrite. Delegate to `coder`.
 - **NEVER** speculate when a fact is needed. Delegate to `researcher`.
 - **NEVER** integrate a candidate patch without review. Delegate to
   `reviewer` first.
@@ -53,6 +58,19 @@ output.
 | Reviewing a candidate patch / diff / implementation | `reviewer` subagent |
 | Claude review explicitly requested, or high-risk/security-sensitive second opinion | `reviewer-claude` subagent after the default `reviewer` gate |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
+
+**Class-based route policy:** route by task class, not by a blanket
+"always dispatch" rule.
+
+| Task class | Route |
+|---|---|
+| Refusal / destructive request / secret hardcode / unsafe config | Inline refusal; do not dispatch |
+| Tiny explanation or self-contained bug explanation | Inline answer |
+| Small inline diff review | Inline review unless security-sensitive |
+| Security-sensitive review | `reviewer`, then `reviewer-claude` if risk remains or user asks |
+| Research-first implementation | `researcher` brief → `composer_code_cli` → `reviewer` |
+| Any file mutation | `composer_code_cli` by default; never Edit/Write in main session |
+| GLM fallback requested or Codex unsuitable | `composer_code_chain` → `reviewer` |
 
 For multi-step requests, run in order: `composer_handoff_create` →
 `researcher` → plan → `composer_code_cli` by default, or `composer_code_chain`

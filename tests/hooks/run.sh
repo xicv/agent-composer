@@ -63,8 +63,10 @@ assert_pass_fixture() {
 
 echo "=== boundary_guard.sh fixture harness ==="
 
-# Block list — native tools
-assert_deny_fixture "block_bash"          "01_block_bash.json"
+# Native Bash is allowed for main-thread inspection and verification.
+assert_pass_fixture "allow_bash"          "01_allow_bash.json"
+
+# Block list — native file-mutating tools
 assert_deny_fixture "block_edit"          "02_block_edit.json"
 assert_deny_fixture "block_write"         "03_block_write.json"
 assert_deny_fixture "block_notebook_edit" "04_block_notebook_edit.json"
@@ -99,7 +101,7 @@ assert_deny_payload "stop_evolve_blocks_mcp_research" \
   '{"hook_event_name":"PreToolUse","tool_name":"mcp__composer__composer_research","tool_input":{"prompt":"x"},"session_id":"t"}'
 assert_pass_payload "stop_evolve_does_not_block_read" \
   '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"x"},"session_id":"t"}'
-assert_deny_payload "stop_evolve_with_bash_still_denied" \
+assert_pass_payload "stop_evolve_does_not_block_bash" \
   '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"t"}'
 rm -f "$STOP_TMP"
 assert_pass_payload "no_stop_evolve_allows_mcp_research" \
@@ -121,8 +123,20 @@ assert_pass_payload "bypass_allows_edit" \
 assert_pass_payload "bypass_allows_write" \
   '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"x","content":"y"},"session_id":"t"}'
 unset COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS
-assert_deny_payload "no_bypass_still_blocks_bash" \
+assert_pass_payload "no_bypass_allows_bash" \
   '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"t"}'
+
+# Soft disable toggle for normal daily use.
+export COMPOSER_ENABLED=0
+assert_pass_payload "composer_enabled_zero_allows_edit" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
+unset COMPOSER_ENABLED
+DISABLED_TMP="$(mktemp -t composer_disabled.XXXXXX)"
+export COMPOSER_DISABLED_FILE="$DISABLED_TMP"
+assert_pass_payload "composer_disabled_file_allows_write" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"x","content":"y"},"session_id":"t"}'
+rm -f "$DISABLED_TMP"
+unset COMPOSER_DISABLED_FILE
 
 
 echo
@@ -153,6 +167,8 @@ assert_dispatch_hint_payload() {
   local name="$1" payload="$2" out
   out="$(printf '%s' "$payload" | "$DISPATCH_SCRIPT" 2>&1)"
   if grep -Eq '"additionalContext"[[:space:]]*:[[:space:]]*"dispatch-hint:' <<<"$out" \
+     && grep -Eq 'route=composer-code-cli' <<<"$out" \
+     && grep -Eq 'class=cross-file-code' <<<"$out" \
      && grep -Eq 'tier=premium' <<<"$out" \
      && grep -Eq 'size=full' <<<"$out" \
      && ! is_deny <<<"$out"; then
@@ -197,6 +213,10 @@ assert_dispatch_deny_payload "dispatch_destructive_tiny_still_denied" \
   '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","prompt":"rm -rf node_modules"},"session_id":"t"}'
 assert_dispatch_pass_payload "dispatch_non_task_passes_open" \
   '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"src/index.ts"},"session_id":"t"}'
+export COMPOSER_ENABLED=0
+assert_dispatch_pass_payload "dispatch_disabled_passes_destructive_task" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","prompt":"rm -rf node_modules"},"session_id":"t"}'
+unset COMPOSER_ENABLED
 
 echo
 echo "------------------------------------------"

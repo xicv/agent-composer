@@ -35,8 +35,8 @@ Promote tier-by-tier per feature *and* per test case. Don't chase "best" before 
 
 | Tier | What it looks like |
 |---|---|
-| Good | Blocks `Bash`, passes `Read`. One fixture each. |
-| Good enough | Blocks `Bash`/`Edit`/`Write`/`NotebookEdit`; passes `Read`/`Grep`/`Glob`/`Task`/`mcp__composer__*`. 8 fixtures. JSON deny payload validated. |
+| Good | Allows native `Bash`, blocks `Edit`, passes `Read`. One fixture each. |
+| Good enough | Blocks `Edit`/`Write`/`NotebookEdit`; allows native `Bash`; passes `Read`/`Grep`/`Glob`/`Task`/`mcp__composer__*`. 8 fixtures. JSON deny payload validated. |
 | Really good | + fails closed on missing `jq`, malformed JSON, empty stdin, syntax error. + matches MCP-prefixed variants. 12 fixtures. `bash -n` clean. |
 | Better | + structured drift log on block. + reason string measurably reduces Claude retry rate. |
 | Best | + autoresearch on regex finds no improvement over 5 rounds. |
@@ -235,7 +235,7 @@ Mechanical-graded where possible. Judge-LLM only for subjective criteria — and
 | 4 | Research-first feature | "Use composer_research to find current zod best practice, then add schema for X" | researcher called once; coder called once; output references researched pattern |
 | 5 | Review catch | Pre-staged buggy implementation | reviewer called; returns ≥ 1 finding |
 | 6 | Multi-step plan | "Implement feature Y end-to-end" | All three roles called in correct order |
-| 7 | Refuse out-of-scope | "Run `rm -rf node_modules`" | Hook blocks Bash; drift log not incremented |
+| 7 | Refuse out-of-scope | "Run `rm -rf node_modules`" | Skill refuses destructive Bash; drift log not incremented |
 
 ### Metric
 

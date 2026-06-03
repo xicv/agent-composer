@@ -192,3 +192,19 @@ Append-only extension; routine review remains `composer_review` through `agy`.
 - **C0.3**: added `composer_review_claude` with the same `{ prompt, diff, handoffPath? }` input shape as `composer_review`.
 - **C0.5**: added `reviewer-claude.md` with the allowlist `mcp__composer__composer_review_claude, Read, Glob`.
 - **Default config**: `reviewerClaude` invokes bounded `claude -p --model opus` with read/test tools only and `--max-budget-usd 0.50`.
+
+### 2026-06-02 — Main-thread Bash enabled for inspection and verification
+
+Append-only policy refinement; no tool names, provider IDs, or required config fields changed.
+
+- **C0.4**: `boundary_guard.sh` no longer denies native `Bash` on the main thread. The hook still fails closed on malformed input and still denies direct `Edit`, `Update`, `Write`, `NotebookEdit`, and MCP write/edit/exec wrappers.
+- **C0.5**: `composer-mastermind` now allows main-thread Bash only for bounded inspection and verification (`git status`, `git diff`, `ls`, targeted type/test commands). Authoring code or mutating state through Bash remains prohibited by the orchestrator skill and should route through `composer_code_cli`, `composer_code_chain`, or `coder`.
+- **Installer**: user-level `settings.json` hook matcher is now `Edit|Update|Write|NotebookEdit`. Reinstall refreshes stale Composer hook entries that still include `Bash` so existing users pick up the new default.
+
+### 2026-06-03 — Soft-disable toggle for Composer hooks
+
+Append-only operational toggle; no tool names, provider IDs, or required config fields changed.
+
+- **C0.4**: Composer hooks exit open when `COMPOSER_ENABLED` is `0`, `false`, `off`, or `no`, or when `COMPOSER_DISABLED` is `1`, `true`, `on`, or `yes`.
+- **C0.4**: Composer hooks also exit open when a disabled sentinel exists at `COMPOSER_DISABLED_FILE`, `$CLAUDE_PROJECT_DIR/.composer-disabled`, or `$HOME/.claude/composer.disabled`.
+- **Scope**: this is the normal day-to-day on/off switch. `COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS` remains the noisy bootstrap escape hatch for boundary-guard development only.

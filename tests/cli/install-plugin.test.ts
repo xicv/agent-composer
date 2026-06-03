@@ -60,6 +60,10 @@ describe("installPluginAssets", () => {
       e.hooks?.some((h) => h.command?.includes("composer-boundary_guard.sh")),
     );
     expect(hasComposer).toBe(true);
+    const composerEntry = s.hooks.PreToolUse.find((e: { hooks?: Array<{ command?: string }> }) =>
+      e.hooks?.some((h) => h.command?.includes("composer-boundary_guard.sh")),
+    );
+    expect(composerEntry.matcher).toBe("Edit|Update|Write|NotebookEdit");
   });
 
   it("preserves existing PreToolUse entries when adding the composer hook", () => {
@@ -109,6 +113,30 @@ describe("installPluginAssets", () => {
       e.hooks?.some((h) => h.command?.includes("composer-boundary_guard.sh")),
     );
     expect(composerEntries.length).toBe(1);
+  });
+
+  it("refreshes stale boundary hook matcher that still includes Bash", () => {
+    mkdirSync(claudeHome, { recursive: true });
+    const hookPath = join(claudeHome, "hooks/composer-boundary_guard.sh");
+    writeFileSync(
+      join(claudeHome, "settings.json"),
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              { matcher: "Bash|Edit|Update|Write|NotebookEdit", hooks: [{ type: "command", command: hookPath }] },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
+    const s = JSON.parse(readFileSync(join(claudeHome, "settings.json"), "utf8"));
+    expect(s.hooks.PreToolUse).toHaveLength(1);
+    expect(s.hooks.PreToolUse[0].matcher).toBe("Edit|Update|Write|NotebookEdit");
   });
 
   it("returns step records with status created/skipped/updated for every action", () => {

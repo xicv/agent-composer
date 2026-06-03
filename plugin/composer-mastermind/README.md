@@ -4,7 +4,7 @@
 
 ## What it is
 
-Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code, runs bash, or edits files directly — instead it dispatches work through subagents and direct apply tools wired to the `agent-composer` MCP server:
+Composer-mastermind is a Claude Code plugin that turns the main session into a coordinator. The orchestrator never writes code or edits files directly; it may use Bash for inspection and verification. Code changes are dispatched through subagents and direct apply tools wired to the `agent-composer` MCP server:
 
 | Subagent | Tool | Role |
 |---|---|---|
@@ -16,7 +16,20 @@ Composer-mastermind is a Claude Code plugin that turns the main session into a c
 | `reviewer` | `mcp__composer__composer_review` | Code review via `agy` CLI |
 | `reviewer-claude` | `mcp__composer__composer_review_claude` | Premium Claude second-opinion review for explicit/risky cases |
 
-The orchestrator's allowed-tool surface is enforced by `boundary_guard.sh` — `Edit`, `Update`, `Write`, `Bash`, `NotebookEdit` are denied; composer MCP tools plus `Read`/`Glob` pass.
+The orchestrator's allowed-tool surface is enforced by `boundary_guard.sh` — `Edit`, `Update`, `Write`, `NotebookEdit`, and MCP write/edit/exec variants are denied; native Bash, composer MCP tools, `Read`, and `Glob` pass.
+
+Soft-disable Composer hooks without editing Claude Code settings:
+
+```bash
+COMPOSER_ENABLED=0 claude          # one launch
+touch ~/.claude/composer.disabled  # global live toggle off
+rm -f ~/.claude/composer.disabled  # global live toggle on
+touch .composer-disabled           # project-local toggle off
+```
+
+The sentinel disables hooks immediately. To fully suppress skill autoload,
+set `"composer-mastermind": "off"` in Claude Code `skillOverrides` and restart
+CC.
 
 ## What's inside
 

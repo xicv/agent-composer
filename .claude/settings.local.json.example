@@ -1,5 +1,5 @@
 {
-  "_note": "Copy to .claude/settings.local.json to enable dispatch_guard Phase 2 hints. It logs Task/Agent dispatches, emits deterministic dispatch-hint additionalContext (tier/size/reasoning/recommendDispatch) computed by src/cli/dispatch-hint.ts, and never denies except the existing destructive-tiny rule.",
+  "_note": "Copy to .claude/settings.local.json to enable dispatch_guard Phase 2 hints. It logs Task/Agent dispatches, emits deterministic dispatch-hint additionalContext (route/class/tier/size/reasoning/recommendDispatch) computed by src/cli/dispatch-hint.ts, and never denies except the existing destructive-tiny rule. Set COMPOSER_ENABLED=0 or touch ~/.claude/composer.disabled to soft-disable Composer hooks.",
   "hooks": {
     "PreToolUse": [
       {

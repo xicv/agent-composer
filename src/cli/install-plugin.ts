@@ -116,7 +116,7 @@ function copyOne(srcPath: string, destPath: string, label: string, opts: CopyOpt
  */
 function wireBoundaryHook(claudeHome: string, hookScriptPath: string): InitStep {
   const settingsPath = join(claudeHome, "settings.json");
-  const matcher = "Bash|Edit|Update|Write|NotebookEdit";
+  const matcher = "Edit|Update|Write|NotebookEdit";
   const entry = {
     matcher,
     hooks: [{ type: "command", command: hookScriptPath }],
@@ -142,9 +142,21 @@ function wireBoundaryHook(claudeHome: string, hookScriptPath: string): InitStep 
   const hooks = (current["hooks"] as Record<string, unknown> | undefined) ?? {};
   const preToolUse = (hooks["PreToolUse"] as Array<{ matcher?: string; hooks?: Array<{ command?: string }> }> | undefined) ?? [];
 
-  // Idempotency: skip if any existing PreToolUse entry already references our script.
-  const alreadyWired = preToolUse.some((e) => e.hooks?.some((h) => h.command === hookScriptPath));
-  if (alreadyWired) {
+  const composerEntryIndex = preToolUse.findIndex((e) => e.hooks?.some((h) => h.command === hookScriptPath));
+  if (composerEntryIndex >= 0) {
+    const existing = preToolUse[composerEntryIndex]!;
+    if (existing.matcher !== matcher) {
+      const nextPreToolUse = preToolUse.map((e, i) => i === composerEntryIndex ? { ...e, matcher } : e);
+      const nextHooks = { ...hooks, PreToolUse: nextPreToolUse };
+      const next = { ...current, hooks: nextHooks };
+      writeFileSync(settingsPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+      return {
+        name: "~/.claude/settings.json boundary hook",
+        status: "updated",
+        path: settingsPath,
+        reason: `refreshed PreToolUse matcher → ${matcher}`,
+      };
+    }
     return {
       name: "~/.claude/settings.json boundary hook",
       status: "skipped",

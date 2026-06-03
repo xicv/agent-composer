@@ -16,6 +16,8 @@ describe("classifyDispatch", () => {
     expect(hint.recommendDispatch).toBe(false);
     expect(hint.signals.promptChars).toBe("rename foo to bar".length);
     expect(hint.signals.complexityScore).toBe(0);
+    expect(hint.route.target).toBe("inline");
+    expect(hint.route.taskClass).toBe("trivial");
   });
 
   it("dispatches multi-file architecture refactors with premium full sizing", () => {
@@ -32,6 +34,10 @@ describe("classifyDispatch", () => {
     expect(hint.recommendDispatch).toBe(true);
     expect(hint.signals.hasFileRef).toBe(true);
     expect(hint.signals.complexityScore).toBeGreaterThanOrEqual(0.6);
+    expect(hint.route.target).toBe("composer-code-cli");
+    expect(hint.route.taskClass).toBe("cross-file-code");
+    expect(hint.route.providerRole).toBe("coderCli");
+    expect(hint.route.requiresReview).toBe(true);
   });
 
   it("does not dispatch tiny destructive prompts", () => {
@@ -39,6 +45,8 @@ describe("classifyDispatch", () => {
 
     expect(hint.recommendDispatch).toBe(false);
     expect(hint.signals.hasDestructive).toBe(true);
+    expect(hint.route.target).toBe("refuse");
+    expect(hint.route.taskClass).toBe("refuse");
   });
 
   it("keeps self-contained inline diff reviews inline", () => {
@@ -55,18 +63,54 @@ describe("classifyDispatch", () => {
 
     expect(hint.recommendDispatch).toBe(false);
     expect(hint.signals.isReviewWithInlineDiff).toBe(true);
+    expect(hint.route.target).toBe("review-inline");
+    expect(hint.route.taskClass).toBe("review-inline");
   });
 
-  it("uses premium tier for security-sensitive prompts", () => {
+  it("routes security-sensitive reviews through the default reviewer first", () => {
     const hint = classifyDispatch({ prompt: "audit auth token handling" });
 
+    expect(hint.tier).toBe("cheap");
+    expect(hint.route.target).toBe("task-reviewer");
+    expect(hint.route.providerRole).toBe("reviewer");
+  });
+
+  it("uses premium reviewer only when explicitly requested", () => {
+    const hint = classifyDispatch({
+      prompt: "Run a premium review of auth token handling.",
+    });
+
     expect(hint.tier).toBe("premium");
+    expect(hint.route.target).toBe("composer-review-claude");
+    expect(hint.route.providerRole).toBe("reviewerClaude");
   });
 
   it("detects arrow functions as code", () => {
     const hint = classifyDispatch({ prompt: "update mapper: value => value.trim()" });
 
     expect(hint.signals.hasCode).toBe(true);
+  });
+
+  it("routes research-first implementation through researcher then coder", () => {
+    const hint = classifyDispatch({
+      prompt: "Research exponential backoff with jitter, then implement retry(fn, opts) in src/_eval/retry.ts.",
+    });
+
+    expect(hint.recommendDispatch).toBe(true);
+    expect(hint.promptSize).toBe("full");
+    expect(hint.route.target).toBe("task-researcher-coder");
+    expect(hint.route.taskClass).toBe("research-first-code");
+    expect(hint.route.requiresReview).toBe(true);
+  });
+
+  it("keeps small bug explanations inline", () => {
+    const hint = classifyDispatch({
+      prompt: "Find the bug: `[10,2,1].sort()` returns wrong numeric order. Explain the fix.",
+    });
+
+    expect(hint.recommendDispatch).toBe(false);
+    expect(hint.route.target).toBe("inline");
+    expect(hint.route.taskClass).toBe("bug-explain");
   });
 });
 

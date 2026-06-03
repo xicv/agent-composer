@@ -19,6 +19,29 @@
 
 set -u
 
+composer_disabled() {
+  case "${COMPOSER_ENABLED:-}" in
+    0|false|FALSE|off|OFF|no|NO) return 0 ;;
+  esac
+  case "${COMPOSER_DISABLED:-}" in
+    1|true|TRUE|on|ON|yes|YES) return 0 ;;
+  esac
+  if [[ -n "${COMPOSER_DISABLED_FILE:-}" && -e "$COMPOSER_DISABLED_FILE" ]]; then
+    return 0
+  fi
+  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -e "$CLAUDE_PROJECT_DIR/.composer-disabled" ]]; then
+    return 0
+  fi
+  if [[ -n "${HOME:-}" && -e "$HOME/.claude/composer.disabled" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+if composer_disabled; then
+  exit 0
+fi
+
 emit_deny() {
   local reason="$1"
   jq -nc --arg r "$reason" \
@@ -86,14 +109,17 @@ if [[ -z "$PROJECT_DIR" ]]; then
 fi
 
 HINT_JSON=""
-if [[ -n "$PROJECT_DIR" && -f "$PROJECT_DIR/dist/cli/dispatch-hint.js" ]]; then
-  HINT_JSON="$(printf '%s' "$INPUT" | node "$PROJECT_DIR/dist/cli/dispatch-hint.js" 2>/dev/null || true)"
+if [[ -n "$PROJECT_DIR" && -x "$PROJECT_DIR/node_modules/.bin/tsx" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]]; then
+  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && "$PROJECT_DIR/node_modules/.bin/tsx" "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
 fi
 if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v npx >/dev/null 2>&1; then
-  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && npx --no-install tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
+  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && npx --no-install --package tsx tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
 fi
 if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v node >/dev/null 2>&1; then
   HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && node --import tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
+fi
+if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/dist/cli/dispatch-hint.js" ]]; then
+  HINT_JSON="$(printf '%s' "$INPUT" | node "$PROJECT_DIR/dist/cli/dispatch-hint.js" 2>/dev/null || true)"
 fi
 
 HINT_VALID="false"
@@ -127,8 +153,10 @@ if [[ "$HINT_VALID" == "true" ]]; then
       select((.tier | type == "string") and
         (.promptSize | type == "string") and
         (.reasoning | type == "string") and
+        (.route.target | type == "string") and
+        (.route.taskClass | type == "string") and
         (.recommendDispatch | type == "boolean"))
-      | "dispatch-hint: tier=\(.tier) size=\(.promptSize) reasoning=\(.reasoning) recommendDispatch=\(.recommendDispatch)"
+      | "dispatch-hint: route=\(.route.target) class=\(.route.taskClass) tier=\(.tier) size=\(.promptSize) reasoning=\(.reasoning) recommendDispatch=\(.recommendDispatch)"
     ' <<<"$HINT_JSON" 2>/dev/null || true
   )"
   if [[ -n "$HINT_TEXT" ]]; then

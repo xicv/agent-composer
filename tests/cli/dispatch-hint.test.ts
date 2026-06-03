@@ -17,6 +17,8 @@ describe("computeHintFromHookInput", () => {
     expect(hint.tier).toBe("premium");
     expect(hint.promptSize).toBe("full");
     expect(hint.signals.hasFileRef).toBe(true);
+    expect(hint.route.target).toBe("composer-code-cli");
+    expect(hint.route.taskClass).toBe("cross-file-code");
   });
 
   it("returns a neutral hint for empty stdin", () => {

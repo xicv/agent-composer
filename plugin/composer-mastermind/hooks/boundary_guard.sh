@@ -9,6 +9,29 @@
 
 set -u
 
+composer_disabled() {
+  case "${COMPOSER_ENABLED:-}" in
+    0|false|FALSE|off|OFF|no|NO) return 0 ;;
+  esac
+  case "${COMPOSER_DISABLED:-}" in
+    1|true|TRUE|on|ON|yes|YES) return 0 ;;
+  esac
+  if [[ -n "${COMPOSER_DISABLED_FILE:-}" && -e "$COMPOSER_DISABLED_FILE" ]]; then
+    return 0
+  fi
+  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -e "$CLAUDE_PROJECT_DIR/.composer-disabled" ]]; then
+    return 0
+  fi
+  if [[ -n "${HOME:-}" && -e "$HOME/.claude/composer.disabled" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+if composer_disabled; then
+  exit 0
+fi
+
 emit_deny() {
   local reason="$1"
   # Claude Code v2.1.150+ requires the decision wrapped in hookSpecificOutput.
@@ -78,12 +101,16 @@ if [[ "$TRANSCRIPT" == */subagents/* ]] \
   exit 0
 fi
 
-# 4. Block list — native dangerous tools + MCP-prefixed variants.
+# 4. Block list — native dangerous file-mutating tools + MCP-prefixed variants.
+# Native Bash is allowed on the main thread for inspection and verification;
+# the orchestrator skill still forbids using Bash to author code or perform
+# destructive state changes. MCP exec/bash wrappers stay blocked because they
+# bypass Claude Code's native Bash permissions surface.
 case "$TOOL" in
-  Bash|Edit|Update|Write|NotebookEdit \
+  Edit|Update|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "DENY (main thread): route Edit/Update/Write via Task(subagent_type=\"coder\"). Coder applies the patch and may use Bash to verify."
+    emit_deny "DENY (main thread): route Edit/Update/Write via Task(subagent_type=\"coder\"). Native Bash is allowed for inspection and verification."
     ;;
 esac
 

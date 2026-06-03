@@ -21,7 +21,7 @@ Verified against the latest Anthropic docs (see [Skills explained](https://claud
 | **Skills** (`.claude/skills/<name>/SKILL.md`) | Reusable expertise, progressive disclosure, unbounded knowledge | `composer-mastermind` (router behavior), `composer-evolve` (self-improvement) |
 | **Agent** (main session) | Orchestration, memory, planning, thinking | Claude (Opus 4.7) — never writes code itself |
 | **Subagents** (`.claude/agents/<role>.md`) | Isolated context window, scoped tool access, separate model selection | `researcher.md`, `coder.md`, `reviewer.md`, `reviewer-claude.md` — each gets one MCP tool and nothing else |
-| **Hooks** (`settings.json → hooks`) | Deterministic enforcement (cannot hallucinate) | `PreToolUse` blocks Bash/Edit/Write at the system level |
+| **Hooks** (`settings.json → hooks`) | Deterministic enforcement (cannot hallucinate) | `PreToolUse` blocks Edit/Write at the system level; native Bash remains available for inspection and verification |
 | **Agent Teams** | Experimental peer-to-peer Claude sessions | *Not used in v2* — token-expensive, session-resumption issues |
 | **Channels** | MCP push messages into session | *Not used in v2* — research preview only as of April 2026 |
 
@@ -55,7 +55,8 @@ The role names are deliberately provider-agnostic — Composer never says "Gemin
 ┌─────────────────────────────────────────────────────────────┐
 │   Main Claude session (Opus 4.7)                            │
 │   - Reads composer-mastermind skill                         │
-│   - Cannot Edit/Write/Bash (denied by settings + hook)      │
+│   - Cannot Edit/Write (denied by settings + hook)           │
+│   - Can use Bash for inspection and verification            │
 │   - Delegates via Task tool to subagents                    │
 └──────────────┬──────────────────────────────────────────────┘
                │ Task() — only the subagent's summary comes back
@@ -365,7 +366,7 @@ Defense-in-depth across the three highest-impact risks. Numbering matches the de
 | Permission | `deny: ["Bash","Edit","Write","NotebookEdit"]` in `settings.json` | High (known bugs #18846/#6699) |
 | Hook | PreToolUse returns `permissionDecision: "deny"` — fires *before* permission check, blocks even `--dangerously-skip-permissions` | Highest |
 | Subagent | `tools:` allowlist scoped to one MCP tool per subagent (coder cannot Read; reviewer cannot Write) | Highest (runtime) |
-| Skill | Negative-style instructions in `composer-mastermind/SKILL.md`. Pattern: "DO NOT use Edit. NEVER call Bash. ALWAYS dispatch via Task." Mirrors Anthropic's frontend-design skill convention | High |
+| Skill | Negative-style instructions in `composer-mastermind/SKILL.md`. Pattern: "DO NOT use Edit. NEVER write code through Bash. ALWAYS dispatch code changes." Mirrors Anthropic's frontend-design skill convention | High |
 | MCP tool desc | Each tool's `description` opens with "MANDATORY:" framing | Medium-High |
 | UX | User invokes `@coder` / `@researcher` / `@reviewer` (April 2026 @-mention typeahead) for non-trivial tasks | Highest (human-in-loop) |
 | Telemetry | PostToolUse on attempted Edit/Write logs to `.claude/learnings/drift.log` for skill retuning | Medium |
@@ -441,9 +442,9 @@ exit 0
 ### Hook test fixtures (`tests/hooks/`)
 
 ```json
-// 01_block_bash.json
+// 01_allow_bash.json
 { "tool_name": "Bash", "tool_input": { "command": "ls" } }
-// expect: jq output contains "permissionDecision":"deny"
+// expect: exit 0, no deny payload
 
 // 02_allow_read.json
 { "tool_name": "Read", "tool_input": { "file_path": "/tmp/x" } }
