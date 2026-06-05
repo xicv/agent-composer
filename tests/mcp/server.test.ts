@@ -158,6 +158,30 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("emits progress notifications for long-running tool calls when requested", async () => {
+    const { client } = await bootClient();
+    const progress: Array<{ progress: number; message?: string }> = [];
+    await client.callTool(
+      {
+        name: "composer_code_cli",
+        arguments: { prompt: "apply with codex" },
+      },
+      undefined,
+      {
+        onprogress: (event) => {
+          progress.push(event);
+        },
+        resetTimeoutOnProgress: true,
+        maxTotalTimeout: 60_000,
+      },
+    );
+
+    expect(progress.length).toBeGreaterThanOrEqual(2);
+    expect(progress.map((event) => event.message)).toContain("composer_code_cli started");
+    expect(progress.map((event) => event.message)).toContain("composer_code_cli completed");
+    expect(progress.map((event) => event.progress)).toEqual([1, 2]);
+  });
+
   it("composer_review accepts diff input", async () => {
     const { client } = await bootClient();
     const result = await client.callTool({

@@ -50,7 +50,10 @@ describe("composer init --global", () => {
       "workspace-write",
       "-c",
       "approval_policy=\"never\"",
+      "-c",
+      "model_reasoning_effort=\"medium\"",
     ]);
+    expect(cfg.roles.coderCli.timeoutMs).toBe(900000);
     expect(cfg.roles.coderCli.retries).toBe(0);
     expect(cfg.roles.reviewerClaude).toBeDefined();
     expect(cfg.roles.reviewerClaude?.provider).toBe("cli");

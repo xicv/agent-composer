@@ -77,7 +77,7 @@ Two files at the consumer-project root, both gitignored or partially gitignored:
   "roles": {
     "researcher": { "provider": "cli", "cli": ["codex", "--search", "--ask-for-approval", "never", "exec", "--ephemeral", "--sandbox", "read-only"], "timeoutMs": 180000, "retries": 0 },
     "coder":      { "provider": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic", "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN" },
-    "coderCli":   { "provider": "cli", "cli": ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""], "retries": 0 },
+    "coderCli":   { "provider": "cli", "cli": ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\"", "-c", "model_reasoning_effort=\"medium\""], "timeoutMs": 900000, "retries": 0 },
     "reviewer":   { "provider": "cli", "cli": ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"], "timeoutMs": 120000, "retries": 0 },
     "reviewerClaude": {
       "provider": "cli",
@@ -105,6 +105,9 @@ main session receives a short outcome instead of raw event output. Composer
 refuses explicit `codex exec --sandbox danger-full-access` and
 `--dangerously-bypass-approvals-and-sandbox` configs by default; set
 `COMPOSER_ALLOW_DANGEROUS_CODEX=1` only inside an external sandbox.
+The default Codex coding lane sets `timeoutMs` to 15 minutes and overrides
+the nested Codex run to `model_reasoning_effort="medium"` so it does not
+inherit slower global high-effort settings intended for the main orchestrator.
 Keep `reviewer` as the default gate. Use `reviewerClaude` only when the user
 asks for Claude review or when a risky diff needs an expensive second opinion.
 
@@ -124,7 +127,7 @@ small SDK harness:
 - CLI calls append best-effort timing records to
   `/tmp/composer-cli-usage.jsonl`; GLM calls append timing/cache records to
   `/tmp/composer-glm-usage.jsonl`. These files contain durations and character
-  counts, not prompts.
+  counts plus success/error status, not prompts.
 
 **`.env.json`** (NEVER commit) — credentials only:
 
@@ -225,7 +228,7 @@ Five resilience layers ensure unattended `/evolve` runs cannot damage the host r
 
 ## Security model
 
-- **`agent-composer` publish surface**: `dist/`, `plugin/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). Current npm dry-run package size is 83.2 KB.
+- **`agent-composer` publish surface**: `dist/`, `plugin/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). Current npm dry-run package size is 84.4 KB.
 - **Spend caps**: per-call (`maxUsdPerCall`, default $0.50) and per-session (`maxUsdPerSession`, default $5.00) enforced in the runner before any external API call. Configurable per project.
 - **Self-evolution scope** (see ADR 0003): five layers gate any SKILL.md mutation — diff-path regex, text deny-list, stat gate, human-promote-only, audit trail. Auto-promote is permanently off the table.
 - **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Update`/`Write`/`NotebookEdit` in the orchestrator session, plus MCP write/edit/exec variants. Native Bash is allowed for inspection and verification. The C0.5 subagent tools allowlist is append-only.

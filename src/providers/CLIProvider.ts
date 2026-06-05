@@ -25,7 +25,12 @@ export interface ExecFileResult {
 export type ExecFileFn = (
   file: string,
   args: ReadonlyArray<string>,
-  options: { cwd?: string; maxBuffer?: number; timeout?: number },
+  options: {
+    cwd?: string;
+    maxBuffer?: number;
+    timeout?: number;
+    signal?: AbortSignal;
+  },
 ) => Promise<ExecFileResult>;
 
 // Default executor uses spawn (not execFile) so we can explicitly ignore
@@ -39,6 +44,7 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
     const child = spawn(file, [...args], {
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      signal: options.signal,
     });
 
     let stdout = "";
@@ -116,7 +122,7 @@ export interface CLIProviderOptions {
   execFn?: ExecFileFn;
 }
 
-const DEFAULT_TIMEOUT_MS = 5 * 60_000; // 5 min — matches tdd_plan.md §6 per-experiment budget cap.
+const DEFAULT_TIMEOUT_MS = 15 * 60_000; // Long enough for Codex apply flows, still bounded.
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024; // 32 MB.
 const DEFAULT_RETRIES = 2; // agy/CLI agents occasionally "time out waiting for response" — retry transient failures.
 const DEFAULT_MAX_RESULT_CHARS = 16_000;
@@ -177,11 +183,13 @@ export class CLIProvider implements IProvider {
           cwd,
           maxBuffer: this.maxBuffer,
           timeout: this.timeoutMs,
+          signal: input.signal,
         });
         const durationMs = Date.now() - startedAt;
         const text = execution.finalMessagePath
           ? CLIProvider.readFinalMessage(execution.finalMessagePath) ?? stdout
           : stdout;
+        const transientFailure = CLIProvider.isTransientFailure(text);
         CLIProvider.logUsage({
           bin,
           model: this.modelLabel,
@@ -189,8 +197,9 @@ export class CLIProvider implements IProvider {
           stdoutChars: stdout.length,
           textChars: text.length,
           attempt: attempt + 1,
+          status: transientFailure ? "transient" : "success",
         });
-        if (CLIProvider.isTransientFailure(text)) {
+        if (transientFailure) {
           lastError = new Error(
             `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${text.trim().slice(0, 200)}`,
           );
@@ -202,6 +211,16 @@ export class CLIProvider implements IProvider {
         return { text: bounded };
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        CLIProvider.logUsage({
+          bin,
+          model: this.modelLabel,
+          durationMs: Date.now() - startedAt,
+          stdoutChars: 0,
+          textChars: 0,
+          attempt: attempt + 1,
+          status: "error",
+          error: lastError.message.slice(0, 300),
+        });
       } finally {
         execution.cleanup();
       }
@@ -275,6 +294,8 @@ export class CLIProvider implements IProvider {
     stdoutChars: number;
     textChars: number;
     attempt: number;
+    status: "success" | "transient" | "error";
+    error?: string;
   }): void {
     try {
       fs.appendFileSync(
@@ -287,6 +308,8 @@ export class CLIProvider implements IProvider {
           stdout_chars: entry.stdoutChars,
           text_chars: entry.textChars,
           attempt: entry.attempt,
+          status: entry.status,
+          ...(entry.error ? { error: entry.error } : {}),
         }) + "\n",
       );
     } catch {

@@ -138,12 +138,15 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }) => {
+    async ({ prompt, context, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("researcher");
-      const result = await provider.execute({
-        prompt,
-        context: contextWithHandoff(root, context, handoffPath),
-      });
+      const result = await withProgress(extra, COMPOSER_RESEARCH, () =>
+        provider.execute({
+          prompt,
+          context: contextWithHandoff(root, context, handoffPath),
+          signal: extra.signal,
+        }),
+      );
       return { content: [{ type: "text", text: result.text }] };
     },
   );
@@ -165,12 +168,15 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }) => {
+    async ({ prompt, context, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("coder");
-      const result = await provider.execute({
-        prompt,
-        context: contextWithHandoff(root, context, handoffPath),
-      });
+      const result = await withProgress(extra, COMPOSER_CODE, () =>
+        provider.execute({
+          prompt,
+          context: contextWithHandoff(root, context, handoffPath),
+          signal: extra.signal,
+        }),
+      );
       return { content: [{ type: "text", text: result.text }] };
     },
   );
@@ -192,12 +198,15 @@ export function createComposerServer(
         idempotentHint: true,
       },
     },
-    async ({ prompt, diff, handoffPath }) => {
+    async ({ prompt, diff, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("reviewer");
-      const result = await provider.execute({
-        prompt,
-        context: contextWithHandoff(root, diff, handoffPath),
-      });
+      const result = await withProgress(extra, COMPOSER_REVIEW, () =>
+        provider.execute({
+          prompt,
+          context: contextWithHandoff(root, diff, handoffPath),
+          signal: extra.signal,
+        }),
+      );
       return { content: [{ type: "text", text: result.text }] };
     },
   );
@@ -219,13 +228,16 @@ export function createComposerServer(
         idempotentHint: true,
       },
     },
-    async ({ prompt, diff, handoffPath }) => {
+    async ({ prompt, diff, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("reviewerClaude");
-      const result = await provider.execute({
-        prompt,
-        context: contextWithHandoff(root, diff, handoffPath),
-        cwd: root,
-      });
+      const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, () =>
+        provider.execute({
+          prompt,
+          context: contextWithHandoff(root, diff, handoffPath),
+          cwd: root,
+          signal: extra.signal,
+        }),
+      );
       return { content: [{ type: "text", text: result.text }] };
     },
   );
@@ -247,7 +259,7 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }) => {
+    async ({ prompt, context, handoffPath }, extra) => {
       // Stage 1: GLM authors the code off-CC (returns full file contents).
       const gen = registry.getProviderForRole("coder");
       const genPrompt =
@@ -256,10 +268,13 @@ export function createComposerServer(
         "create or modify. For each file, write a line `FILE: <relative/path>` " +
         "followed by a fenced code block with the full file content. No " +
         "abbreviations, no placeholders, no commentary outside the blocks.";
-      const authored = await gen.execute({
-        prompt: genPrompt,
-        context: contextWithHandoff(root, context, handoffPath),
-      });
+      const authored = await withProgress(extra, COMPOSER_CODE_CHAIN, () =>
+        gen.execute({
+          prompt: genPrompt,
+          context: contextWithHandoff(root, context, handoffPath),
+          signal: extra.signal,
+        }),
+      );
 
       // Stage 2: server applies GLM's FILE: blocks deterministically (off-CC,
       // no LLM transcription step — an executor cannot fabricate the apply).
@@ -292,13 +307,16 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }) => {
+    async ({ prompt, context, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("coderCli");
-      const result = await provider.execute({
-        prompt,
-        context: contextWithHandoff(root, context, handoffPath),
-        cwd: root,
-      });
+      const result = await withProgress(extra, COMPOSER_CODE_CLI, () =>
+        provider.execute({
+          prompt,
+          context: contextWithHandoff(root, context, handoffPath),
+          cwd: root,
+          signal: extra.signal,
+        }),
+      );
       return { content: [{ type: "text", text: result.text }] };
     },
   );
@@ -387,4 +405,76 @@ function contextWithHandoff(
   }
   if (context) blocks.push(context);
   return blocks.length > 0 ? blocks.join("\n\n") : undefined;
+}
+
+type ToolProgressExtra = {
+  _meta?: { progressToken?: string | number };
+  signal?: AbortSignal;
+  sendNotification?: (notification: {
+    method: "notifications/progress";
+    params: {
+      progressToken: string | number;
+      progress: number;
+      message?: string;
+    };
+  }) => Promise<void>;
+};
+
+async function withProgress<T>(
+  extra: ToolProgressExtra,
+  label: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const reporter = createProgressReporter(extra, label);
+  await reporter.report("started");
+  try {
+    const result = await work();
+    await reporter.report("completed");
+    return result;
+  } catch (error) {
+    await reporter.report("failed");
+    throw error;
+  } finally {
+    reporter.stop();
+  }
+}
+
+function createProgressReporter(extra: ToolProgressExtra, label: string) {
+  const progressToken = extra._meta?.progressToken;
+  let progress = 0;
+  let active = true;
+
+  const report = async (state: string) => {
+    if (!active || progressToken === undefined || !extra.sendNotification) {
+      return;
+    }
+    progress += 1;
+    try {
+      await extra.sendNotification({
+        method: "notifications/progress",
+        params: {
+          progressToken,
+          progress,
+          message: `${label} ${state}`,
+        },
+      });
+    } catch {
+      // Progress is advisory; never fail the tool because a client ignores it.
+    }
+  };
+
+  const timer =
+    progressToken !== undefined && extra.sendNotification
+      ? setInterval(() => {
+          void report("still running");
+        }, 30_000)
+      : undefined;
+
+  return {
+    report,
+    stop: () => {
+      active = false;
+      if (timer) clearInterval(timer);
+    },
+  };
 }

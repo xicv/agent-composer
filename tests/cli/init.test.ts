@@ -53,7 +53,10 @@ describe("composer init", () => {
       "workspace-write",
       "-c",
       "approval_policy=\"never\"",
+      "-c",
+      "model_reasoning_effort=\"medium\"",
     ]);
+    expect(cfg.roles.coderCli.timeoutMs).toBe(900000);
     expect(cfg.roles.coderCli.retries).toBe(0);
     expect(cfg.roles.reviewer.provider).toBe("cli");
     expect(cfg.roles.reviewer.cli).toContain("--print-timeout");

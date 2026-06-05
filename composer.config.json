@@ -65,8 +65,11 @@
         "--sandbox",
         "workspace-write",
         "-c",
-        "approval_policy=\"never\""
+        "approval_policy=\"never\"",
+        "-c",
+        "model_reasoning_effort=\"medium\""
       ],
+      "timeoutMs": 900000,
       "retries": 0
     }
   },

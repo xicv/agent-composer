@@ -50,7 +50,18 @@ const DEFAULT_COMPOSER_CONFIG = {
     coder: { provider: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", apiKeyEnv: "ANTHROPIC_AUTH_TOKEN" },
     coderCli: {
       provider: "cli",
-      cli: ["codex", "exec", "--ephemeral", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""],
+      cli: [
+        "codex",
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "workspace-write",
+        "-c",
+        "approval_policy=\"never\"",
+        "-c",
+        "model_reasoning_effort=\"medium\"",
+      ],
+      timeoutMs: 900000,
       retries: 0,
     },
     reviewer: {
