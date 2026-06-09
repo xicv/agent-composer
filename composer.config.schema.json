@@ -37,9 +37,123 @@
     },
     "spendAuthorization": {
       "$ref": "#/$defs/spendAuthorization"
+    },
+    "codexReview": {
+      "$ref": "#/$defs/codexReview"
     }
   },
   "$defs": {
+    "codexReview": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "description": "Optional Codex review-gate settings. Composer owns the trigger points; omit or disable to keep review-gate off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master opt-in switch. false keeps Codex review-gate shipped off."
+        },
+        "triggers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Composer trigger points that may request Codex review.",
+          "properties": {
+            "preCommit": {
+              "type": "boolean",
+              "description": "Run Codex review before commit when enabled."
+            },
+            "postPlan": {
+              "type": "boolean",
+              "description": "Run Codex review after planning when enabled."
+            }
+          }
+        },
+        "preCommitCommand": {
+          "type": "string",
+          "enum": [
+            "review",
+            "adversarial-review"
+          ],
+          "description": "Codex companion verb for pre-commit review. Omitted = review."
+        },
+        "postPlanCommand": {
+          "type": "string",
+          "enum": [
+            "review",
+            "adversarial-review"
+          ],
+          "description": "Codex companion verb for post-plan review. Omitted = adversarial-review."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "description": "ask: require user confirmation before invoking Codex. auto: invoke without asking. Omitted = ask."
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "foreground: wait for Codex review. background: launch review asynchronously. Omitted = background."
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "working-tree",
+            "branch"
+          ],
+          "description": "auto: infer review scope. working-tree: review local changes. branch: review against base. Omitted = auto."
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base branch for branch-scoped review. Omitted = main."
+        },
+        "preCommitHook": {
+          "$ref": "#/$defs/codexPreCommitHook"
+        }
+      }
+    },
+    "codexPreCommitHook": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "description": "Optional mechanical PreToolUse gate for git commit. Omitted or disabled = off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Opt-in switch for the mechanical pre-commit gate."
+        },
+        "blockOnSeverity": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Minimum finding severity that blocks commit. Omitted = high."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Review wall-clock timeout in milliseconds. Omitted = 120000."
+        },
+        "failClosed": {
+          "type": "boolean",
+          "description": "If true, reviewer unavailability blocks commit. Omitted = false."
+        }
+      }
+    },
     "spendAuthorization": {
       "type": "object",
       "required": [

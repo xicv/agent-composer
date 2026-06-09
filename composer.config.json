@@ -77,5 +77,24 @@
     "mode": "auto",
     "maxUsdPerCall": 0.5,
     "maxUsdPerSession": 50
+  },
+  "codexReview": {
+    "enabled": false,
+    "triggers": {
+      "preCommit": true,
+      "postPlan": true
+    },
+    "preCommitCommand": "review",
+    "postPlanCommand": "adversarial-review",
+    "mode": "ask",
+    "execution": "background",
+    "scope": "auto",
+    "base": "main",
+    "preCommitHook": {
+      "enabled": false,
+      "blockOnSeverity": "high",
+      "timeoutMs": 120000,
+      "failClosed": false
+    }
   }
 }

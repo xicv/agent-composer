@@ -200,6 +200,7 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-05-24 | Step 5 v2 (real-eval-against-tasks scorer) | haiku-4-5 | 6.5 | $1.02 | 3.72M | 34 | 1 | 2 modified | +507 | 268/269 first pass; 1-line fp-precision fix → 269/269 green |
 | 2026-05-24 | Step 5 v3 (--length-lambda + --force-operator + EvolveDeps.pickOperator) | sonnet-4-6 | 6.9 | $1.22 | 1.99M | 31 | 1 | 4 modified | +366 | 275/275 first pass; lint clean; extra operators.ts edit was judgment call (added camelCase lookup) |
 | 2026-05-24 | Build 4 (worktree-sandbox real-eval refactor) | sonnet-4-6 | 10.3 | $1.50 (cap) | 2.02M | 34 | 1 | 3 modified | +190/-22 | Budget cap hit before commit; main session repaired 2 test bugs (ESM `vi.spyOn(fs, …)` → `vi.mock("node:fs", …)`; `.toContain` on args array) → 283/283 green |
+| 2026-06-09 | Codex review-gate (composer-driven triggers + mechanical pre-commit PreToolUse gate) | opus-4-8 orch + codex exec | n/a (interactive) | n/a | n/a | — | 4 code + 2 review | 4 new / 10 modified | ~+650 | All gates green: vitest 454/454, hook harness 45/0, script harness 14/0, ajv valid, release-sync in sync; agy review approve (2 low notes); feature ships OFF by default |
 
 ### Build 1 (Step 5 v1) — findings
 

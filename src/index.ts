@@ -11,6 +11,7 @@ import { applyEnvJson } from "./config/env.js";
 import { ProviderRegistry } from "./registry.js";
 import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
+import { runDoctor } from "./cli/doctor.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -29,6 +30,11 @@ async function main(): Promise<void> {
     } else {
       runInit({ cwd: process.cwd() });
     }
+    return;
+  }
+  if (subcommand === "doctor") {
+    const report = await runDoctor({ cwd: process.cwd() });
+    process.exit(report.healthy ? 0 : 1);
     return;
   }
 

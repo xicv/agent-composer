@@ -28,6 +28,7 @@ const SYNC_PAIRS = [
   { src: ".claude/agents/explorer.md",                  dest: "plugin/composer-mastermind/agents/explorer.md" },
   { src: ".claude/commands/evolve.md",                  dest: "plugin/composer-mastermind/commands/evolve.md" },
   { src: "scripts/boundary_guard.sh",                   dest: "plugin/composer-mastermind/hooks/boundary_guard.sh", exec: true },
+  { src: "scripts/precommit_codex_review.sh",           dest: "plugin/composer-mastermind/hooks/precommit_codex_review.sh", exec: true },
   { src: "scripts/learn.sh",                            dest: "plugin/composer-mastermind/hooks/learn.sh",          exec: true },
 ];
 

@@ -8,7 +8,8 @@
   ],
   "settings": {
     "PreToolUse": [
-      "bash:hooks/boundary_guard.sh"
+      "bash:hooks/boundary_guard.sh",
+      "bash:hooks/precommit_codex_review.sh"
     ],
     "PostToolUse": [
       "bash:hooks/lint-on-save.sh"

@@ -147,6 +147,39 @@ dispatch that hits a real-money provider (`anthropic`,
 CLI providers (`Codex`, `agy`) are billed separately by the user's own auth
 and do not count toward these caps. Mock providers are always free.
 
+# Codex review gate (optional)
+
+Optional cross-LLM review lane using the OpenAI `codex` Claude Code plugin:
+a different model catches issues agy / Claude miss. OFF by default via
+`composer.config.json` `codexReview.enabled`. Run `agent-composer doctor`
+to check codex CLI, plugin availability, and current gate config.
+
+Fire Codex review at composer's OWN trigger points. Do NOT enable the plugin's
+global stop-gate; it fires on every stop.
+
+- Before a commit you are about to make (`triggers.preCommit`): run
+  `codexReview.preCommitCommand` (default `review`) on the working-tree diff.
+- After a plan doc is written (`triggers.postPlan`): run
+  `codexReview.postPlanCommand` (default `adversarial-review`) on the plan
+  `.md` via focus text, challenging design before code is written.
+- Invoke via Bash: resolve plugin root from `agent-composer doctor`, then run
+  `node <root>/scripts/codex-companion.mjs <command> --background --scope <scope> [--base <base>] [focus...]`.
+- Default `execution: background`: launch with `run_in_background`, poll
+  `status` / `result`, parse review-output JSON, and surface ONLY `verdict`
+  plus one line per finding. Raw Codex output stays out.
+- Honor `codexReview.mode`: `ask` -> AskUserQuestion once before running;
+  `auto` -> run within `spendAuthorization`.
+
+## Mechanical pre-commit gate
+
+A stronger, optional enforcement: `codexReview.preCommitHook.enabled` turns the
+PreToolUse hook `precommit_codex_review.sh` into a hard gate — a `git commit`
+is DENIED when Codex review returns `needs-attention` with a finding at or above
+`preCommitHook.blockOnSeverity` (default `high`). Fail-open by default
+(`failClosed:false`): if Codex is unavailable the commit proceeds. Run
+`agent-composer doctor` to see the gate state. This is mechanical (hook-enforced),
+unlike the orchestrator-driven triggers above.
+
 # Headless invocation
 
 When composer-mastermind runs inside a headless `claude -p` (eval harness,

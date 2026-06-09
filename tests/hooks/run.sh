@@ -138,6 +138,105 @@ assert_pass_payload "composer_disabled_file_allows_write" \
 rm -f "$DISABLED_TMP"
 unset COMPOSER_DISABLED_FILE
 
+echo
+echo "=== precommit_codex_review.sh fixture harness ==="
+
+GUARD2="${PRECOMMIT_GUARD:-$REPO_ROOT/scripts/precommit_codex_review.sh}"
+if [[ ! -x "$GUARD2" ]]; then
+  FAIL=$((FAIL+1))
+  FAILED+=("precommit_codex_review.sh missing or not executable at $GUARD2")
+  printf '  FAIL  %-40s missing executable\n' "precommit_guard_exists"
+else
+  printf '  ok    %-40s executable\n' "precommit_guard_exists"
+
+  PRECOMMIT_TMP="$(mktemp -d -t composer_precommit.XXXXXX)"
+  trap 'rm -rf "$PRECOMMIT_TMP"' EXIT
+
+  REVIEW_APPROVE="$PRECOMMIT_TMP/review-approve.sh"
+  REVIEW_HIGH="$PRECOMMIT_TMP/review-high.sh"
+  REVIEW_LOW="$PRECOMMIT_TMP/review-low.sh"
+  REVIEW_FAIL="$PRECOMMIT_TMP/review-fail.sh"
+  CONFIG_ENABLED="$PRECOMMIT_TMP/enabled.json"
+  CONFIG_DISABLED="$PRECOMMIT_TMP/disabled.json"
+  CONFIG_FAIL_CLOSED="$PRECOMMIT_TMP/fail-closed.json"
+
+  cat >"$REVIEW_APPROVE" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"verdict":"approve","summary":"ok","findings":[],"next_steps":[]}'
+SH
+  cat >"$REVIEW_HIGH" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"verdict":"needs-attention","summary":"bug","findings":[{"severity":"high","title":"X","body":"b","file":"a.ts","line_start":1,"line_end":1,"confidence":0.9,"recommendation":"fix"}],"next_steps":[]}'
+SH
+  cat >"$REVIEW_LOW" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"verdict":"needs-attention","summary":"bug","findings":[{"severity":"low","title":"X","body":"b","file":"a.ts","line_start":1,"line_end":1,"confidence":0.9,"recommendation":"fix"}],"next_steps":[]}'
+SH
+  cat >"$REVIEW_FAIL" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$REVIEW_APPROVE" "$REVIEW_HIGH" "$REVIEW_LOW" "$REVIEW_FAIL"
+
+  cat >"$CONFIG_ENABLED" <<'JSON'
+{"codexReview":{"enabled":true,"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":false}}}
+JSON
+  cat >"$CONFIG_DISABLED" <<'JSON'
+{"codexReview":{"enabled":false,"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":false}}}
+JSON
+  cat >"$CONFIG_FAIL_CLOSED" <<'JSON'
+{"codexReview":{"enabled":true,"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":true}}}
+JSON
+
+  run_precommit_hook() {
+    local payload="$1" config="$2" reviewer="$3" disabled="${4:-}" out
+    out="$(printf '%s' "$payload" | COMPOSER_CONFIG="$config" COMPOSER_CODEX_REVIEW_CMD="$reviewer" COMPOSER_DISABLED="$disabled" "$GUARD2" 2>/dev/null)"
+    printf '%s' "$out"
+  }
+
+  assert_precommit_deny_payload() {
+    local name="$1" payload="$2" config="$3" reviewer="$4" disabled="${5:-}" out
+    out="$(run_precommit_hook "$payload" "$config" "$reviewer" "$disabled")"
+    if is_deny <<<"$out"; then
+      PASS=$((PASS+1))
+      printf '  ok    %-40s DENY\n' "$name"
+    else
+      FAIL=$((FAIL+1))
+      FAILED+=("$name: expected DENY, got: ${out:-<empty>}")
+      printf '  FAIL  %-40s expected DENY\n' "$name"
+    fi
+  }
+
+  assert_precommit_pass_payload() {
+    local name="$1" payload="$2" config="$3" reviewer="$4" disabled="${5:-}" out
+    out="$(run_precommit_hook "$payload" "$config" "$reviewer" "$disabled")"
+    if is_deny <<<"$out"; then
+      FAIL=$((FAIL+1))
+      FAILED+=("$name: expected PASS, got DENY: $out")
+      printf '  FAIL  %-40s expected PASS\n' "$name"
+    else
+      PASS=$((PASS+1))
+      printf '  ok    %-40s PASS\n' "$name"
+    fi
+  }
+
+  PAYLOAD_EDIT='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"a.ts","old_string":"a","new_string":"b"}}'
+  PAYLOAD_STATUS='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git status"}}'
+  PAYLOAD_COMMIT='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}'
+  PAYLOAD_DRY_RUN='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit --dry-run"}}'
+
+  assert_precommit_pass_payload "precommit_non_bash_allows" "$PAYLOAD_EDIT" "$CONFIG_ENABLED" "$REVIEW_HIGH"
+  assert_precommit_pass_payload "precommit_non_commit_allows" "$PAYLOAD_STATUS" "$CONFIG_ENABLED" "$REVIEW_HIGH"
+  assert_precommit_pass_payload "precommit_gate_disabled_allows" "$PAYLOAD_COMMIT" "$CONFIG_DISABLED" "$REVIEW_HIGH"
+  assert_precommit_pass_payload "precommit_approve_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_APPROVE"
+  assert_precommit_deny_payload "precommit_high_denies" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_HIGH"
+  assert_precommit_pass_payload "precommit_low_below_threshold_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_LOW"
+  assert_precommit_pass_payload "precommit_dry_run_allows" "$PAYLOAD_DRY_RUN" "$CONFIG_ENABLED" "$REVIEW_HIGH"
+  assert_precommit_pass_payload "precommit_composer_disabled_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_HIGH" "1"
+  assert_precommit_pass_payload "precommit_reviewer_fail_open_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_FAIL"
+  assert_precommit_deny_payload "precommit_reviewer_fail_closed_denies" "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_FAIL"
+fi
+
 
 echo
 echo "------------------------------------------"

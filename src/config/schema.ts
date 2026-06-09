@@ -68,6 +68,46 @@ export const SpendAuthorizationSchema = z
   .strict();
 export type SpendAuthorization = z.infer<typeof SpendAuthorizationSchema>;
 
+export const CodexReviewCommandSchema = z.enum(["review", "adversarial-review"]);
+export const CodexReviewModeSchema = z.enum(["ask", "auto"]);
+export const CodexReviewExecutionSchema = z.enum(["foreground", "background"]);
+export const CodexReviewScopeSchema = z.enum(["auto", "working-tree", "branch"]);
+export const CodexSeveritySchema = z.enum(["critical", "high", "medium", "low"]);
+
+export const CodexPreCommitHookSchema = z
+  .object({
+    enabled: z.boolean(),
+    blockOnSeverity: CodexSeveritySchema.optional(),
+    timeoutMs: z.number().int().min(1).optional(),
+    failClosed: z.boolean().optional(),
+  })
+  .strict();
+export type CodexPreCommitHook = z.infer<typeof CodexPreCommitHookSchema>;
+
+export const CodexReviewTriggersSchema = z
+  .object({
+    preCommit: z.boolean().optional(),
+    postPlan: z.boolean().optional(),
+  })
+  .strict();
+
+// Gates an optional cross-LLM (Codex) review at composer's own trigger points; off by default.
+export const CodexReviewSchema = z
+  .object({
+    enabled: z.boolean(),
+    triggers: CodexReviewTriggersSchema.optional(),
+    preCommitCommand: CodexReviewCommandSchema.optional(),
+    postPlanCommand: CodexReviewCommandSchema.optional(),
+    mode: CodexReviewModeSchema.optional(),
+    execution: CodexReviewExecutionSchema.optional(),
+    scope: CodexReviewScopeSchema.optional(),
+    base: z.string().min(1).optional(),
+    // Mechanical PreToolUse pre-commit gate; off by default.
+    preCommitHook: CodexPreCommitHookSchema.optional(),
+  })
+  .strict();
+export type CodexReview = z.infer<typeof CodexReviewSchema>;
+
 export const ComposerConfigSchema = z
   .object({
     roles: z
@@ -80,6 +120,7 @@ export const ComposerConfigSchema = z
       })
       .strict(),
     spendAuthorization: SpendAuthorizationSchema.optional(),
+    codexReview: CodexReviewSchema.optional(),
   })
   .strict();
 export type ComposerConfig = z.infer<typeof ComposerConfigSchema>;

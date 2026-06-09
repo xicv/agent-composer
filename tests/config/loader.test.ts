@@ -256,6 +256,124 @@ describe("parseConfig — spendAuthorization (Wave 3 audit follow-up)", () => {
   });
 });
 
+describe("parseConfig — codexReview", () => {
+  it("accepts config without codexReview (backward compat)", () => {
+    const cfg = parseConfig(VALID);
+    expect(cfg.codexReview).toBeUndefined();
+  });
+
+  it("accepts codexReview with only enabled=false", () => {
+    const cfg = parseConfig({ ...VALID, codexReview: { enabled: false } });
+    expect(cfg.codexReview?.enabled).toBe(false);
+  });
+
+  it("accepts a fully-populated codexReview block", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      codexReview: {
+        enabled: true,
+        triggers: { preCommit: true, postPlan: true },
+        preCommitCommand: "review",
+        postPlanCommand: "adversarial-review",
+        mode: "auto",
+        execution: "background",
+        scope: "branch",
+        base: "origin/main",
+      },
+    });
+    expect(cfg.codexReview).toEqual({
+      enabled: true,
+      triggers: { preCommit: true, postPlan: true },
+      preCommitCommand: "review",
+      postPlanCommand: "adversarial-review",
+      mode: "auto",
+      execution: "background",
+      scope: "branch",
+      base: "origin/main",
+    });
+  });
+
+  it("accepts codexReview with preCommitHook enabled=false", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: false },
+      },
+    });
+    expect(cfg.codexReview?.preCommitHook).toEqual({ enabled: false });
+  });
+
+  it("accepts a fully-populated preCommitHook", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      codexReview: {
+        enabled: true,
+        preCommitHook: {
+          enabled: true,
+          blockOnSeverity: "critical",
+          timeoutMs: 60000,
+          failClosed: true,
+        },
+      },
+    });
+    expect(cfg.codexReview?.preCommitHook).toEqual({
+      enabled: true,
+      blockOnSeverity: "critical",
+      timeoutMs: 60000,
+      failClosed: true,
+    });
+  });
+
+  it("requires enabled on preCommitHook", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexReview: { enabled: true, preCommitHook: {} } }),
+    ).toThrow();
+  });
+
+  it("rejects invalid preCommitHook blockOnSeverity", () => {
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        codexReview: {
+          enabled: true,
+          preCommitHook: { enabled: true, blockOnSeverity: "trivial" },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects additional properties on preCommitHook (strict)", () => {
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        codexReview: {
+          enabled: true,
+          preCommitHook: { enabled: true, bogus: 1 },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("requires enabled when codexReview is present", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexReview: {} }),
+    ).toThrow();
+  });
+
+  it("rejects unknown enum values", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexReview: { enabled: true, mode: "yolo" } }),
+    ).toThrow();
+  });
+
+  it("rejects additional properties on codexReview (strict)", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexReview: { enabled: true, bogus: 1 } }),
+    ).toThrow();
+  });
+});
+
 describe("loadConfig (disk)", () => {
   it("loads + validates JSON file from disk", () => {
     const tmp = path.join(os.tmpdir(), `composer-cfg-${Date.now()}.json`);
