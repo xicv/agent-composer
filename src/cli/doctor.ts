@@ -229,7 +229,8 @@ function loadConfigCheck(cwd: string): { ok: true; config: ComposerConfig } | { 
   const previousCwd = process.cwd();
   try {
     process.chdir(resolve(cwd));
-    return { ok: true, config: loadConfig("composer.config.json") };
+    const configPath = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
+    return { ok: true, config: loadConfig(configPath) };
   } catch (error) {
     return {
       ok: false,
