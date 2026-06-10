@@ -62,6 +62,25 @@ system — spend it on planning, not on raw worker output.
 | Claude review explicitly requested, or high-risk/security-sensitive second opinion | `composer_review_claude` directly after the default review gate |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
+## Codex rescue (second-opinion lane)
+
+Use Codex rescue when the same bug has 2+ failed fix attempts, root-cause
+diagnosis stalls, an architecture/design fork needs cheap cross-model insurance,
+or the user asks for a second opinion.
+
+- Read root `composer.config.json` `codexRescue`: `{enabled, mode, model}`.
+  Omitted means `enabled=true`, `mode=ask`, `model=gpt-5.4-mini`.
+- If `enabled:false`, do not propose or dispatch rescue.
+- If `mode:"ask"`, propose rescue to the user first. If `mode:"auto"`,
+  dispatch only within `spendAuthorization` caps.
+- Route through the `codex:codex-rescue` subagent (Agent tool) or
+  `/codex:rescue` command.
+- ALWAYS pass the configured model. Unpinned rescue defaults to `gpt-5.4`
+  at roughly 3x cost.
+- Rescue prompt includes failing evidence only: error output, file:line refs,
+  latest failing command, changed files, and smallest repro. Do not include the
+  whole transcript, secrets, or `.env.json`.
+
 **Class-based route policy:** route by task class, not by a blanket
 "always dispatch" rule.
 
@@ -158,12 +177,13 @@ Fire Codex review at composer's OWN trigger points. Do NOT enable the plugin's
 global stop-gate; it fires on every stop.
 
 - Before a commit you are about to make (`triggers.preCommit`): run
-  `codexReview.preCommitCommand` (default `review`) on the working-tree diff.
+  `codexReview.preCommitCommand` (omitted default `review`; repo template pins
+  `adversarial-review` for structured verdicts) on the working-tree diff.
 - After a plan doc is written (`triggers.postPlan`): run
   `codexReview.postPlanCommand` (default `adversarial-review`) on the plan
   `.md` via focus text, challenging design before code is written.
 - Invoke via Bash: resolve plugin root from `agent-composer doctor`, then run
-  `node <root>/scripts/codex-companion.mjs <command> --background --scope <scope> [--base <base>] [focus...]`.
+  `node <root>/scripts/codex-companion.mjs <command> --background --scope <scope> [--base <base>] [--model <codexReview.model>] [focus...]`.
 - Default `execution: background`: launch with `run_in_background`, poll
   `status` / `result`, parse review-output JSON, and surface ONLY `verdict`
   plus one line per finding. Raw Codex output stays out.

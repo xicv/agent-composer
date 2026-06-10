@@ -75,6 +75,12 @@ SUBAGENT="$(jq -r '.tool_input.subagent_type // empty' <<<"$INPUT" 2>/dev/null)"
 PROMPT="$(jq -r '.tool_input.prompt // empty' <<<"$INPUT" 2>/dev/null)"
 DESCRIPTION="$(jq -r '.tool_input.description // empty' <<<"$INPUT" 2>/dev/null)"
 PROMPT_LEN="${#PROMPT}"
+NORMALIZED_PAYLOAD="$(
+  { printf '%s\n' "$DESCRIPTION"; printf '%s' "$PROMPT"; } \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr '\n\r\t' '   ' \
+    | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
+)"
 
 HAS_FILE_REF="false"
 if printf '%s' "$PROMPT" | grep -qE '(\.[a-z]{1,4}|src/|tests/|lib/|app/)[A-Za-z0-9._/-]*(:[0-9]+)?' 2>/dev/null; then
@@ -82,23 +88,47 @@ if printf '%s' "$PROMPT" | grep -qE '(\.[a-z]{1,4}|src/|tests/|lib/|app/)[A-Za-z
 fi
 
 HAS_DESTRUCTIVE="false"
-if printf '%s' "$PROMPT" | grep -qiE '\b(rm -rf|drop table|delete from|destroy|reset --hard|--force)\b' 2>/dev/null; then
+if printf '%s' "$NORMALIZED_PAYLOAD" | grep -qE '\b(rm -rf|drop table|delete from|destroy|reset --hard|--force)\b' 2>/dev/null; then
   HAS_DESTRUCTIVE="true"
 fi
 
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EPOCH_SECOND="$(date +%s)"
 LOG="/tmp/composer-dispatch-log.jsonl"
+DEDUP_SENTINEL="/tmp/composer-dispatch-guard-last"
+DEDUP_HASH="$(
+  { printf '%s\n' "$DESCRIPTION"; printf '%s' "$PROMPT"; } \
+    | shasum -a 256 2>/dev/null \
+    | awk '{print $1}' 2>/dev/null
+)"
+if [[ -z "$DEDUP_HASH" ]]; then
+  DEDUP_HASH="$(
+    { printf '%s\n' "$DESCRIPTION"; printf '%s' "$PROMPT"; } \
+      | cksum 2>/dev/null \
+      | awk '{print $1":"$2}' 2>/dev/null
+  )"
+fi
+DEDUP_KEY="${DEDUP_HASH}:${EPOCH_SECOND}"
+LAST_DEDUP_KEY="$(cat "$DEDUP_SENTINEL" 2>/dev/null || true)"
+SKIP_LOG="false"
+if [[ -n "$DEDUP_HASH" && "$DEDUP_KEY" == "$LAST_DEDUP_KEY" ]]; then
+  SKIP_LOG="true"
+elif [[ -n "$DEDUP_HASH" ]]; then
+  printf '%s' "$DEDUP_KEY" > "$DEDUP_SENTINEL" 2>/dev/null || true
+fi
 
 # Phase 1: always log. Phase 2 (below) may then deny.
-jq -nc \
-  --arg ts "$TS" \
-  --arg subagent "$SUBAGENT" \
-  --arg description "$DESCRIPTION" \
-  --argjson prompt_len "$PROMPT_LEN" \
-  --argjson has_file_ref "$HAS_FILE_REF" \
-  --argjson has_destructive "$HAS_DESTRUCTIVE" \
-  '{ts:$ts, subagent_type:$subagent, description:$description, prompt_len:$prompt_len, has_file_ref:$has_file_ref, has_destructive:$has_destructive}' \
-  >> "$LOG" 2>/dev/null || true
+if [[ "$SKIP_LOG" != "true" ]]; then
+  jq -nc \
+    --arg ts "$TS" \
+    --arg subagent "$SUBAGENT" \
+    --arg description "$DESCRIPTION" \
+    --argjson prompt_len "$PROMPT_LEN" \
+    --argjson has_file_ref "$HAS_FILE_REF" \
+    --argjson has_destructive "$HAS_DESTRUCTIVE" \
+    '{ts:$ts, subagent_type:$subagent, description:$description, prompt_len:$prompt_len, has_file_ref:$has_file_ref, has_destructive:$has_destructive}' \
+    >> "$LOG" 2>/dev/null || true
+fi
 
 # Phase 2 hint: best-effort deterministic sizing/routing signal. This is
 # advisory only; failure to compute or parse it must not affect permission.
@@ -125,12 +155,14 @@ fi
 HINT_VALID="false"
 if [[ -n "$HINT_JSON" ]] && jq -e . >/dev/null 2>&1 <<<"$HINT_JSON"; then
   HINT_VALID="true"
-  jq -nc \
-    --arg ts "$TS" \
-    --arg subagent "$SUBAGENT" \
-    --argjson hint "$HINT_JSON" \
-    '{ts:$ts, kind:"hint", subagent_type:$subagent, hint:$hint}' \
-    >> "$LOG" 2>/dev/null || true
+  if [[ "$SKIP_LOG" != "true" ]]; then
+    jq -nc \
+      --arg ts "$TS" \
+      --arg subagent "$SUBAGENT" \
+      --argjson hint "$HINT_JSON" \
+      '{ts:$ts, kind:"hint", subagent_type:$subagent, hint:$hint}' \
+      >> "$LOG" 2>/dev/null || true
+  fi
 fi
 
 # Phase 2 deny rule: destructive-op refusals must NOT be dispatched.
@@ -140,8 +172,8 @@ fi
 # is one of composer's roles.
 case "$SUBAGENT" in
   coder|researcher|reviewer)
-    if [[ "$HAS_DESTRUCTIVE" == "true" && "$PROMPT_LEN" -lt 200 ]]; then
-      emit_deny "dispatch_guard: destructive-op pattern detected in tiny prompt; refuse inline (SKILL frontmatter SKIP-condition b). Subagent=${SUBAGENT}, len=${PROMPT_LEN}."
+    if [[ "$HAS_DESTRUCTIVE" == "true" ]]; then
+      emit_deny "dispatch_guard: destructive-op pattern detected; refuse inline (SKILL frontmatter SKIP-condition b). Subagent=${SUBAGENT}, len=${PROMPT_LEN}."
     fi
     ;;
 esac

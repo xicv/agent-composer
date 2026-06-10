@@ -84,6 +84,22 @@ export const CodexPreCommitHookSchema = z
   .strict();
 export type CodexPreCommitHook = z.infer<typeof CodexPreCommitHookSchema>;
 
+export const CodexWarmCacheSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    maxAgeMinutes: z.number().int().min(1).default(30),
+    timeoutMs: z.number().int().min(1).default(300000),
+  })
+  .strict();
+export type CodexWarmCache = z.infer<typeof CodexWarmCacheSchema>;
+
+export const CodexReviewNotifySchema = z
+  .object({
+    desktop: z.boolean().default(false),
+  })
+  .strict();
+export type CodexReviewNotify = z.infer<typeof CodexReviewNotifySchema>;
+
 export const CodexReviewTriggersSchema = z
   .object({
     preCommit: z.boolean().optional(),
@@ -102,11 +118,23 @@ export const CodexReviewSchema = z
     execution: CodexReviewExecutionSchema.optional(),
     scope: CodexReviewScopeSchema.optional(),
     base: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
     // Mechanical PreToolUse pre-commit gate; off by default.
     preCommitHook: CodexPreCommitHookSchema.optional(),
+    warmCache: CodexWarmCacheSchema.optional(),
+    notify: CodexReviewNotifySchema.optional(),
   })
   .strict();
 export type CodexReview = z.infer<typeof CodexReviewSchema>;
+
+export const CodexRescueSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    mode: z.enum(["ask", "auto"]).default("ask"),
+    model: z.string().min(1).default("gpt-5.4-mini"),
+  })
+  .strict();
+export type CodexRescue = z.infer<typeof CodexRescueSchema>;
 
 export const ComposerConfigSchema = z
   .object({
@@ -121,6 +149,7 @@ export const ComposerConfigSchema = z
       .strict(),
     spendAuthorization: SpendAuthorizationSchema.optional(),
     codexReview: CodexReviewSchema.optional(),
+    codexRescue: CodexRescueSchema.optional(),
   })
   .strict();
 export type ComposerConfig = z.infer<typeof ComposerConfigSchema>;

@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../config/loader.js";
-import type { CodexReview, ComposerConfig } from "../config/schema.js";
+import type { CodexRescue, CodexReview, ComposerConfig } from "../config/schema.js";
 
 export interface CodexPluginRoot {
   root: string;
@@ -38,12 +38,27 @@ interface ResolvedCodexReview {
   execution: "foreground" | "background";
   scope: "auto" | "working-tree" | "branch";
   base: string;
+  model?: string;
   preCommitHook: {
     enabled: boolean;
     blockOnSeverity: "critical" | "high" | "medium" | "low";
     timeoutMs: number;
     failClosed: boolean;
   };
+  warmCache: {
+    enabled: boolean;
+    maxAgeMinutes: number;
+    timeoutMs: number;
+  };
+  notify: {
+    desktop: boolean;
+  };
+}
+
+interface ResolvedCodexRescue {
+  enabled: boolean;
+  mode: "ask" | "auto";
+  model: string;
 }
 
 const DEFAULT_CODEX_REVIEW: ResolvedCodexReview = {
@@ -64,6 +79,20 @@ const DEFAULT_CODEX_REVIEW: ResolvedCodexReview = {
     timeoutMs: 120000,
     failClosed: false,
   },
+  warmCache: {
+    enabled: false,
+    maxAgeMinutes: 30,
+    timeoutMs: 300000,
+  },
+  notify: {
+    desktop: false,
+  },
+};
+
+const DEFAULT_CODEX_RESCUE: ResolvedCodexRescue = {
+  enabled: true,
+  mode: "ask",
+  model: "gpt-5.4-mini",
 };
 
 export function resolveCodexPluginRoot(pluginsDir: string): CodexPluginRoot | null {
@@ -82,6 +111,7 @@ export function resolveCodexPluginRoot(pluginsDir: string): CodexPluginRoot | nu
 export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
   const codexReview = config.codexReview;
   const resolved = resolveCodexReview(codexReview);
+  const rescue = resolveCodexRescue(config.codexRescue);
   const enabledCheck = codexReview
     ? reviewEnabledCheck(resolved)
     : {
@@ -103,9 +133,22 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
         `preCommitCommand=${resolved.preCommitCommand}, ` +
         `postPlanCommand=${resolved.postPlanCommand}, ` +
         `mode=${resolved.mode}, execution=${resolved.execution}, ` +
-        `scope=${resolved.scope}, base=${resolved.base}`,
+        `scope=${resolved.scope}, base=${resolved.base}, ` +
+        `model=${resolved.model ?? "unset"}`,
     },
     preCommitHookCheck(resolved),
+    preCommitCommandCheck(resolved),
+    warmCacheCheck(resolved),
+    {
+      name: "config: codexReview notify",
+      status: "pass",
+      detail: `desktop=${resolved.notify.desktop ? "on" : "off"}`,
+    },
+    {
+      name: "config: codexRescue",
+      status: "pass",
+      detail: `enabled=${rescue.enabled}, mode=${rescue.mode}, model=${rescue.model}`,
+    },
   ];
 }
 
@@ -184,6 +227,7 @@ function resolveCodexReview(codexReview: CodexReview | undefined): ResolvedCodex
     execution: codexReview?.execution ?? DEFAULT_CODEX_REVIEW.execution,
     scope: codexReview?.scope ?? DEFAULT_CODEX_REVIEW.scope,
     base: codexReview?.base ?? DEFAULT_CODEX_REVIEW.base,
+    model: codexReview?.model ?? DEFAULT_CODEX_REVIEW.model,
     preCommitHook: {
       enabled: codexReview?.preCommitHook?.enabled ?? DEFAULT_CODEX_REVIEW.preCommitHook.enabled,
       blockOnSeverity:
@@ -191,6 +235,22 @@ function resolveCodexReview(codexReview: CodexReview | undefined): ResolvedCodex
       timeoutMs: codexReview?.preCommitHook?.timeoutMs ?? DEFAULT_CODEX_REVIEW.preCommitHook.timeoutMs,
       failClosed: codexReview?.preCommitHook?.failClosed ?? DEFAULT_CODEX_REVIEW.preCommitHook.failClosed,
     },
+    warmCache: {
+      enabled: codexReview?.warmCache?.enabled ?? DEFAULT_CODEX_REVIEW.warmCache.enabled,
+      maxAgeMinutes: codexReview?.warmCache?.maxAgeMinutes ?? DEFAULT_CODEX_REVIEW.warmCache.maxAgeMinutes,
+      timeoutMs: codexReview?.warmCache?.timeoutMs ?? DEFAULT_CODEX_REVIEW.warmCache.timeoutMs,
+    },
+    notify: {
+      desktop: codexReview?.notify?.desktop ?? DEFAULT_CODEX_REVIEW.notify.desktop,
+    },
+  };
+}
+
+function resolveCodexRescue(codexRescue: CodexRescue | undefined): ResolvedCodexRescue {
+  return {
+    enabled: codexRescue?.enabled ?? DEFAULT_CODEX_RESCUE.enabled,
+    mode: codexRescue?.mode ?? DEFAULT_CODEX_RESCUE.mode,
+    model: codexRescue?.model ?? DEFAULT_CODEX_RESCUE.model,
   };
 }
 
@@ -223,6 +283,45 @@ function preCommitHookCheck(resolved: ResolvedCodexReview): DoctorCheck {
         status: "warn",
         detail: "mechanical pre-commit gate OFF",
       };
+}
+
+function preCommitCommandCheck(resolved: ResolvedCodexReview): DoctorCheck {
+  if (resolved.preCommitHook.enabled && resolved.preCommitCommand === "review") {
+    return {
+      name: "config: codexReview preCommitCommand",
+      status: "warn",
+      detail:
+        "preCommitCommand 'review' returns free-text only — the mechanical gate cannot extract a verdict; use 'adversarial-review'",
+    };
+  }
+  return {
+    name: "config: codexReview preCommitCommand",
+    status: "pass",
+    detail: `preCommitCommand=${resolved.preCommitCommand}`,
+  };
+}
+
+function warmCacheCheck(resolved: ResolvedCodexReview): DoctorCheck {
+  const warmCache = resolved.warmCache;
+  if (warmCache.enabled && !resolved.preCommitHook.enabled) {
+    return {
+      name: "config: codexReview warmCache",
+      status: "warn",
+      detail: `warm cache is inert without preCommitHook, maxAgeMinutes=${warmCache.maxAgeMinutes}`,
+    };
+  }
+  if (warmCache.enabled && !resolved.enabled) {
+    return {
+      name: "config: codexReview warmCache",
+      status: "warn",
+      detail: `on but inert because codexReview.enabled=false, maxAgeMinutes=${warmCache.maxAgeMinutes}`,
+    };
+  }
+  return {
+    name: "config: codexReview warmCache",
+    status: "pass",
+    detail: `${warmCache.enabled ? "on" : "off"}, maxAgeMinutes=${warmCache.maxAgeMinutes}`,
+  };
 }
 
 function loadConfigCheck(cwd: string): { ok: true; config: ComposerConfig } | { ok: false; check: DoctorCheck } {

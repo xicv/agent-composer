@@ -279,6 +279,9 @@ describe("parseConfig — codexReview", () => {
         execution: "background",
         scope: "branch",
         base: "origin/main",
+        model: "gpt-5.4-mini",
+        warmCache: { enabled: true, maxAgeMinutes: 15, timeoutMs: 300000 },
+        notify: { desktop: false },
       },
     });
     expect(cfg.codexReview).toEqual({
@@ -290,7 +293,27 @@ describe("parseConfig — codexReview", () => {
       execution: "background",
       scope: "branch",
       base: "origin/main",
+      model: "gpt-5.4-mini",
+      warmCache: { enabled: true, maxAgeMinutes: 15, timeoutMs: 300000 },
+      notify: { desktop: false },
     });
+  });
+
+  it("applies defaults for empty optional codexReview nested blocks", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      codexReview: {
+        enabled: true,
+        warmCache: {},
+        notify: {},
+      },
+    });
+    expect(cfg.codexReview?.warmCache).toEqual({
+      enabled: false,
+      maxAgeMinutes: 30,
+      timeoutMs: 300000,
+    });
+    expect(cfg.codexReview?.notify).toEqual({ desktop: false });
   });
 
   it("accepts codexReview with preCommitHook enabled=false", () => {
@@ -370,6 +393,31 @@ describe("parseConfig — codexReview", () => {
   it("rejects additional properties on codexReview (strict)", () => {
     expect(() =>
       parseConfig({ ...VALID, codexReview: { enabled: true, bogus: 1 } }),
+    ).toThrow();
+  });
+});
+
+describe("parseConfig — codexRescue", () => {
+  it("accepts codexRescue with defaults", () => {
+    const cfg = parseConfig({ ...VALID, codexRescue: {} });
+    expect(cfg.codexRescue).toEqual({
+      enabled: true,
+      mode: "ask",
+      model: "gpt-5.4-mini",
+    });
+  });
+
+  it("accepts fully-populated codexRescue", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      codexRescue: { enabled: false, mode: "auto", model: "gpt-5.4" },
+    });
+    expect(cfg.codexRescue).toEqual({ enabled: false, mode: "auto", model: "gpt-5.4" });
+  });
+
+  it("rejects additional properties on codexRescue", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexRescue: { enabled: true, bogus: 1 } }),
     ).toThrow();
   });
 });

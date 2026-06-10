@@ -58,17 +58,38 @@ mkdir -p "$LEARN_DIR" 2>/dev/null || exit 0
 TRIGGER='(?i)\b(no|don.t|do not|wrong|stop|actually|instead|never|please don.t)\b'
 
 # Anthropic transcripts are JSONL (one event per line). Filter user-role
-# events whose content matches the trigger regex, then append a short
-# bullet per match. Truncate to 240 chars to keep the log scannable.
-{
-  printf '\n## Session ended %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  jq -r --arg trig "$TRIGGER" '
-    select(.role == "user" or .type == "user")
-    | (.content // .message // "") as $raw
-    | (if ($raw | type) == "array" then ($raw | map(.text // "") | join(" ")) else ($raw | tostring) end) as $text
-    | select($text | test($trig))
-    | "- " + ($text | gsub("\\s+"; " ") | .[0:240])
-  ' "$TRANSCRIPT_PATH" 2>/dev/null
-} >> "$OUT" 2>/dev/null || true
+# events whose content matches the trigger regex, then append new short
+# bullets only. Truncate to 400 chars to keep the log scannable.
+MATCHES="$(mktemp -t composer_learnings.XXXXXX)" || exit 0
+jq -r --arg trig "$TRIGGER" '
+  select(.role == "user" or .type == "user")
+  | (.content // .message // "") as $raw
+  | (if ($raw | type) == "array" then ($raw | map(.text // "") | join(" ")) else ($raw | tostring) end) as $text
+  | select($text | test($trig))
+  | "- " + ($text | gsub("\\s+"; " ") | .[0:400])
+' "$TRANSCRIPT_PATH" 2>/dev/null > "$MATCHES" || {
+  rm -f "$MATCHES"
+  exit 0
+}
+
+NEW_MATCHES="$(mktemp -t composer_learnings_new.XXXXXX)" || {
+  rm -f "$MATCHES"
+  exit 0
+}
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  if [[ ! -f "$OUT" ]] || ! grep -Fxq -- "$line" "$OUT" 2>/dev/null; then
+    printf '%s\n' "$line" >> "$NEW_MATCHES"
+  fi
+done < "$MATCHES"
+
+if [[ -s "$NEW_MATCHES" ]]; then
+  {
+    printf '\n## Session ended %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    cat "$NEW_MATCHES"
+  } >> "$OUT" 2>/dev/null || true
+fi
+
+rm -f "$MATCHES" "$NEW_MATCHES"
 
 exit 0

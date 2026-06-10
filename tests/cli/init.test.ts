@@ -60,8 +60,9 @@ describe("composer init", () => {
     expect(cfg.roles.coderCli.retries).toBe(0);
     expect(cfg.roles.reviewer.provider).toBe("cli");
     expect(cfg.roles.reviewer.cli).toContain("--print-timeout");
+    expect(cfg.roles.reviewer.cli).toContain("110s");
     expect(cfg.roles.reviewer.timeoutMs).toBe(120000);
-    expect(cfg.roles.reviewer.retries).toBe(0);
+    expect(cfg.roles.reviewer.retries).toBe(1);
     expect(cfg.roles.reviewerClaude).toBeDefined();
     expect(cfg.roles.reviewerClaude?.provider).toBe("cli");
     expect(cfg.roles.reviewerClaude?.cli).toContain("claude");
@@ -70,6 +71,8 @@ describe("composer init", () => {
     expect(cfg.roles.reviewerClaude?.retries).toBe(0);
     expect(cfg.spendAuthorization.mode).toBe("interactive");
     expect(cfg.spendAuthorization.maxUsdPerCall).toBe(0.5);
+    expect(cfg.codexReview.preCommitCommand).toBe("adversarial-review");
+    expect(cfg.codexReview.model).toBe("gpt-5.4-mini");
   });
 
   it("does NOT overwrite an existing composer.config.json", () => {

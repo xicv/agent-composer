@@ -35,3 +35,7 @@ coverage/
 # Composer brief scratchpad (per-run worker dispatch maps)
 .composer/briefs/
 .composer/handoffs/
+
+# local session memory (never commit)
+AGENTS.md
+HANDOFF.md

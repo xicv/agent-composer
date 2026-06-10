@@ -297,6 +297,7 @@ export class CLIProvider implements IProvider {
     status: "success" | "transient" | "error";
     error?: string;
   }): void {
+    if (process.env["VITEST"]) return;
     try {
       fs.appendFileSync(
         "/tmp/composer-cli-usage.jsonl",

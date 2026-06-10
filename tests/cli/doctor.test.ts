@@ -70,6 +70,14 @@ describe("doctor config checks", () => {
       status: "warn",
       detail: expect.stringContaining("OFF"),
     });
+    expect(checks.find((check) => check.name === "config: codexReview warmCache")).toMatchObject({
+      status: "pass",
+      detail: expect.stringContaining("off"),
+    });
+    expect(checks.find((check) => check.name === "config: codexReview notify")?.detail)
+      .toContain("desktop=off");
+    expect(checks.find((check) => check.name === "config: codexRescue")?.detail)
+      .toContain("enabled=true");
   });
 
   it("reports enabled triggers and resolved defaults without throwing", () => {
@@ -91,6 +99,54 @@ describe("doctor config checks", () => {
     const defaults = checks.find((check) => check.name === "config: codexReview defaults")?.detail;
     expect(defaults).toContain("mode=ask");
     expect(defaults).toContain("execution=background");
+    expect(defaults).toContain("model=unset");
+  });
+
+  it("warns when the mechanical pre-commit gate uses free-text review output", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitCommand: "review",
+        preCommitHook: { enabled: true },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexReview preCommitCommand")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("free-text only"),
+    });
+  });
+
+  it("reports configured codexReview.model in defaults", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        model: "gpt-5.4-mini",
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexReview defaults")?.detail)
+      .toContain("model=gpt-5.4-mini");
+  });
+
+  it("warns when warmCache is enabled while codexReview is disabled", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: false,
+        warmCache: { enabled: true, maxAgeMinutes: 10, timeoutMs: 300000 },
+      },
+      codexRescue: { enabled: true, mode: "auto", model: "gpt-5.4-mini" },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexReview warmCache")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("inert"),
+    });
+    expect(checks.find((check) => check.name === "config: codexRescue")?.detail)
+      .toContain("mode=auto");
   });
 });
 

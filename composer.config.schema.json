@@ -40,6 +40,9 @@
     },
     "codexReview": {
       "$ref": "#/$defs/codexReview"
+    },
+    "codexRescue": {
+      "$ref": "#/$defs/codexRescue"
     }
   },
   "$defs": {
@@ -116,8 +119,82 @@
           "minLength": 1,
           "description": "Base branch for branch-scoped review. Omitted = main."
         },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional Codex model passed to codex-companion via --model."
+        },
         "preCommitHook": {
           "$ref": "#/$defs/codexPreCommitHook"
+        },
+        "warmCache": {
+          "$ref": "#/$defs/codexWarmCache"
+        },
+        "notify": {
+          "$ref": "#/$defs/codexReviewNotify"
+        }
+      }
+    },
+    "codexWarmCache": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional background warm cache for the mechanical Codex pre-commit gate. Omitted or disabled = off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, Stop hooks may warm a cached Codex review verdict for the current diff."
+        },
+        "maxAgeMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Maximum age for cached pre-commit verdicts. Omitted = 30."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300000,
+          "description": "Warm review wall-clock timeout in milliseconds. Omitted = 300000."
+        }
+      }
+    },
+    "codexReviewNotify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional user notifications for Codex review-gate activity.",
+      "properties": {
+        "desktop": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, use macOS desktop notifications for sync review start and deny events."
+        }
+      }
+    },
+    "codexRescue": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional guidance-only Codex Rescue integration settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, skills may suggest Codex Rescue for stuck or failing work."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "default": "ask",
+          "description": "ask: request confirmation before rescue. auto: allow documented rescue flow to proceed."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "default": "gpt-5.4-mini",
+          "description": "Model label used in Codex Rescue guidance."
         }
       }
     },

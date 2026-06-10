@@ -127,20 +127,22 @@ export class AnthropicCompatibleProvider implements IProvider {
     const durationMs = Date.now() - startedAt;
 
     // Best-effort GLM cache-hit telemetry
-    try {
-      const fs = await import("node:fs");
-      const entry = {
-        ts: new Date().toISOString(),
-        model: this.modelLabel,
-        input_tokens: msg.usage.input_tokens,
-        output_tokens: msg.usage.output_tokens,
-        cache_creation_input_tokens: msg.usage.cache_creation_input_tokens ?? 0,
-        cache_read_input_tokens: msg.usage.cache_read_input_tokens ?? 0,
-        duration_ms: durationMs,
-      };
-      fs.appendFileSync("/tmp/composer-glm-usage.jsonl", JSON.stringify(entry) + "\n");
-    } catch {
-      // best-effort telemetry; never break the provider on log failure
+    if (!process.env["VITEST"]) {
+      try {
+        const fs = await import("node:fs");
+        const entry = {
+          ts: new Date().toISOString(),
+          model: this.modelLabel,
+          input_tokens: msg.usage.input_tokens,
+          output_tokens: msg.usage.output_tokens,
+          cache_creation_input_tokens: msg.usage.cache_creation_input_tokens ?? 0,
+          cache_read_input_tokens: msg.usage.cache_read_input_tokens ?? 0,
+          duration_ms: durationMs,
+        };
+        fs.appendFileSync("/tmp/composer-glm-usage.jsonl", JSON.stringify(entry) + "\n");
+      } catch {
+        // best-effort telemetry; never break the provider on log failure
+      }
     }
 
     const text = msg.content

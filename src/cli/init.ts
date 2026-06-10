@@ -66,9 +66,9 @@ const DEFAULT_COMPOSER_CONFIG = {
     },
     reviewer: {
       provider: "cli",
-      cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
+      cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "110s", "-p"],
       timeoutMs: 120000,
-      retries: 0,
+      retries: 1,
     },
     reviewerClaude: {
       provider: "cli",
@@ -99,6 +99,38 @@ const DEFAULT_COMPOSER_CONFIG = {
     mode: "interactive",
     maxUsdPerCall: 0.5,
     maxUsdPerSession: 5.0,
+  },
+  codexReview: {
+    enabled: false,
+    triggers: {
+      preCommit: true,
+      postPlan: true,
+    },
+    preCommitCommand: "adversarial-review",
+    postPlanCommand: "adversarial-review",
+    mode: "ask",
+    execution: "background",
+    scope: "auto",
+    base: "main",
+    model: "gpt-5.4-mini",
+    preCommitHook: {
+      enabled: false,
+      blockOnSeverity: "high",
+      timeoutMs: 120000,
+      failClosed: false,
+    },
+    warmCache: {
+      enabled: false,
+      maxAgeMinutes: 30,
+    },
+    notify: {
+      desktop: false,
+    },
+  },
+  codexRescue: {
+    enabled: true,
+    mode: "ask",
+    model: "gpt-5.4-mini",
   },
 };
 
