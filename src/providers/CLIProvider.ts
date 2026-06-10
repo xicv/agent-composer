@@ -172,15 +172,17 @@ export class CLIProvider implements IProvider {
     if (!bin) {
       throw new Error("CLIProvider: argv missing binary");
     }
-    const cwd = input.cwd ?? this.cwd;
+    const baseCwd = input.cwd ?? this.cwd;
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
-      const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt);
+      const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt, {
+        projectDir: input.projectDir,
+      });
       const startedAt = Date.now();
       try {
         const { stdout } = await this.exec(bin, execution.args, {
-          cwd,
+          cwd: execution.cwd ?? baseCwd,
           maxBuffer: this.maxBuffer,
           timeout: this.timeoutMs,
           signal: input.signal,
@@ -242,20 +244,30 @@ export class CLIProvider implements IProvider {
     bin: string,
     staticArgs: ReadonlyArray<string>,
     prompt: string,
-  ): { args: string[]; finalMessagePath?: string; cleanup: () => void } {
+    options: { projectDir?: string } = {},
+  ): { args: string[]; cwd?: string; finalMessagePath?: string; cleanup: () => void } {
     const args = [...staticArgs];
     let tempDir: string | undefined;
     let finalMessagePath = CLIProvider.findFlagValue(args, "--output-last-message");
+    let cwd: string | undefined;
 
-    if (CLIProvider.isCodexExec(bin, args) && !finalMessagePath) {
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-codex-"));
-      finalMessagePath = path.join(tempDir, "last-message.txt");
-      args.push("--output-last-message", finalMessagePath);
+    if (CLIProvider.isCodexExec(bin, args)) {
+      if (options.projectDir && !CLIProvider.hasCodexCd(args)) {
+        args.splice(CLIProvider.codexExecIndex(args), 0, "-C", options.projectDir);
+      }
+      if (!finalMessagePath) {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-codex-"));
+        finalMessagePath = path.join(tempDir, "last-message.txt");
+        args.push("--output-last-message", finalMessagePath);
+      }
+    } else if (options.projectDir) {
+      cwd = options.projectDir;
     }
 
     args.push(prompt);
     return {
       args,
+      cwd,
       finalMessagePath,
       cleanup: () => {
         if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
@@ -356,6 +368,10 @@ export class CLIProvider implements IProvider {
       return -1;
     }
     return -1;
+  }
+
+  private static hasCodexCd(args: ReadonlyArray<string>): boolean {
+    return args.some((arg) => arg === "-C" || arg === "--cd" || arg.startsWith("--cd="));
   }
 
   private static findFlagValue(

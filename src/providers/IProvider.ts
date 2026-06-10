@@ -8,6 +8,7 @@ export interface IProviderExecuteInput {
   context?: string;
   maxTokens?: number;
   cwd?: string;
+  projectDir?: string;
   signal?: AbortSignal;
 }
 

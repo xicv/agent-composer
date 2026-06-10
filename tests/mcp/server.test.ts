@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -10,6 +10,7 @@ import { ProviderRegistry } from "../../src/registry.js";
 import { parseConfig } from "../../src/config/loader.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
 import { MockProvider } from "../../src/providers/MockProvider.js";
+import type { IProvider } from "../../src/providers/IProvider.js";
 
 const allMockConfig: ComposerConfig = parseConfig({
   roles: {
@@ -23,6 +24,27 @@ const allMockConfig: ComposerConfig = parseConfig({
 
 async function bootClient(root?: string) {
   const registry = new ProviderRegistry(allMockConfig);
+  const server = createComposerServer(registry, root ? { root } : {});
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "composer-test-client", version: "0.0.0" });
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  return { client, server, registry };
+}
+
+async function bootClientWithProviders(
+  providers: Record<string, IProvider>,
+  root?: string,
+) {
+  const fallback = new MockProvider();
+  const registry = {
+    getProviderForRole(role: string): IProvider {
+      return providers[role] ?? fallback;
+    },
+  } as unknown as ProviderRegistry;
   const server = createComposerServer(registry, root ? { root } : {});
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -68,6 +90,15 @@ describe("composer MCP server", () => {
     expect(byName["composer_code"]?.description).not.toContain("MANDATORY");
     expect(byName["composer_code_cli"]?.description).toContain("Generate AND APPLY");
     expect(byName["composer_code_cli"]?.description).toContain("Prefer");
+  });
+
+  it("declares optional projectDir on direct apply tool schemas", async () => {
+    const { client } = await bootClient();
+    const { tools } = await client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+
+    expect(JSON.stringify(byName["composer_code_cli"]?.inputSchema)).toContain("projectDir");
+    expect(JSON.stringify(byName["composer_code_chain"]?.inputSchema)).toContain("projectDir");
   });
 
   it("marks research and review tools as direct bounded off-CC lanes", async () => {
@@ -155,6 +186,117 @@ describe("composer MCP server", () => {
       expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_cli validates projectDir and forwards it separately", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const target = mkdtempSync(join(tmpdir(), "composer-target-"));
+    try {
+      const { client, registry } = await bootClient(root);
+      await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "apply with codex", projectDir: target },
+      });
+      const provider = registry.getProviderForRole("coderCli");
+      expect(provider).toBeInstanceOf(MockProvider);
+      expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
+      expect((provider as MockProvider).calls[0]?.projectDir).toBe(realpathSync(target));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_cli rejects non-absolute projectDir", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_code_cli",
+      arguments: { prompt: "apply with codex", projectDir: "relative/path" },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("projectDir must be an absolute path");
+  });
+
+  it("composer_code_chain rejects path escapes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: ../outside.txt", "```txt", "bad", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("outside projectDir");
+      expect(existsSync(resolve(root, "../outside.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain returns an error when apply produces zero changes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      writeFileSync(join(root, "same.txt"), "same\n", "utf8");
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: same.txt", "```txt", "same", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("apply produced no changes");
+      expect(JSON.stringify(result.content)).toContain(`target was ${realpathSync(root)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain applies changed files under projectDir and reports status", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const target = mkdtempSync(join(tmpdir(), "composer-target-"));
+    try {
+      writeFileSync(join(target, "same.txt"), "same\n", "utf8");
+      const coder = new MockProvider({
+        responses: [
+          [
+            "FILE: src/new.ts",
+            "```ts",
+            "export const value = 1;",
+            "```",
+            "FILE: same.txt",
+            "```txt",
+            "same",
+            "```",
+          ].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it", projectDir: target },
+      });
+      expect(result.isError).not.toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(text).toContain(`projectDir ${realpathSync(target)}`);
+      expect(text).toContain("src/new.ts=changed");
+      expect(text).toContain("same.txt=unchanged");
+      expect(readFileSync(join(target, "src/new.ts"), "utf8")).toBe(
+        "export const value = 1;\n",
+      );
+      expect(existsSync(join(root, "src/new.ts"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
     }
   });
 

@@ -1,6 +1,6 @@
 {
   "name": "composer-mastermind",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Multi-agent orchestrator: Claude as brain, GLM/Codex/agy as executors. Dispatches code/research/review work to subagents wired through the @composer-mcp/server MCP server.",
   "claudeCodeVersion": ">=4.6",
   "requires": [

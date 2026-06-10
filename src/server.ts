@@ -77,30 +77,78 @@ const HANDOFF_CREATE_DESCRIPTION =
  *   ```lang
  *   <content>
  *   ```
- * Writes each file under `root` (cwd). Guards against path traversal.
+ * Writes each file under `root` (cwd/projectDir). Guards against path
+ * traversal, including symlink escapes through existing parent directories.
  */
 export function applyFileBlocks(
   text: string,
   root: string,
-): { written: string[]; skipped: string[] } {
-  const written: string[] = [];
-  const skipped: string[] = [];
+): { files: Array<{ path: string; status: "changed" | "unchanged" }>; rejected: string[] } {
+  const projectRoot = fs.realpathSync(root);
+  const parsed: Array<{ rel: string; abs: string; content: string }> = [];
+  const rejected: string[] = [];
   const re = /FILE:\s*(\S+)[^\n]*\n```[^\n]*\n([\s\S]*?)```/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const rel = (m[1] ?? "").trim();
     const content = m[2] ?? "";
     if (!rel) continue;
-    const abs = path.resolve(root, rel);
-    if (abs !== root && !abs.startsWith(root + path.sep)) {
-      skipped.push(rel + " (outside root)");
+    const abs = path.resolve(projectRoot, rel);
+    if (!isPathInside(abs, projectRoot)) {
+      rejected.push(`${rel} (outside projectDir)`);
       continue;
     }
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, content, "utf8");
-    written.push(rel);
+    const nearestParent = nearestExistingParent(path.dirname(abs));
+    const parentReal = fs.realpathSync(nearestParent);
+    if (!isPathInside(parentReal, projectRoot)) {
+      rejected.push(`${rel} (parent resolves outside projectDir)`);
+      continue;
+    }
+    parsed.push({ rel, abs, content });
   }
-  return { written, skipped };
+
+  if (rejected.length > 0) {
+    throw new Error(
+      `composer_code_chain: refusing to apply paths outside projectDir ${projectRoot}: ${rejected.join(", ")}`,
+    );
+  }
+
+  const files: Array<{ path: string; status: "changed" | "unchanged" }> = [];
+  for (const { rel, abs, content } of parsed) {
+    const previous = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : undefined;
+    const status = previous === content ? "unchanged" : "changed";
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    if (status === "changed") {
+      fs.writeFileSync(abs, content, "utf8");
+    }
+    files.push({ path: rel, status });
+  }
+  return { files, rejected };
+}
+
+function isPathInside(candidate: string, root: string): boolean {
+  return candidate === root || candidate.startsWith(root + path.sep);
+}
+
+function nearestExistingParent(dir: string): string {
+  let current = dir;
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return current;
+    current = parent;
+  }
+  return current;
+}
+
+function resolveProjectDir(projectDir: string | undefined, root: string): string {
+  const resolved = projectDir === undefined ? root : path.resolve(projectDir);
+  if (projectDir !== undefined && !path.isAbsolute(projectDir)) {
+    throw new Error(`projectDir must be an absolute path: ${projectDir}`);
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+    throw new Error(`projectDir must be an existing directory: ${resolved}`);
+  }
+  return fs.realpathSync(resolved);
 }
 
 export interface ComposerServerOptions {
@@ -250,6 +298,7 @@ export function createComposerServer(
         prompt: z.string().min(1),
         context: z.string().optional(),
         handoffPath: z.string().optional(),
+        projectDir: z.string().optional(),
       },
       annotations: {
         title: "Composer Code (GLM author -> CLI apply)",
@@ -259,11 +308,13 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }, extra) => {
+    async ({ prompt, context, handoffPath, projectDir }, extra) => {
+      const targetRoot = resolveProjectDir(projectDir, root);
       // Stage 1: GLM authors the code off-CC (returns full file contents).
       const gen = registry.getProviderForRole("coder");
       const genPrompt =
         prompt +
+        `\n\nTARGET PROJECT DIR: ${targetRoot}. All FILE paths must be relative to this directory.` +
         "\n\nOUTPUT FORMAT: give the COMPLETE contents of every file to " +
         "create or modify. For each file, write a line `FILE: <relative/path>` " +
         "followed by a fenced code block with the full file content. No " +
@@ -272,20 +323,24 @@ export function createComposerServer(
         gen.execute({
           prompt: genPrompt,
           context: contextWithHandoff(root, context, handoffPath),
+          cwd: root,
           signal: extra.signal,
         }),
       );
 
       // Stage 2: server applies GLM's FILE: blocks deterministically (off-CC,
       // no LLM transcription step — an executor cannot fabricate the apply).
-      const { written, skipped } = applyFileBlocks(authored.text, root);
+      const { files } = applyFileBlocks(authored.text, targetRoot);
+      const changed = files.filter((file) => file.status === "changed");
+      if (changed.length === 0) {
+        throw new Error(
+          `composer_code_chain: apply produced no changes — check projectDir (server cwd is ${process.cwd()}, target was ${targetRoot}); nothing was modified`,
+        );
+      }
       const summary =
-        written.length > 0
-          ? `GLM authored + applied off-CC. Wrote ${written.length} file(s): ${written.join(", ")}.` +
-            (skipped.length ? ` Skipped: ${skipped.join(", ")}.` : "")
-          : "GLM authored but produced NO parseable FILE: blocks — nothing written. " +
-            "Re-issue with explicit 'FILE: <path>' + fenced-block formatting, or " +
-            "use composer_code_cli (CLI executor authors+applies) instead.";
+        `GLM authored + applied off-CC in projectDir ${targetRoot}. ` +
+        `Changed ${changed.length}/${files.length} file(s): ` +
+        files.map((file) => `${file.path}=${file.status}`).join(", ") + ".";
       return { content: [{ type: "text", text: summary }] };
     },
   );
@@ -298,6 +353,7 @@ export function createComposerServer(
         prompt: z.string().min(1),
         context: z.string().optional(),
         handoffPath: z.string().optional(),
+        projectDir: z.string().optional(),
       },
       annotations: {
         title: "Composer Code (CLI apply)",
@@ -307,13 +363,15 @@ export function createComposerServer(
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath }, extra) => {
+    async ({ prompt, context, handoffPath, projectDir }, extra) => {
+      const targetRoot = resolveProjectDir(projectDir, root);
       const provider = registry.getProviderForRole("coderCli");
       const result = await withProgress(extra, COMPOSER_CODE_CLI, () =>
         provider.execute({
           prompt,
           context: contextWithHandoff(root, context, handoffPath),
           cwd: root,
+          projectDir: projectDir === undefined ? undefined : targetRoot,
           signal: extra.signal,
         }),
       );

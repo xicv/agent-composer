@@ -62,6 +62,12 @@ system — spend it on planning, not on raw worker output.
 | Claude review explicitly requested, or high-risk/security-sensitive second opinion | `composer_review_claude` directly after the default review gate |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
 
+When an edit targets a project other than the Composer MCP server cwd (for
+example dotfiles or another repo), pass `projectDir: "<absolute path>"` to
+`composer_code_cli` or `composer_code_chain`. Codex must trust that directory
+(a git repo or a `config.toml` projects entry) or it will refuse; do not add
+`--skip-git-repo-check`.
+
 ## Codex rescue (second-opinion lane)
 
 Use Codex rescue when the same bug has 2+ failed fix attempts, root-cause

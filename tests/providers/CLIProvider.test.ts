@@ -119,6 +119,54 @@ describe("CLIProvider (execFile injected)", () => {
     expect(out.text).toBe("codex summary");
   });
 
+  it("injects -C for codex exec when projectDir is set", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", projectDir: "/target/project" });
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox",
+      "workspace-write",
+    ]);
+    expect(captured[0]?.options.cwd).toBeUndefined();
+  });
+
+  it("does not duplicate codex -C when already present", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-C", "/configured/project", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", projectDir: "/target/project" });
+    expect(captured[0]?.args.filter((arg) => arg === "-C")).toHaveLength(1);
+    expect(captured[0]?.args.slice(0, 4)).toEqual([
+      "-C",
+      "/configured/project",
+      "exec",
+      "--sandbox",
+      "workspace-write",
+    ].slice(0, 4));
+  });
+
+  it("sets spawn cwd to projectDir for non-codex binaries", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      cwd: "/default-root",
+      execFn: makeExec("ok", "", captured),
+    });
+    await p.execute({ prompt: "x", projectDir: "/target/project" });
+    expect(captured[0]?.options.cwd).toBe("/target/project");
+    expect(captured[0]?.args).toEqual(["-p", "x"]);
+  });
+
   it("supports codex global flags before exec for web-search research", async () => {
     const captured: CapturedExec[] = [];
     const p = new CLIProvider({
