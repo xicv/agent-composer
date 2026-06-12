@@ -178,6 +178,8 @@ export class CLIProvider implements IProvider {
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt, {
         projectDir: input.projectDir,
+        readOnly: input.readOnly,
+        model: input.model,
       });
       const startedAt = Date.now();
       try {
@@ -244,16 +246,28 @@ export class CLIProvider implements IProvider {
     bin: string,
     staticArgs: ReadonlyArray<string>,
     prompt: string,
-    options: { projectDir?: string } = {},
+    options: { projectDir?: string; readOnly?: boolean; model?: string } = {},
   ): { args: string[]; cwd?: string; finalMessagePath?: string; cleanup: () => void } {
     const args = [...staticArgs];
     let tempDir: string | undefined;
     let finalMessagePath = CLIProvider.findFlagValue(args, "--output-last-message");
     let cwd: string | undefined;
 
+    if (options.readOnly && !CLIProvider.isCodexExec(bin, args)) {
+      throw new Error(
+        "CLIProvider: readOnly execution requires a supported Codex exec CLI config.",
+      );
+    }
+
     if (CLIProvider.isCodexExec(bin, args)) {
       if (options.projectDir && !CLIProvider.hasCodexCd(args)) {
-        args.splice(CLIProvider.codexExecIndex(args), 0, "-C", options.projectDir);
+        args.splice(CLIProvider.codexExecCommandIndex(bin, args), 0, "-C", options.projectDir);
+      }
+      if (options.model && !CLIProvider.hasCodexModel(args)) {
+        args.splice(CLIProvider.codexExecCommandIndex(bin, args), 0, "-m", options.model);
+      }
+      if (options.readOnly) {
+        CLIProvider.forceCodexReadOnlySandbox(bin, args);
       }
       if (!finalMessagePath) {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-codex-"));
@@ -279,7 +293,7 @@ export class CLIProvider implements IProvider {
     bin: string,
     args: ReadonlyArray<string>,
   ): boolean {
-    return path.basename(bin) === "codex" && CLIProvider.codexExecIndex(args) >= 0;
+    return CLIProvider.codexExecCommandIndex(bin, args) >= 0;
   }
 
   private static assertSafeCli(argv: ReadonlyArray<string>): void {
@@ -287,8 +301,7 @@ export class CLIProvider implements IProvider {
     if (!bin || !CLIProvider.isCodexExec(bin, args)) return;
     if (process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"] === "1") return;
 
-    const sandboxIndex = args.indexOf("--sandbox");
-    const sandbox = sandboxIndex >= 0 ? args[sandboxIndex + 1] : undefined;
+    const sandbox = CLIProvider.findSandboxValue(args);
     if (
       args.includes("--dangerously-bypass-approvals-and-sandbox") ||
       sandbox === "danger-full-access"
@@ -335,6 +348,7 @@ export class CLIProvider implements IProvider {
       "-a",
       "--add-dir",
       "--ask-for-approval",
+      "-C",
       "-c",
       "--cd",
       "--color",
@@ -374,6 +388,12 @@ export class CLIProvider implements IProvider {
     return args.some((arg) => arg === "-C" || arg === "--cd" || arg.startsWith("--cd="));
   }
 
+  private static hasCodexModel(args: ReadonlyArray<string>): boolean {
+    return args.some(
+      (arg) => arg === "-m" || arg === "--model" || arg.startsWith("--model="),
+    );
+  }
+
   private static findFlagValue(
     args: ReadonlyArray<string>,
     flag: string,
@@ -381,6 +401,63 @@ export class CLIProvider implements IProvider {
     const index = args.indexOf(flag);
     const value = index >= 0 ? args[index + 1] : undefined;
     return typeof value === "string" && value.length > 0 ? value : undefined;
+  }
+
+  private static forceCodexReadOnlySandbox(bin: string, args: string[]): void {
+    const equalsIndex = args.findIndex((arg) => arg.startsWith("--sandbox="));
+    if (equalsIndex >= 0) {
+      args[equalsIndex] = "--sandbox=read-only";
+      return;
+    }
+
+    const flagIndex = args.findIndex((arg) => arg === "--sandbox" || arg === "-s");
+    if (flagIndex >= 0) {
+      args[flagIndex] = "--sandbox";
+      args[flagIndex + 1] = "read-only";
+      return;
+    }
+
+    const execIndex = CLIProvider.codexExecCommandIndex(bin, args);
+    if (execIndex < 0) {
+      throw new Error(
+        "CLIProvider: readOnly execution requires a supported Codex exec CLI config.",
+      );
+    }
+    args.splice(execIndex + 1, 0, "--sandbox", "read-only");
+  }
+
+  private static findSandboxValue(args: ReadonlyArray<string>): string | undefined {
+    const equals = args.find((arg) => arg.startsWith("--sandbox="));
+    if (equals) return equals.slice("--sandbox=".length);
+    const index = args.findIndex((arg) => arg === "--sandbox" || arg === "-s");
+    const value = index >= 0 ? args[index + 1] : undefined;
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  }
+
+  private static codexExecCommandIndex(
+    bin: string,
+    args: ReadonlyArray<string>,
+  ): number {
+    if (path.basename(bin) === "codex") {
+      return CLIProvider.codexExecIndex(args);
+    }
+    if (!CLIProvider.isCodexWrapper(bin)) return -1;
+    const packageIndex = args.findIndex((arg) => CLIProvider.isCodexPackageToken(arg));
+    if (packageIndex < 0) return -1;
+    return args.indexOf("exec", packageIndex + 1);
+  }
+
+  private static isCodexWrapper(bin: string): boolean {
+    return ["npx", "npm", "pnpm", "yarn", "bun"].includes(path.basename(bin));
+  }
+
+  private static isCodexPackageToken(arg: string): boolean {
+    return (
+      arg === "codex" ||
+      arg.startsWith("codex@") ||
+      arg === "@openai/codex" ||
+      arg.startsWith("@openai/codex@")
+    );
   }
 
   private static readFinalMessage(filePath: string): string | undefined {

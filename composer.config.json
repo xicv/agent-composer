@@ -71,6 +71,13 @@
       ],
       "timeoutMs": 900000,
       "retries": 0
+    },
+    "oraclePlanner": {
+      "provider": "cli",
+      "cli": ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
+      "timeoutMs": 1500000,
+      "retries": 0,
+      "maxResultChars": 14000
     }
   },
   "spendAuthorization": {
@@ -79,27 +86,28 @@
     "maxUsdPerSession": 50
   },
   "codexReview": {
-    "enabled": false,
+    "enabled": true,
     "triggers": {
       "preCommit": true,
       "postPlan": true
     },
     "preCommitCommand": "adversarial-review",
     "postPlanCommand": "adversarial-review",
-    "mode": "ask",
+    "mode": "auto",
     "execution": "background",
     "scope": "auto",
     "base": "main",
     "model": "gpt-5.4-mini",
     "preCommitHook": {
-      "enabled": false,
+      "enabled": true,
       "blockOnSeverity": "high",
-      "timeoutMs": 120000,
-      "failClosed": false
+      "timeoutMs": 900000,
+      "failClosed": true
     },
     "warmCache": {
-      "enabled": false,
-      "maxAgeMinutes": 30
+      "enabled": true,
+      "maxAgeMinutes": 30,
+      "timeoutMs": 300000
     },
     "notify": {
       "desktop": false
@@ -109,5 +117,35 @@
     "enabled": true,
     "mode": "ask",
     "model": "gpt-5.4-mini"
+  },
+  "codexLifecycle": {
+    "enabled": true,
+    "mode": "auto",
+    "execution": "background",
+    "model": "gpt-5.4-mini",
+    "triggers": {
+      "postResearch": false,
+      "postPlan": true,
+      "postCodeApply": true,
+      "postTestFailure": true,
+      "afterFailedAttempts": true,
+      "preCommit": false,
+      "stopWarm": false
+    },
+    "thresholds": {
+      "minScore": 60,
+      "minExpectedOutputTokens": 500,
+      "minChangedFiles": 2,
+      "minDiffLines": 80,
+      "failedAttempts": 2
+    },
+    "fallback": {
+      "enabled": true,
+      "order": [
+        "reviewerClaude",
+        "reviewer",
+        "coder"
+      ]
+    }
   }
 }

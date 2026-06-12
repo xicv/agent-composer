@@ -322,22 +322,171 @@ cache_age_minutes() {
   jq -r '((now - (.ts | fromdateiso8601)) / 60 | floor)' "$cache_file" 2>/dev/null || printf '0'
 }
 
-review_has_parse_error() {
-  jq -e '
-    (.parseError // null) as $error
-    | ($error != null and $error != false and (($error | tostring) | length) > 0)
-  ' >/dev/null 2>&1
+review_parse_error_message() {
+  local review_output="$1"
+  jq -r '
+    def parsed_json($value):
+      if ($value | type) == "string" then (($value | fromjson?) // {}) else {} end;
+    def first_error($items):
+      [
+        $items[]
+        | select(. != null and . != false and ((. | tostring) | length) > 0)
+      ]
+      | first // "";
+
+    (parsed_json(.rawOutput? // null)) as $rawOutputJson
+    | (parsed_json(.codex.stdout? // null)) as $codexStdoutJson
+    | first_error([
+        .parseError?,
+        .result.parseError?,
+        .review?.parseError?,
+        .review?.result?.parseError?,
+        .data?.parseError?,
+        .data?.result?.parseError?,
+        .output?.parseError?,
+        .output?.result?.parseError?,
+        .response?.parseError?,
+        .response?.result?.parseError?,
+        .payload?.parseError?,
+        .payload?.result?.parseError?,
+        $rawOutputJson.parseError?,
+        $rawOutputJson.result.parseError?,
+        $codexStdoutJson.parseError?,
+        $codexStdoutJson.result.parseError?
+      ])
+  ' <<<"$review_output" 2>/dev/null
 }
 
 normalize_review_output() {
   local review_output="$1"
   jq -c '
-    def array_or_empty($value): if ($value | type) == "array" then $value else [] end;
-    {
-      verdict: (.result.verdict // .verdict // null),
-      summary: (.result.summary // .summary // ""),
-      findings: array_or_empty(.result.findings // .findings // []),
-      next_steps: array_or_empty(.result.next_steps // .next_steps // [])
+    def parsed_json($value):
+      if ($value | type) == "string" then (($value | fromjson?) // {}) else {} end;
+    def first_value($items):
+      [
+        $items[]
+        | select(. != null and . != "")
+      ]
+      | first // null;
+    def first_text($items):
+      [
+        $items[]
+        | select((. | type) == "string" and length > 0)
+      ]
+      | first // "";
+    def first_array($items):
+      [
+        $items[]
+        | select((. | type) == "array")
+      ]
+      | first // [];
+
+    (parsed_json(.rawOutput? // null)) as $rawOutputJson
+    | (parsed_json(.codex.stdout? // null)) as $codexStdoutJson
+    | (parsed_json(.stdout? // null)) as $stdoutJson
+    | {
+      verdict: first_value([
+        .result.verdict?,
+        .verdict?,
+        .review?.result?.verdict?,
+        .review?.verdict?,
+        .data?.result?.verdict?,
+        .data?.verdict?,
+        .output?.result?.verdict?,
+        .output?.verdict?,
+        .response?.result?.verdict?,
+        .response?.verdict?,
+        .payload?.result?.verdict?,
+        .payload?.verdict?,
+        $rawOutputJson.result.verdict?,
+        $rawOutputJson.verdict?,
+        $rawOutputJson.review?.result?.verdict?,
+        $rawOutputJson.review?.verdict?,
+        $codexStdoutJson.result.verdict?,
+        $codexStdoutJson.verdict?,
+        $codexStdoutJson.review?.result?.verdict?,
+        $codexStdoutJson.review?.verdict?,
+        $stdoutJson.result.verdict?,
+        $stdoutJson.verdict?
+      ]),
+      summary: (first_text([
+        .result.summary?,
+        .summary?,
+        .review?.result?.summary?,
+        .review?.summary?,
+        .data?.result?.summary?,
+        .data?.summary?,
+        .output?.result?.summary?,
+        .output?.summary?,
+        .response?.result?.summary?,
+        .response?.summary?,
+        .payload?.result?.summary?,
+        .payload?.summary?,
+        $rawOutputJson.result.summary?,
+        $rawOutputJson.summary?,
+        $rawOutputJson.review?.result?.summary?,
+        $rawOutputJson.review?.summary?,
+        $codexStdoutJson.result.summary?,
+        $codexStdoutJson.summary?,
+        $codexStdoutJson.review?.result?.summary?,
+        $codexStdoutJson.review?.summary?,
+        $stdoutJson.result.summary?,
+        $stdoutJson.summary?
+      ]) // ""),
+      findings: first_array([
+        .result.findings?,
+        .findings?,
+        .review?.result?.findings?,
+        .review?.findings?,
+        .data?.result?.findings?,
+        .data?.findings?,
+        .output?.result?.findings?,
+        .output?.findings?,
+        .response?.result?.findings?,
+        .response?.findings?,
+        .payload?.result?.findings?,
+        .payload?.findings?,
+        $rawOutputJson.result.findings?,
+        $rawOutputJson.findings?,
+        $rawOutputJson.review?.result?.findings?,
+        $rawOutputJson.review?.findings?,
+        $codexStdoutJson.result.findings?,
+        $codexStdoutJson.findings?,
+        $codexStdoutJson.review?.result?.findings?,
+        $codexStdoutJson.review?.findings?,
+        $stdoutJson.result.findings?,
+        $stdoutJson.findings?
+      ]),
+      next_steps: first_array([
+        .result.next_steps?,
+        .next_steps?,
+        .review?.result?.next_steps?,
+        .review?.next_steps?,
+        .data?.result?.next_steps?,
+        .data?.next_steps?,
+        .output?.result?.next_steps?,
+        .output?.next_steps?,
+        .response?.result?.next_steps?,
+        .response?.next_steps?,
+        .payload?.result?.next_steps?,
+        .payload?.next_steps?,
+        $rawOutputJson.result.next_steps?,
+        $rawOutputJson.next_steps?,
+        $rawOutputJson.review?.result?.next_steps?,
+        $rawOutputJson.review?.next_steps?,
+        $codexStdoutJson.result.next_steps?,
+        $codexStdoutJson.next_steps?,
+        $codexStdoutJson.review?.result?.next_steps?,
+        $codexStdoutJson.review?.next_steps?,
+        $stdoutJson.result.next_steps?,
+        $stdoutJson.next_steps?
+      ]),
+      raw_text: first_text([
+        .codex.stdout?,
+        .rawOutput?,
+        .stdout?,
+        .review?
+      ])
     }
   ' <<<"$review_output" 2>/dev/null
 }
@@ -369,6 +518,11 @@ evaluate_review_output() {
     needs-attention)
       ;;
     *)
+      local raw_text_len
+      raw_text_len="$(jq -r '(.raw_text // "" | length)' <<<"$review_output" 2>/dev/null || printf '0')"
+      if [[ -z "$verdict" && "$raw_text_len" =~ ^[0-9]+$ && "$raw_text_len" -gt 0 ]]; then
+        fail_review "$FAIL_CLOSED" "structured review verdict missing; use codexReview.preCommitCommand=adversarial-review for mechanical gates" "$duration_ms"
+      fi
       fail_review "$FAIL_CLOSED" "unknown review verdict: ${verdict:-missing}" "$duration_ms"
       ;;
   esac
@@ -460,7 +614,7 @@ SCOPE="$(jq -r '.codexReview.scope // "working-tree"' <<<"$CONFIG_JSON" 2>/dev/n
 BASE="$(jq -r '.codexReview.base // "main"' <<<"$CONFIG_JSON" 2>/dev/null || printf 'main')"
 CODEX_MODEL="$(jq -r '.codexReview.model // empty' <<<"$CONFIG_JSON" 2>/dev/null || true)"
 BLOCK_ON_SEVERITY="$(jq -r '.codexReview.preCommitHook.blockOnSeverity // "high"' <<<"$CONFIG_JSON" 2>/dev/null || printf 'high')"
-TIMEOUT_MS="$(jq -r '.codexReview.preCommitHook.timeoutMs // 120000' <<<"$CONFIG_JSON" 2>/dev/null || printf '120000')"
+TIMEOUT_MS="$(jq -r '.codexReview.preCommitHook.timeoutMs // 900000' <<<"$CONFIG_JSON" 2>/dev/null || printf '900000')"
 FAIL_CLOSED="$(jq -r '.codexReview.preCommitHook.failClosed // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
 WARM_CACHE_ENABLED="$(jq -r '.codexReview.warmCache.enabled // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
 WARM_CACHE_MAX_AGE_MINUTES="$(jq -r '.codexReview.warmCache.maxAgeMinutes // 30' <<<"$CONFIG_JSON" 2>/dev/null || printf '30')"
@@ -538,6 +692,12 @@ if [[ "$REVIEW_STATUS" -eq 124 ]]; then
   fail_review "$FAIL_CLOSED" "review timed out after ${TIMEOUT_SECONDS}s" "$DURATION_MS"
 fi
 if [[ "$REVIEW_STATUS" -ne 0 ]]; then
+  if [[ -n "$REVIEW_OUTPUT" ]] && jq -e . >/dev/null 2>&1 <<<"$REVIEW_OUTPUT"; then
+    PARSE_ERROR_MESSAGE="$(review_parse_error_message "$REVIEW_OUTPUT")"
+    if [[ -n "$PARSE_ERROR_MESSAGE" ]]; then
+      fail_review "$FAIL_CLOSED" "review parseError: $PARSE_ERROR_MESSAGE" "$DURATION_MS"
+    fi
+  fi
   fail_review "$FAIL_CLOSED" "review command exited $REVIEW_STATUS" "$DURATION_MS"
 fi
 if [[ -z "$REVIEW_OUTPUT" ]]; then
@@ -546,8 +706,9 @@ fi
 if ! jq -e . >/dev/null 2>&1 <<<"$REVIEW_OUTPUT"; then
   fail_review "$FAIL_CLOSED" "review returned unparseable JSON" "$DURATION_MS"
 fi
-if review_has_parse_error <<<"$REVIEW_OUTPUT"; then
-  fail_review "$FAIL_CLOSED" "review parseError: $(jq -r '.parseError | tostring' <<<"$REVIEW_OUTPUT" 2>/dev/null || printf 'unknown')" "$DURATION_MS"
+PARSE_ERROR_MESSAGE="$(review_parse_error_message "$REVIEW_OUTPUT")"
+if [[ -n "$PARSE_ERROR_MESSAGE" ]]; then
+  fail_review "$FAIL_CLOSED" "review parseError: $PARSE_ERROR_MESSAGE" "$DURATION_MS"
 fi
 NORMALIZED_REVIEW_OUTPUT="$(normalize_review_output "$REVIEW_OUTPUT" || true)"
 if [[ -z "$NORMALIZED_REVIEW_OUTPUT" ]] || ! jq -e . >/dev/null 2>&1 <<<"$NORMALIZED_REVIEW_OUTPUT"; then

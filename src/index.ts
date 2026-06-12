@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   applyEnvJson(ENV_PATH);
   const config = loadConfig(CONFIG_PATH);
   const registry = new ProviderRegistry(config);
-  const server = createComposerServer(registry);
+  const server = createComposerServer(registry, { config, configPath: CONFIG_PATH });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Connection success message goes to stderr — stdio MCP requires stdout

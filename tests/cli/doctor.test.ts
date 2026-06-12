@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   buildConfigChecks,
+  checkGitPreCommitHook,
+  classifyOracleNode,
   isHealthy,
   resolveCodexPluginRoot,
   type DoctorCheck,
@@ -78,6 +81,14 @@ describe("doctor config checks", () => {
       .toContain("desktop=off");
     expect(checks.find((check) => check.name === "config: codexRescue")?.detail)
       .toContain("enabled=true");
+    expect(checks.find((check) => check.name === "config: codexLifecycle")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("enabled=false"),
+    });
+    expect(checks.find((check) => check.name === "config: codexLifecycle fallback")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("enabled=false"),
+    });
   });
 
   it("reports enabled triggers and resolved defaults without throwing", () => {
@@ -147,6 +158,193 @@ describe("doctor config checks", () => {
     });
     expect(checks.find((check) => check.name === "config: codexRescue")?.detail)
       .toContain("mode=auto");
+  });
+
+  it("reports configured codexLifecycle policy", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexLifecycle: {
+        enabled: true,
+        mode: "auto",
+        execution: "foreground",
+        model: "gpt-5.4",
+        triggers: {
+          postResearch: false,
+          postPlan: true,
+          postCodeApply: true,
+          postTestFailure: true,
+          afterFailedAttempts: true,
+          preCommit: false,
+          stopWarm: false,
+        },
+        thresholds: {
+          minScore: 45,
+          minExpectedOutputTokens: 500,
+          minChangedFiles: 2,
+          minDiffLines: 80,
+          failedAttempts: 3,
+        },
+        fallback: {
+          enabled: true,
+          order: ["reviewerClaude", "reviewer"],
+        },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexLifecycle")).toMatchObject({
+      status: "pass",
+      detail: expect.stringContaining("mode=auto"),
+    });
+    expect(checks.find((check) => check.name === "config: codexLifecycle")).toMatchObject({
+      detail: expect.stringContaining("model=gpt-5.4"),
+    });
+    expect(checks.find((check) => check.name === "config: codexLifecycle triggers")?.detail)
+      .toContain("postCodeApply=true");
+    expect(checks.find((check) => check.name === "config: codexLifecycle thresholds")?.detail)
+      .toContain("failedAttempts=3");
+    expect(checks.find((check) => check.name === "config: codexLifecycle fallback")).toMatchObject({
+      status: "pass",
+      detail: expect.stringContaining("reviewerClaude>reviewer"),
+    });
+  });
+
+  it("reports oraclePlanner configuration status", () => {
+    const withoutOraclePlanner = buildConfigChecks(BASE_CONFIG);
+
+    expect(withoutOraclePlanner.find((check) => check.name === "config: oraclePlanner")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("not configured"),
+    });
+
+    const withOraclePlanner = buildConfigChecks({
+      ...BASE_CONFIG,
+      roles: {
+        ...BASE_CONFIG.roles,
+        oraclePlanner: { provider: "cli", cli: ["oracle"] },
+      },
+    });
+
+    expect(withOraclePlanner.find((check) => check.name === "config: oraclePlanner")).toMatchObject({
+      status: "pass",
+      detail: expect.stringContaining("roles.oraclePlanner"),
+    });
+  });
+});
+
+describe("doctor oracle runtime check", () => {
+  it("fails when oracle runs under a bad Node major and oraclePlanner is configured", () => {
+    const check = classifyOracleNode({ oracleFound: true, nodeVersion: "v26.3.0", oraclePlannerConfigured: true });
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("Node v26.3.0");
+    expect(check.detail).toContain("Node 24 LTS");
+  });
+
+  it("warns (not fails) on a bad Node major when oraclePlanner is not configured", () => {
+    const check = classifyOracleNode({ oracleFound: true, nodeVersion: "v26.3.0", oraclePlannerConfigured: false });
+    expect(check.status).toBe("warn");
+  });
+
+  it("passes on Node 24 LTS", () => {
+    const check = classifyOracleNode({ oracleFound: true, nodeVersion: "v24.16.0", oraclePlannerConfigured: true });
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain("v24.16.0");
+  });
+
+  it("fails when oracle is not found and oraclePlanner is configured", () => {
+    const check = classifyOracleNode({ oracleFound: false, nodeVersion: null, oraclePlannerConfigured: true });
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("roles.oraclePlanner is configured");
+  });
+
+  it("warns when oracle is not found and oraclePlanner is not configured", () => {
+    const check = classifyOracleNode({ oracleFound: false, nodeVersion: null, oraclePlannerConfigured: false });
+    expect(check.status).toBe("warn");
+    expect(check.detail).toContain("not found");
+  });
+
+  it("warns when the Node runtime cannot be determined", () => {
+    const check = classifyOracleNode({ oracleFound: true, nodeVersion: null, oraclePlannerConfigured: true });
+    expect(check.status).toBe("warn");
+  });
+});
+
+describe("doctor git pre-commit hook check", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "composer-doctor-git-"));
+    const result = spawnSync("git", ["init"], { cwd: tmp, encoding: "utf8" });
+    expect(result.status).toBe(0);
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("fails when forced Codex pre-commit review lacks a Git hook", () => {
+    const check = checkGitPreCommitHook(tmp, {
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true },
+      },
+    });
+
+    expect(check).toMatchObject({
+      name: "git: pre-commit hook",
+      status: "fail",
+      detail: expect.stringContaining("not covered"),
+    });
+  });
+
+  it("warns when the Git hook calls Composer's Codex review gate", () => {
+    const hookPath = join(tmp, ".git", "hooks", "pre-commit");
+    writeFileSync(
+      hookPath,
+      "#!/usr/bin/env bash\nexec \"$PWD/scripts/precommit_codex_review.sh\"\n",
+      "utf8",
+    );
+    chmodSync(hookPath, 0o755);
+
+    const check = checkGitPreCommitHook(tmp, {
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true },
+      },
+    });
+
+    expect(check).toMatchObject({
+      name: "git: pre-commit hook",
+      status: "warn",
+      detail: expect.stringContaining("cannot block a terminal"),
+    });
+  });
+
+  it("resolves the Git hook from a repository subdirectory", () => {
+    const subdir = join(tmp, "src");
+    mkdirSync(subdir);
+    const hookPath = join(tmp, ".git", "hooks", "pre-commit");
+    writeFileSync(
+      hookPath,
+      "#!/usr/bin/env bash\nexec \"$PWD/scripts/precommit_codex_review.sh\"\n",
+      "utf8",
+    );
+    chmodSync(hookPath, 0o755);
+
+    const check = checkGitPreCommitHook(subdir, {
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true },
+      },
+    });
+
+    expect(check).toMatchObject({
+      name: "git: pre-commit hook",
+      status: "warn",
+      detail: expect.stringContaining("cannot block a terminal"),
+    });
   });
 });
 

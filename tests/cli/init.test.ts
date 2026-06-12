@@ -73,6 +73,13 @@ describe("composer init", () => {
     expect(cfg.spendAuthorization.maxUsdPerCall).toBe(0.5);
     expect(cfg.codexReview.preCommitCommand).toBe("adversarial-review");
     expect(cfg.codexReview.model).toBe("gpt-5.4-mini");
+    expect(cfg.codexLifecycle.enabled).toBe(false);
+    expect(cfg.codexLifecycle.mode).toBe("ask");
+    expect(cfg.codexLifecycle.triggers.postCodeApply).toBe(true);
+    expect(cfg.codexLifecycle.triggers.stopWarm).toBe(false);
+    expect(cfg.codexLifecycle.thresholds.minScore).toBe(60);
+    expect(cfg.codexLifecycle.fallback.enabled).toBe(false);
+    expect(cfg.codexLifecycle.fallback.order).toEqual(["reviewerClaude", "reviewer", "coder"]);
   });
 
   it("does NOT overwrite an existing composer.config.json", () => {

@@ -32,6 +32,9 @@
         },
         "coderCli": {
           "$ref": "#/$defs/roleConfig"
+        },
+        "oraclePlanner": {
+          "$ref": "#/$defs/roleConfig"
         }
       }
     },
@@ -43,6 +46,9 @@
     },
     "codexRescue": {
       "$ref": "#/$defs/codexRescue"
+    },
+    "codexLifecycle": {
+      "$ref": "#/$defs/codexLifecycle"
     }
   },
   "$defs": {
@@ -198,6 +204,163 @@
         }
       }
     },
+    "codexLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional deterministic policy for deciding when Codex should participate beyond the mechanical review gate. It never invokes Codex by itself.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Master opt-in switch. false keeps lifecycle participation policy off."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "default": "ask",
+          "description": "ask: return ask decisions for qualified events. auto: return run decisions for qualified events."
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "default": "background",
+          "description": "Preferred Codex execution mode when the policy qualifies an event."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "default": "gpt-5.4-mini",
+          "description": "Codex model label to use for lifecycle participation prompts."
+        },
+        "triggers": {
+          "$ref": "#/$defs/codexLifecycleTriggers"
+        },
+        "thresholds": {
+          "$ref": "#/$defs/codexLifecycleThresholds"
+        },
+        "fallback": {
+          "$ref": "#/$defs/codexLifecycleFallback"
+        }
+      }
+    },
+    "codexLifecycleTriggers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Lifecycle stages where Coco may ask the policy whether Codex should participate.",
+      "properties": {
+        "postResearch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider Codex after a research result is produced."
+        },
+        "postPlan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after a plan is written, before code."
+        },
+        "postCodeApply": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after code has been applied."
+        },
+        "postTestFailure": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after targeted tests fail."
+        },
+        "afterFailedAttempts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after repeated failed fix attempts."
+        },
+        "preCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider lifecycle policy before commit. The mechanical codexReview preCommitHook remains the hard gate."
+        },
+        "stopWarm": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider passive Stop-time warm checks. Keep off unless background participation is desired."
+        }
+      }
+    },
+    "codexLifecycleThresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Deterministic score thresholds used by composer_codex_lifecycle_decide.",
+      "properties": {
+        "minScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 60,
+          "description": "Minimum score required to return ask/run instead of skip."
+        },
+        "minExpectedOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 500,
+          "description": "Expected output size that contributes to the lifecycle score."
+        },
+        "minChangedFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Changed-file count that contributes to the lifecycle score."
+        },
+        "minDiffLines": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 80,
+          "description": "Diff-line count that contributes to the lifecycle score."
+        },
+        "failedAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Failed attempts required before the repeated-failure score applies."
+        }
+      }
+    },
+    "codexLifecycleFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional fallback provider roles used when the primary Codex lifecycle provider is unavailable.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, lifecycle runs try fallback roles after coderCli is unavailable."
+        },
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "default": [
+            "reviewerClaude",
+            "reviewer",
+            "coder"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "researcher",
+              "coder",
+              "reviewer",
+              "reviewerClaude",
+              "coderCli"
+            ]
+          },
+          "description": "Provider role fallback order after coderCli. Duplicate coderCli entries are ignored at runtime."
+        }
+      }
+    },
     "codexPreCommitHook": {
       "type": "object",
       "required": [
@@ -223,7 +386,7 @@
         "timeoutMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "Review wall-clock timeout in milliseconds. Omitted = 120000."
+          "description": "Review wall-clock timeout in milliseconds. Omitted = 900000."
         },
         "failClosed": {
           "type": "boolean",

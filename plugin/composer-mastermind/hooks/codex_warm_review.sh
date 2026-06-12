@@ -300,19 +300,171 @@ if [[ "$status" -ne 0 || -z "$output" ]] || ! jq -e . >/dev/null 2>&1 <<<"$outpu
   append_run_log "skip" "$duration_ms" 0
   exit 0
 fi
-if jq -e "(.parseError // null) as \$error | (\$error != null and \$error != false and ((\$error | tostring) | length) > 0)" >/dev/null 2>&1 <<<"$output"; then
+parse_error_message="$(jq -r '
+  def parsed_json($value):
+    if ($value | type) == "string" then (($value | fromjson?) // {}) else {} end;
+  def first_error($items):
+    [
+      $items[]
+      | select(. != null and . != false and ((. | tostring) | length) > 0)
+    ]
+    | first // "";
+
+  (parsed_json(.rawOutput? // null)) as $rawOutputJson
+  | (parsed_json(.codex.stdout? // null)) as $codexStdoutJson
+  | first_error([
+      .parseError?,
+      .result.parseError?,
+      .review?.parseError?,
+      .review?.result?.parseError?,
+      .data?.parseError?,
+      .data?.result?.parseError?,
+      .output?.parseError?,
+      .output?.result?.parseError?,
+      .response?.parseError?,
+      .response?.result?.parseError?,
+      .payload?.parseError?,
+      .payload?.result?.parseError?,
+      $rawOutputJson.parseError?,
+      $rawOutputJson.result.parseError?,
+      $codexStdoutJson.parseError?,
+      $codexStdoutJson.result.parseError?
+    ])
+' <<<"$output" 2>/dev/null || true)"
+if [[ -n "$parse_error_message" ]]; then
   append_run_log "skip" "$duration_ms" 0
   exit 0
 fi
-normalized="$(jq -c "
-  def array_or_empty(\$value): if (\$value | type) == \"array\" then \$value else [] end;
-  {
-    verdict: (.result.verdict // .verdict // null),
-    summary: (.result.summary // .summary // \"\"),
-    findings: array_or_empty(.result.findings // .findings // []),
-    next_steps: array_or_empty(.result.next_steps // .next_steps // [])
+normalized="$(jq -c '
+  def parsed_json($value):
+    if ($value | type) == "string" then (($value | fromjson?) // {}) else {} end;
+  def first_value($items):
+    [
+      $items[]
+      | select(. != null and . != "")
+    ]
+    | first // null;
+  def first_text($items):
+    [
+      $items[]
+      | select((. | type) == "string" and length > 0)
+    ]
+    | first // "";
+  def first_array($items):
+    [
+      $items[]
+      | select((. | type) == "array")
+    ]
+    | first // [];
+
+  (parsed_json(.rawOutput? // null)) as $rawOutputJson
+  | (parsed_json(.codex.stdout? // null)) as $codexStdoutJson
+  | (parsed_json(.stdout? // null)) as $stdoutJson
+  | {
+    verdict: first_value([
+      .result.verdict?,
+      .verdict?,
+      .review?.result?.verdict?,
+      .review?.verdict?,
+      .data?.result?.verdict?,
+      .data?.verdict?,
+      .output?.result?.verdict?,
+      .output?.verdict?,
+      .response?.result?.verdict?,
+      .response?.verdict?,
+      .payload?.result?.verdict?,
+      .payload?.verdict?,
+      $rawOutputJson.result.verdict?,
+      $rawOutputJson.verdict?,
+      $rawOutputJson.review?.result?.verdict?,
+      $rawOutputJson.review?.verdict?,
+      $codexStdoutJson.result.verdict?,
+      $codexStdoutJson.verdict?,
+      $codexStdoutJson.review?.result?.verdict?,
+      $codexStdoutJson.review?.verdict?,
+      $stdoutJson.result.verdict?,
+      $stdoutJson.verdict?
+    ]),
+    summary: (first_text([
+      .result.summary?,
+      .summary?,
+      .review?.result?.summary?,
+      .review?.summary?,
+      .data?.result?.summary?,
+      .data?.summary?,
+      .output?.result?.summary?,
+      .output?.summary?,
+      .response?.result?.summary?,
+      .response?.summary?,
+      .payload?.result?.summary?,
+      .payload?.summary?,
+      $rawOutputJson.result.summary?,
+      $rawOutputJson.summary?,
+      $rawOutputJson.review?.result?.summary?,
+      $rawOutputJson.review?.summary?,
+      $codexStdoutJson.result.summary?,
+      $codexStdoutJson.summary?,
+      $codexStdoutJson.review?.result?.summary?,
+      $codexStdoutJson.review?.summary?,
+      $stdoutJson.result.summary?,
+      $stdoutJson.summary?
+    ]) // ""),
+    findings: first_array([
+      .result.findings?,
+      .findings?,
+      .review?.result?.findings?,
+      .review?.findings?,
+      .data?.result?.findings?,
+      .data?.findings?,
+      .output?.result?.findings?,
+      .output?.findings?,
+      .response?.result?.findings?,
+      .response?.findings?,
+      .payload?.result?.findings?,
+      .payload?.findings?,
+      $rawOutputJson.result.findings?,
+      $rawOutputJson.findings?,
+      $rawOutputJson.review?.result?.findings?,
+      $rawOutputJson.review?.findings?,
+      $codexStdoutJson.result.findings?,
+      $codexStdoutJson.findings?,
+      $codexStdoutJson.review?.result?.findings?,
+      $codexStdoutJson.review?.findings?,
+      $stdoutJson.result.findings?,
+      $stdoutJson.findings?
+    ]),
+    next_steps: first_array([
+      .result.next_steps?,
+      .next_steps?,
+      .review?.result?.next_steps?,
+      .review?.next_steps?,
+      .data?.result?.next_steps?,
+      .data?.next_steps?,
+      .output?.result?.next_steps?,
+      .output?.next_steps?,
+      .response?.result?.next_steps?,
+      .response?.next_steps?,
+      .payload?.result?.next_steps?,
+      .payload?.next_steps?,
+      $rawOutputJson.result.next_steps?,
+      $rawOutputJson.next_steps?,
+      $rawOutputJson.review?.result?.next_steps?,
+      $rawOutputJson.review?.next_steps?,
+      $codexStdoutJson.result.next_steps?,
+      $codexStdoutJson.next_steps?,
+      $codexStdoutJson.review?.result?.next_steps?,
+      $codexStdoutJson.review?.next_steps?,
+      $stdoutJson.result.next_steps?,
+      $stdoutJson.next_steps?
+    ]),
+    raw_text: first_text([
+      .codex.stdout?,
+      .rawOutput?,
+      .stdout?,
+      .review?
+    ])
   }
-" <<<"$output" 2>/dev/null || true)"
+' <<<"$output" 2>/dev/null || true)"
 if [[ -z "$normalized" ]] || ! jq -e . >/dev/null 2>&1 <<<"$normalized"; then
   append_run_log "skip" "$duration_ms" 0
   exit 0

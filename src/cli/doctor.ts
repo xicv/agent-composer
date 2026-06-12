@@ -3,12 +3,13 @@
 // The doctor is intentionally resilient: missing optional integrations are
 // reported as checks instead of throwing out of the CLI.
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../config/loader.js";
 import type { CodexRescue, CodexReview, ComposerConfig } from "../config/schema.js";
+import { resolveCodexLifecycle } from "../util/codexLifecycle.js";
 
 export interface CodexPluginRoot {
   root: string;
@@ -76,7 +77,7 @@ const DEFAULT_CODEX_REVIEW: ResolvedCodexReview = {
   preCommitHook: {
     enabled: false,
     blockOnSeverity: "high",
-    timeoutMs: 120000,
+    timeoutMs: 900000,
     failClosed: false,
   },
   warmCache: {
@@ -112,6 +113,7 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
   const codexReview = config.codexReview;
   const resolved = resolveCodexReview(codexReview);
   const rescue = resolveCodexRescue(config.codexRescue);
+  const lifecycle = resolveCodexLifecycle(config.codexLifecycle);
   const enabledCheck = codexReview
     ? reviewEnabledCheck(resolved)
     : {
@@ -149,11 +151,135 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
       status: "pass",
       detail: `enabled=${rescue.enabled}, mode=${rescue.mode}, model=${rescue.model}`,
     },
+    {
+      name: "config: codexLifecycle",
+      status: lifecycle.enabled ? "pass" : "warn",
+      detail:
+        `enabled=${lifecycle.enabled}, mode=${lifecycle.mode}, ` +
+        `execution=${lifecycle.execution}, model=${lifecycle.model}`,
+    },
+    {
+      name: "config: codexLifecycle triggers",
+      status: "pass",
+      detail:
+        `postResearch=${lifecycle.triggers.postResearch}, ` +
+        `postPlan=${lifecycle.triggers.postPlan}, ` +
+        `postCodeApply=${lifecycle.triggers.postCodeApply}, ` +
+        `postTestFailure=${lifecycle.triggers.postTestFailure}, ` +
+        `afterFailedAttempts=${lifecycle.triggers.afterFailedAttempts}, ` +
+        `preCommit=${lifecycle.triggers.preCommit}, ` +
+        `stopWarm=${lifecycle.triggers.stopWarm}`,
+    },
+    {
+      name: "config: codexLifecycle thresholds",
+      status: "pass",
+      detail:
+        `minScore=${lifecycle.thresholds.minScore}, ` +
+        `minExpectedOutputTokens=${lifecycle.thresholds.minExpectedOutputTokens}, ` +
+        `minChangedFiles=${lifecycle.thresholds.minChangedFiles}, ` +
+        `minDiffLines=${lifecycle.thresholds.minDiffLines}, ` +
+        `failedAttempts=${lifecycle.thresholds.failedAttempts}`,
+    },
+    {
+      name: "config: codexLifecycle fallback",
+      status: lifecycle.fallback.enabled ? "pass" : "warn",
+      detail:
+        `enabled=${lifecycle.fallback.enabled}, ` +
+        `order=${lifecycle.fallback.order.join(">")}`,
+    },
+    {
+      name: "config: oraclePlanner",
+      status: config.roles?.oraclePlanner ? "pass" : "warn",
+      detail: config.roles?.oraclePlanner
+        ? "Oracle planning lane configured (roles.oraclePlanner)"
+        : "Oracle planning lane not configured (optional; composer_oracle_plan needs roles.oraclePlanner)",
+    },
   ];
 }
 
 export function isHealthy(checks: DoctorCheck[]): boolean {
   return checks.every((check) => check.status !== "fail");
+}
+
+export const ORACLE_BAD_NODE_MAJORS = [26];
+
+export function classifyOracleNode(input: {
+  oracleFound: boolean;
+  nodeVersion: string | null;
+  oraclePlannerConfigured: boolean;
+}): DoctorCheck {
+  if (!input.oracleFound) {
+    return {
+      name: "oracle runtime",
+      status: input.oraclePlannerConfigured ? "fail" : "warn",
+      detail: input.oraclePlannerConfigured
+        ? "roles.oraclePlanner is configured but the oracle CLI is not on PATH — composer_oracle_plan and the async Oracle job tools cannot run; install oracle (npm install -g @steipete/oracle) or remove roles.oraclePlanner"
+        : "oracle CLI not found (optional; needed only for composer_oracle_plan / roles.oraclePlanner)",
+    };
+  }
+  const parsed = input.nodeVersion
+    ? parseSemver(input.nodeVersion.replace(/^v/, ""))
+    : null;
+  if (!parsed) {
+    return {
+      name: "oracle runtime",
+      status: "warn",
+      detail: `oracle found, but its Node runtime could not be determined${
+        input.nodeVersion ? ` (${input.nodeVersion})` : ""
+      }`,
+    };
+  }
+  const version = `v${parsed.join(".")}`;
+  if (ORACLE_BAD_NODE_MAJORS.includes(parsed[0])) {
+    const remedy =
+      "reinstall under Node 24 LTS: brew uninstall oracle && npm install -g @steipete/oracle";
+    return {
+      name: "oracle runtime",
+      // Fail only when the feature is actually configured; otherwise warn.
+      status: input.oraclePlannerConfigured ? "fail" : "warn",
+      detail:
+        `oracle runs under Node ${version}, which has the undici setTypeOfService ` +
+        `EINVAL crash on uploads — ${remedy}`,
+    };
+  }
+  return {
+    name: "oracle runtime",
+    status: "pass",
+    detail: `oracle runs under Node ${version}`,
+  };
+}
+
+function detectOracleNodeVersion(): { oracleFound: boolean; nodeVersion: string | null } {
+  const locator = process.platform === "win32" ? "where" : "which";
+  const located = spawnSync(locator, ["oracle"], { encoding: "utf8", timeout: 10000 });
+  if (located.error || located.status !== 0) return { oracleFound: false, nodeVersion: null };
+  const oraclePath = located.stdout.split(/\r?\n/)[0]?.trim();
+  if (!oraclePath || !existsSync(oraclePath)) return { oracleFound: false, nodeVersion: null };
+
+  let nodeBin = "node";
+  try {
+    const firstLine = readFileSync(oraclePath, "utf8").split(/\r?\n/)[0] ?? "";
+    const match = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(firstLine);
+    if (match) {
+      const interp = match[1] ?? "";
+      if (interp.endsWith("/env")) nodeBin = match[2] ?? "node";
+      else if (/node/.test(interp)) nodeBin = interp;
+    }
+  } catch {
+    // Unreadable shebang (e.g. compiled binary) — fall back to PATH node.
+  }
+
+  const version = spawnSync(nodeBin, ["--version"], { encoding: "utf8", timeout: 10000 });
+  if (version.error || version.status !== 0) return { oracleFound: true, nodeVersion: null };
+  return { oracleFound: true, nodeVersion: version.stdout.trim() || null };
+}
+
+export function checkOracleRuntime(config: ComposerConfig | null): DoctorCheck {
+  const detected = detectOracleNodeVersion();
+  return classifyOracleNode({
+    ...detected,
+    oraclePlannerConfigured: Boolean(config?.roles?.oraclePlanner),
+  });
 }
 
 export async function runDoctor(opts: { cwd: string; verbose?: boolean }): Promise<DoctorReport> {
@@ -163,7 +289,9 @@ export async function runDoctor(opts: { cwd: string; verbose?: boolean }): Promi
   const pluginCheck = checkCodexPluginRoot(pluginRoot);
   const setupChecks = pluginRoot ? queryCodexSetup(pluginRoot.root) : [];
   const configChecks = config.ok ? buildConfigChecks(config.config) : [config.check];
-  const checks = [codexCli, pluginCheck, ...setupChecks, ...configChecks];
+  const gitHookChecks = config.ok ? [checkGitPreCommitHook(opts.cwd, config.config)] : [];
+  const oracleRuntime = checkOracleRuntime(config.ok ? config.config : null);
+  const checks = [codexCli, pluginCheck, ...setupChecks, ...configChecks, ...gitHookChecks, oracleRuntime];
   const report = { checks, healthy: isHealthy(checks) };
 
   if (opts.verbose !== false) printReport(report);
@@ -322,6 +450,73 @@ function warmCacheCheck(resolved: ResolvedCodexReview): DoctorCheck {
     status: "pass",
     detail: `${warmCache.enabled ? "on" : "off"}, maxAgeMinutes=${warmCache.maxAgeMinutes}`,
   };
+}
+
+export function checkGitPreCommitHook(cwd: string, config: ComposerConfig): DoctorCheck {
+  const resolved = resolveCodexReview(config.codexReview);
+  const hookPath = resolveGitHookPath(cwd);
+  const required = resolved.enabled && resolved.preCommitHook.enabled;
+
+  if (!hookPath) {
+    return {
+      name: "git: pre-commit hook",
+      status: required ? "fail" : "warn",
+      detail: "not a git repository or hook path could not be resolved",
+    };
+  }
+
+  const installed = inspectComposerGitHook(hookPath);
+  if (!required) {
+    return {
+      name: "git: pre-commit hook",
+      status: "warn",
+      detail: installed.ok
+        ? `installed at ${hookPath}, but codexReview.preCommitHook.enabled=false`
+        : `not required while codexReview/preCommitHook is off (${installed.reason})`,
+    };
+  }
+
+  return installed.ok
+    ? {
+        name: "git: pre-commit hook",
+        status: "warn",
+        detail:
+          `${hookPath} calls scripts/precommit_codex_review.sh, but that script is a Claude ` +
+          `PreToolUse gate that always exits 0 and cannot block a terminal \`git commit\` — ` +
+          `terminal commits are NOT mechanically gated; the Codex gate only covers Claude-issued Bash commits`,
+      }
+    : {
+        name: "git: pre-commit hook",
+        status: "fail",
+        detail: `manual Terminal commits are not covered: ${installed.reason}`,
+      };
+}
+
+function resolveGitHookPath(cwd: string): string | null {
+  const result = spawnSync("git", ["-C", cwd, "rev-parse", "--git-path", "hooks/pre-commit"], {
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  if (result.error || result.status !== 0) return null;
+  const hookPath = result.stdout.trim();
+  return hookPath.length > 0 ? resolve(cwd, hookPath) : null;
+}
+
+function inspectComposerGitHook(hookPath: string): { ok: true } | { ok: false; reason: string } {
+  if (!existsSync(hookPath)) return { ok: false, reason: `${hookPath} is missing` };
+
+  try {
+    const stat = statSync(hookPath);
+    if (!stat.isFile()) return { ok: false, reason: `${hookPath} is not a file` };
+    if ((stat.mode & 0o111) === 0) return { ok: false, reason: `${hookPath} is not executable` };
+    const text = readFileSync(hookPath, "utf8");
+    if (!text.includes("scripts/precommit_codex_review.sh")) {
+      return { ok: false, reason: `${hookPath} does not call scripts/precommit_codex_review.sh` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: errorMessage(error) };
+  }
 }
 
 function loadConfigCheck(cwd: string): { ok: true; config: ComposerConfig } | { ok: false; check: DoctorCheck } {

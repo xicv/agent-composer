@@ -156,8 +156,12 @@ else
   REVIEW_HIGH="$PRECOMMIT_TMP/review-high.sh"
   REVIEW_LOW="$PRECOMMIT_TMP/review-low.sh"
   REVIEW_FAIL="$PRECOMMIT_TMP/review-fail.sh"
+  REVIEW_EXIT_PARSE_ERROR="$PRECOMMIT_TMP/review-exit-parse-error.sh"
   REVIEW_PARSE_ERROR="$PRECOMMIT_TMP/review-parse-error.sh"
   REVIEW_GARBAGE="$PRECOMMIT_TMP/review-garbage.sh"
+  REVIEW_NESTED_HIGH="$PRECOMMIT_TMP/review-nested-high.sh"
+  REVIEW_CODEX_STDOUT_HIGH="$PRECOMMIT_TMP/review-codex-stdout-high.sh"
+  REVIEW_NATIVE_TEXT="$PRECOMMIT_TMP/review-native-text.sh"
   CONFIG_ENABLED="$PRECOMMIT_TMP/enabled.json"
   CONFIG_DISABLED="$PRECOMMIT_TMP/disabled.json"
   CONFIG_FAIL_CLOSED="$PRECOMMIT_TMP/fail-closed.json"
@@ -190,6 +194,11 @@ SH
 #!/usr/bin/env bash
 exit 1
 SH
+  cat >"$REVIEW_EXIT_PARSE_ERROR" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"review":"Adversarial Review","result":null,"parseError":"usage limit reached"}'
+exit 1
+SH
   cat >"$REVIEW_PARSE_ERROR" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' '{"review":"free text","parseError":"could not parse structured review","result":null}'
@@ -198,7 +207,19 @@ SH
 #!/usr/bin/env bash
 printf '%s\n' '{"verdict":"garbage","summary":"bad","findings":[],"next_steps":[]}'
 SH
-  chmod +x "$REVIEW_APPROVE" "$REVIEW_HIGH" "$REVIEW_LOW" "$REVIEW_FAIL" "$REVIEW_PARSE_ERROR" "$REVIEW_GARBAGE"
+  cat >"$REVIEW_NESTED_HIGH" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"data":{"result":{"verdict":"needs-attention","summary":"nested bug","findings":[{"severity":"high","title":"Nested","body":"b","file":"a.ts","line_start":1,"line_end":1,"confidence":0.9,"recommendation":"fix"}],"next_steps":[]}},"parseError":null}'
+SH
+  cat >"$REVIEW_CODEX_STDOUT_HIGH" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"review":"Adversarial Review","codex":{"status":0,"stdout":"{\"verdict\":\"needs-attention\",\"summary\":\"stdout bug\",\"findings\":[{\"severity\":\"high\",\"title\":\"Stdout\",\"body\":\"b\",\"file\":\"a.ts\",\"line_start\":1,\"line_end\":1,\"confidence\":0.9,\"recommendation\":\"fix\"}],\"next_steps\":[]}"}}'
+SH
+  cat >"$REVIEW_NATIVE_TEXT" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"review":"Review","codex":{"status":0,"stdout":"Found one issue in the reviewed diff, but this native review output is not structured JSON."}}'
+SH
+  chmod +x "$REVIEW_APPROVE" "$REVIEW_HIGH" "$REVIEW_LOW" "$REVIEW_FAIL" "$REVIEW_EXIT_PARSE_ERROR" "$REVIEW_PARSE_ERROR" "$REVIEW_GARBAGE" "$REVIEW_NESTED_HIGH" "$REVIEW_CODEX_STDOUT_HIGH" "$REVIEW_NATIVE_TEXT"
 
   cat >"$CONFIG_ENABLED" <<'JSON'
 {"codexReview":{"enabled":true,"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":false}}}
@@ -361,7 +382,20 @@ JSON
   assert_precommit_pass_payload "precommit_composer_disabled_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_HIGH" "1"
   assert_precommit_pass_payload "precommit_reviewer_fail_open_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_FAIL"
   assert_precommit_deny_payload "precommit_reviewer_fail_closed_denies" "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_FAIL"
+  out="$(run_precommit_hook "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_EXIT_PARSE_ERROR")"
+  if is_deny <<<"$out" && grep -Fq "usage limit reached" <<<"$out"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-40s DENY\n' "precommit_nonzero_parse_error_denies"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_nonzero_parse_error_denies: expected fail-closed parseError deny, got: ${out:-<empty>}")
+    printf '  FAIL  %-40s expected DENY\n' "precommit_nonzero_parse_error_denies"
+  fi
   assert_precommit_pass_payload "precommit_parse_error_fail_open_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_PARSE_ERROR"
+  assert_precommit_deny_payload "precommit_nested_result_denies" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_NESTED_HIGH"
+  assert_precommit_deny_payload "precommit_codex_stdout_json_denies" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_CODEX_STDOUT_HIGH"
+  assert_precommit_system_message "precommit_native_text_fail_open_warns" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_NATIVE_TEXT" "structured review verdict missing"
+  assert_precommit_deny_payload "precommit_native_text_fail_closed_denies" "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_NATIVE_TEXT"
   assert_precommit_bash_watchdog_timeout "precommit_bash_watchdog_timeout" "$PAYLOAD_COMMIT" "$CONFIG_TIMEOUT"
 
   CACHE_HIT_CODEX_ROOT="$PRECOMMIT_TMP/cache-hit-codex"
@@ -540,11 +574,15 @@ JSON
     printf 'dirty\n' >> "$WARM_REPO/a.txt"
     cat > "$FAKE_CODEX_ROOT/scripts/codex-companion.mjs" <<'JS'
 console.log(JSON.stringify({
-  result: {
-    verdict: "approve",
-    summary: "ok",
-    findings: [],
-    next_steps: []
+  review: "Adversarial Review",
+  codex: {
+    status: 0,
+    stdout: JSON.stringify({
+      verdict: "approve",
+      summary: "ok",
+      findings: [],
+      next_steps: []
+    })
   }
 }));
 JS

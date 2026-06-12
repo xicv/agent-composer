@@ -1,6 +1,6 @@
 # Composer — multi-agent orchestration for Claude Code
 
-[![npm](https://img.shields.io/badge/npm-agent--composer-blue)](#install) [![tests](https://img.shields.io/badge/vitest-435%20passing-brightgreen)](#contributing) [![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
+[![npm](https://img.shields.io/badge/npm-agent--composer-blue)](#install) [![tests](https://img.shields.io/badge/vitest-499%20passing-brightgreen)](#contributing) [![license](https://img.shields.io/badge/license-MIT-lightgrey)](#license)
 
 > **Claude orchestrates. GLM, Codex, and `agy` execute — and *apply* — off your Claude quota.** Composer is an MCP server + Claude Code plugin that lets the most-capable model hold the plan while worker models generate *and write* the code in their own context. Because the executors apply files themselves (instead of returning text the main session must re-ingest), composer keeps the orchestrator's context lean and every change reviewable.
 
@@ -10,14 +10,14 @@ Two coordinated artefacts:
 
 | Artefact | Purpose |
 |---|---|
-| **`agent-composer`** (this npm package) | MCP server exposing `composer_handoff_create`, `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`, and `composer_review_claude`. Wraps GLM (via Anthropic-compatible endpoint) and CLI executors such as Codex, `agy`, or bounded `claude -p`. |
+| **`agent-composer`** (this npm package) | MCP server exposing `composer_handoff_create`, `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`, `composer_review_claude`, the `composer_codex_lifecycle_*` decision/run/result tools, and `composer_config_*` config tools. Wraps GLM (via Anthropic-compatible endpoint) and CLI executors such as Codex, `agy`, or bounded `claude -p`. |
 | **`composer-mastermind`** (Claude Code plugin) | Orchestrator skill + haiku-wrapped subagents (`coder`, `researcher`, `reviewer`, optional `reviewer-claude`) + `boundary_guard` PreToolUse hook + `/evolve` slash command. |
 
 Combined, they turn the main Claude session into a coordinator that never writes code or edits files directly. The main session may use Bash for inspection and verification, while code changes are dispatched through Composer MCP tools. The boundary hook fails closed if a denied file-mutating tool is requested.
 
 ## Tools
 
-Seven MCP tools, all routing work off the main Claude session:
+Twelve MCP tools, all routing work off the main Claude session:
 
 | Tool | Executor | What it does |
 |---|---|---|
@@ -28,6 +28,11 @@ Seven MCP tools, all routing work off the main Claude session:
 | `composer_research` | Codex CLI search | Direct docs/web/current-context lane → bounded structured summary. Runs Codex with live web search and a read-only sandbox. |
 | `composer_review` | agy | Direct diff-review lane. Ask it to run repo-appropriate targeted checks off-CC; use a reviewer model different from the author for cross-model rigor (e.g. GLM writes → agy reviews). |
 | `composer_review_claude` | Claude Code CLI | Premium second-opinion review for high-risk/security-sensitive diffs or explicit user requests. Default config runs bounded `claude -p --model opus` with read/test tools only and `--max-budget-usd 0.50`. |
+| `composer_codex_lifecycle_decide` | Composer server | Scores lifecycle events and returns `skip`, `ask`, or `run` from project config without invoking Codex. |
+| `composer_codex_lifecycle_run` | Codex CLI companion | Runs a foreground or background advisory Codex checkpoint and persists a durable job under `.composer/codex-lifecycle/`. |
+| `composer_codex_lifecycle_result` | Composer server | Reads a lifecycle job by `jobId`, or the latest job, so background Codex output is merged back into the main loop. |
+| `composer_config_get` | Composer server | Reads the active, project, or global Composer config and path. |
+| `composer_config_set` | Composer server | Safely updates lifecycle, lifecycle fallback, and pre-commit review-gate config after schema validation. |
 
 **Why "off-CC" matters:** GLM (z.ai), Codex, and agy run on *separate* quotas. Generating and *applying* code in their own context — not returning text the main Claude session must re-ingest — is what actually preserves your Max5 quota. The eval harness scores on **total-CC tokens** (every Claude model in a run = real Max5 burn), with a correctness gate (tsc/tests) and N-run averaging.
 
@@ -110,6 +115,139 @@ the nested Codex run to `model_reasoning_effort="medium"` so it does not
 inherit slower global high-effort settings intended for the main orchestrator.
 Keep `reviewer` as the default gate. Use `reviewerClaude` only when the user
 asks for Claude review or when a risky diff needs an expensive second opinion.
+
+### Codex lifecycle automation
+
+`codexLifecycle` controls ambient Codex participation during feature/debug
+work. The policy is deterministic and cheap: `composer_codex_lifecycle_decide`
+scores the event first, then `composer_codex_lifecycle_run` only calls Codex
+when the result is `run` or when the orchestrator asks after an `ask` decision
+and passes `confirmed:true`.
+
+```json
+{
+  "codexLifecycle": {
+    "enabled": true,
+    "mode": "auto",
+    "execution": "background",
+    "model": "gpt-5.4-mini",
+    "triggers": {
+      "postPlan": true,
+      "postCodeApply": true,
+      "postTestFailure": true,
+      "afterFailedAttempts": true,
+      "preCommit": false,
+      "stopWarm": false
+    },
+    "thresholds": {
+      "minScore": 60,
+      "minExpectedOutputTokens": 500,
+      "minChangedFiles": 2,
+      "minDiffLines": 80,
+      "failedAttempts": 2
+    },
+    "fallback": {
+      "enabled": true,
+      "order": ["reviewerClaude", "reviewer", "coder"]
+    }
+  }
+}
+```
+
+Foreground runs return the Codex result in the same MCP call. Background runs
+return a `jobId` and `resultPath`; the orchestrator must call
+`composer_codex_lifecycle_result` before treating the lifecycle step as done.
+Job records are stored outside the project worktree under Composer user state so
+background output does not dirty `git status`. They use `succeeded`, `failed`,
+`skipped`, or `unavailable`. `skipped` means policy chose not to call Codex.
+`unavailable` means the primary and configured fallback providers could not run
+because of auth, quota/usage exhaustion, rate limits, timeout, cancellation, or
+another provider failure.
+When `fallback.enabled` is true, Composer tries `coderCli` first and then each
+role in `fallback.order`, recording every provider attempt in the job. Optional
+lifecycle work can continue after surfacing that record, but it is not an
+approval.
+
+Lifecycle runs are companion/advisory passes. They are prompted not to mutate
+files silently; any suggested changes should be applied deliberately through
+the normal coding lane and then reviewed.
+
+### Forced Codex pre-commit review
+
+`codexReview.preCommitHook.enabled` is the hard quality gate for commits. It is
+separate from `codexLifecycle.preCommit`: lifecycle participation is advisory,
+while the review hook can block a commit.
+
+```json
+{
+  "codexReview": {
+    "enabled": true,
+    "preCommitCommand": "adversarial-review",
+    "scope": "auto",
+    "model": "gpt-5.4-mini",
+    "preCommitHook": {
+      "enabled": true,
+      "blockOnSeverity": "high",
+      "timeoutMs": 900000,
+      "failClosed": true
+    },
+    "warmCache": {
+      "enabled": true,
+      "maxAgeMinutes": 30
+    }
+  }
+}
+```
+
+Claude Code's `PreToolUse` Bash hook protects `git commit` launched through
+Claude Code by emitting `permissionDecision` JSON and exiting 0. It gates
+Claude-issued Bash commits, but does not mechanically block a manual Terminal
+`git commit`; that requires a real Git hook path that exits non-zero, such as
+the local `.git/hooks/pre-commit` bridge installed for this checkout. With
+`failClosed:true`, missing Codex auth, expired sessions, quota/usage
+exhaustion, rate limits, timeouts, or invalid review output block gated commits
+instead of silently allowing them. `agent-composer doctor` checks both the
+config and whether the local Git pre-commit bridge is installed and executable.
+
+The remaining local bypass is Git's own `git commit --no-verify`; protect that
+path with branch protection or CI if every commit path must be enforced.
+
+### Config from Claude Code
+
+Use `composer_config_get` and `composer_config_set` when you want Claude Code to
+toggle Composer behavior without editing JSON by hand. `composer_config_set`
+accepts only scoped patches for `codexLifecycle` and `codexReview`; it validates
+the resulting config before writing.
+
+Examples:
+
+```json
+{
+  "scope": "active",
+  "codexLifecycle": {
+    "enabled": true,
+    "mode": "auto",
+    "execution": "background",
+    "fallback": {
+      "enabled": true,
+      "order": ["reviewerClaude", "reviewer", "coder"]
+    }
+  },
+  "codexReview": {
+    "enabled": true,
+    "preCommitHook": {
+      "enabled": true,
+      "failClosed": true
+    }
+  }
+}
+```
+
+`scope:"active"` follows the running Composer config path for reads. For writes,
+Composer refuses an active path that resolves to the user-global fallback; use
+`scope:"global"` explicitly when mutating
+`~/.config/composer/composer.config.json`. Use `scope:"project"` for
+`<repo>/composer.config.json`.
 
 ### Fast direct-tool mode
 
@@ -242,7 +380,7 @@ git clone <this-repo>
 cd composer
 npm install
 npx tsc --noEmit                                # type check
-./node_modules/.bin/vitest run                  # 435 tests
+./node_modules/.bin/vitest run                  # 499 tests
 ./node_modules/.bin/ajv validate \              # schema lint
   --strict=false -c ajv-formats \
   -s composer.config.schema.json \

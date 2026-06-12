@@ -75,6 +75,20 @@ describe("CLIProvider (execFile injected)", () => {
             execFn: makeExec(""),
           }),
       ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["codex", "exec", "--sandbox=danger-full-access"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["npx", "-y", "@openai/codex", "exec", "--sandbox=danger-full-access"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
     } finally {
       if (previous === undefined) delete process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"];
       else process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"] = previous;
@@ -137,6 +151,27 @@ describe("CLIProvider (execFile injected)", () => {
     expect(captured[0]?.options.cwd).toBeUndefined();
   });
 
+  it("forces read-only sandbox for advisory codex exec calls", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({
+      prompt: "review src/server.ts",
+      projectDir: "/target/project",
+      readOnly: true,
+    });
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+  });
+
   it("does not duplicate codex -C when already present", async () => {
     const captured: CapturedExec[] = [];
     const p = new CLIProvider({
@@ -153,6 +188,114 @@ describe("CLIProvider (execFile injected)", () => {
       "--sandbox",
       "workspace-write",
     ].slice(0, 4));
+  });
+
+  it("injects -m for codex exec when model is set", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    const args = captured[0]?.args ?? [];
+    const modelIndex = args.indexOf("-m");
+    expect(modelIndex).toBeGreaterThanOrEqual(0);
+    expect(args[modelIndex + 1]).toBe("gpt-5.4-mini");
+    expect(modelIndex).toBeLessThan(args.indexOf("exec"));
+  });
+
+  it("does not override an explicitly configured codex model", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-m", "gpt-5", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    const args = captured[0]?.args ?? [];
+    expect(args.filter((arg) => arg === "-m")).toHaveLength(1);
+    expect(args[args.indexOf("-m") + 1]).toBe("gpt-5");
+    expect(args).not.toContain("gpt-5.4-mini");
+  });
+
+  it("does not inject -m for non-codex binaries", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      execFn: makeExec("agy summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    expect(captured[0]?.args).not.toContain("-m");
+  });
+
+  it("keeps configured codex -C on the hardened exec path", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-C", "/configured/project", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", readOnly: true });
+    expect(captured[0]?.options.cwd).toBeUndefined();
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/configured/project",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+    expect(captured[0]?.args).toContain("--output-last-message");
+  });
+
+  it("hardens wrapped codex exec invocations", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex", "exec", "--sandbox=workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", projectDir: "/target/project", readOnly: true });
+    expect(captured[0]?.args.slice(0, 7)).toEqual([
+      "-y",
+      "@openai/codex",
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox=read-only",
+      "--output-last-message",
+    ]);
+  });
+
+  it("hardens versioned wrapped codex exec invocations", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex@0.139.0", "exec", "--sandbox=workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", projectDir: "/target/project", readOnly: true });
+    expect(captured[0]?.args.slice(0, 7)).toEqual([
+      "-y",
+      "@openai/codex@0.139.0",
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox=read-only",
+      "--output-last-message",
+    ]);
+  });
+
+  it("rejects read-only execution when a wrapper is not a supported codex exec", async () => {
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex"],
+      model: "codex-cli",
+      execFn: makeExec("should not run"),
+    });
+
+    await expect(p.execute({ prompt: "review", readOnly: true })).rejects.toThrow(
+      /readOnly execution requires a supported Codex exec CLI config/,
+    );
   });
 
   it("sets spawn cwd to projectDir for non-codex binaries", async () => {

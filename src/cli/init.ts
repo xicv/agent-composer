@@ -116,7 +116,7 @@ const DEFAULT_COMPOSER_CONFIG = {
     preCommitHook: {
       enabled: false,
       blockOnSeverity: "high",
-      timeoutMs: 120000,
+      timeoutMs: 900000,
       failClosed: false,
     },
     warmCache: {
@@ -131,6 +131,32 @@ const DEFAULT_COMPOSER_CONFIG = {
     enabled: true,
     mode: "ask",
     model: "gpt-5.4-mini",
+  },
+  codexLifecycle: {
+    enabled: false,
+    mode: "ask",
+    execution: "background",
+    model: "gpt-5.4-mini",
+    triggers: {
+      postResearch: false,
+      postPlan: true,
+      postCodeApply: true,
+      postTestFailure: true,
+      afterFailedAttempts: true,
+      preCommit: false,
+      stopWarm: false,
+    },
+    thresholds: {
+      minScore: 60,
+      minExpectedOutputTokens: 500,
+      minChangedFiles: 2,
+      minDiffLines: 80,
+      failedAttempts: 2,
+    },
+    fallback: {
+      enabled: false,
+      order: ["reviewerClaude", "reviewer", "coder"],
+    },
   },
 };
 
