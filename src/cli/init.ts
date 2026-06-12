@@ -10,9 +10,10 @@
 // Idempotent: each step checks existing state and skips if already correct.
 // Never overwrites a present, non-default file (no --force flag in this slice).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { globalConfigDir } from "../config/paths.js";
 import { installPluginAssets } from "./install-plugin.js";
 
@@ -33,6 +34,10 @@ export interface InitOptions {
   defaultBaseUrl?: string;
   /** Override the default auth token placeholder. */
   defaultAuthToken?: string;
+  /** When true, copy Oracle adapter scripts + add an opt-in oraclePlanner role. */
+  installOracle?: boolean;
+  /** Override the Oracle scripts source dir (tests inject). */
+  oracleSourceDir?: string;
 }
 
 export interface InitResult {
@@ -177,6 +182,26 @@ const DEFAULT_MCP_SETTINGS = {
   },
 };
 
+const ORACLE_SCRIPTS = [
+  "oracle-pro-safe.sh",
+  "oracle-plan-mcp.sh",
+  "composer-oracle-router-safe.sh",
+  "oracle-codex-handoff-safe.sh",
+];
+
+const ORACLE_PLANNER_ROLE = {
+  provider: "cli",
+  cli: ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
+  timeoutMs: 1500000,
+  retries: 0,
+  maxResultChars: 14000,
+};
+
+export function defaultOracleSourceDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "..", "..", "scripts");
+}
+
 export function runInit(opts: InitOptions): InitResult {
   const cwd = resolve(opts.cwd);
   const steps: InitStep[] = [];
@@ -186,6 +211,10 @@ export function runInit(opts: InitOptions): InitResult {
 
   steps.push(ensureClaudeDir(cwd));
   steps.push(writeComposerConfig(cwd));
+  if (opts.installOracle) {
+    steps.push(installOracleScripts(cwd, opts.oracleSourceDir ?? defaultOracleSourceDir()));
+    steps.push(ensureOraclePlannerRole(cwd));
+  }
   steps.push(
     writeEnvJsonStub(
       cwd,
@@ -337,6 +366,37 @@ function writeComposerConfig(cwd: string): InitStep {
   }
   writeFileSync(path, JSON.stringify(DEFAULT_COMPOSER_CONFIG, null, 2) + "\n", "utf8");
   return { name: "composer.config.json", status: "created", path };
+}
+
+function installOracleScripts(cwd: string, sourceDir: string): InitStep {
+  const destDir = join(cwd, "scripts");
+  mkdirSync(destDir, { recursive: true });
+  const copied: string[] = [];
+  for (const name of ORACLE_SCRIPTS) {
+    const dest = join(destDir, name);
+    if (existsSync(dest)) continue;
+    copyFileSync(join(sourceDir, name), dest);
+    chmodSync(dest, 0o755);
+    copied.push(name);
+  }
+  return copied.length > 0
+    ? { name: "oracle scripts", status: "created", path: destDir, reason: `copied ${copied.length} script(s)` }
+    : { name: "oracle scripts", status: "skipped", path: destDir, reason: "already present" };
+}
+
+function ensureOraclePlannerRole(cwd: string): InitStep {
+  const path = join(cwd, "composer.config.json");
+  if (!existsSync(path)) {
+    return { name: "oraclePlanner role", status: "skipped", path, reason: "no composer.config.json" };
+  }
+  const config = JSON.parse(readFileSync(path, "utf8")) as { roles?: Record<string, unknown> };
+  config.roles ??= {};
+  if (config.roles["oraclePlanner"]) {
+    return { name: "oraclePlanner role", status: "skipped", path, reason: "already present" };
+  }
+  config.roles["oraclePlanner"] = ORACLE_PLANNER_ROLE;
+  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf8");
+  return { name: "oraclePlanner role", status: "updated", path, reason: "added opt-in Oracle role" };
 }
 
 function writeEnvJsonStub(cwd: string, baseUrl: string, token: string): InitStep {

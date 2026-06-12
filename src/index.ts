@@ -23,12 +23,12 @@ const ENV_PATH = process.env["COMPOSER_ENV"];
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
-  const flag = process.argv[3];
   if (subcommand === "init") {
-    if (flag === "--global") {
+    const flags = process.argv.slice(3);
+    if (flags.includes("--global")) {
       runGlobalInit({});
     } else {
-      runInit({ cwd: process.cwd() });
+      runInit({ cwd: process.cwd(), installOracle: flags.includes("--oracle") });
     }
     return;
   }

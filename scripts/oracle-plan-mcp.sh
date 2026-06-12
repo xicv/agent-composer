@@ -54,4 +54,13 @@ if [[ -z "$answer_path" || ! -s "$answer_path" ]]; then
   exit 1
 fi
 
+# Write a stable sidecar so async callers (composer_oracle_job_start) can
+# recover the full-answer path even though only bounded text is returned.
+meta_dir="$(dirname "$answer_path")"
+slug="$(basename "$answer_path" .md)"
+if [[ -d "$meta_dir" ]] && command -v node >/dev/null 2>&1; then
+  node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({answerPath:process.argv[2],oracleSlug:process.argv[3],mode:process.argv[4]})+"\n")' \
+    "$meta_dir/.last-plan-meta.json" "$answer_path" "$slug" "$MODE" 2>/dev/null || true
+fi
+
 cat "$answer_path"

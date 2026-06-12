@@ -249,6 +249,29 @@ export function classifyOracleNode(input: {
   };
 }
 
+export function classifyPreCommitJq(input: {
+  gateFailClosedEnabled: boolean;
+  jqAvailable: boolean;
+}): DoctorCheck {
+  if (!input.gateFailClosedEnabled) {
+    return {
+      name: "pre-commit jq",
+      status: "pass",
+      detail: input.jqAvailable
+        ? "jq present"
+        : "jq not found (only required for a fail-closed Codex pre-commit gate)",
+    };
+  }
+  return input.jqAvailable
+    ? { name: "pre-commit jq", status: "pass", detail: "jq present for the fail-closed Codex gate" }
+    : {
+        name: "pre-commit jq",
+        status: "fail",
+        detail:
+          "codexReview.preCommitHook.failClosed=true but jq is not on PATH — the gate would fail OPEN; install jq (brew install jq)",
+      };
+}
+
 function detectOracleNodeVersion(): { oracleFound: boolean; nodeVersion: string | null } {
   const locator = process.platform === "win32" ? "where" : "which";
   const located = spawnSync(locator, ["oracle"], { encoding: "utf8", timeout: 10000 });
@@ -282,6 +305,15 @@ export function checkOracleRuntime(config: ComposerConfig | null): DoctorCheck {
   });
 }
 
+function detectJqAvailable(): boolean {
+  try {
+    const r = spawnSync("jq", ["--version"], { encoding: "utf8", timeout: 10000 });
+    return !r.error && r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function runDoctor(opts: { cwd: string; verbose?: boolean }): Promise<DoctorReport> {
   const config = loadConfigCheck(opts.cwd);
   const codexCli = checkCodexCli();
@@ -291,7 +323,13 @@ export async function runDoctor(opts: { cwd: string; verbose?: boolean }): Promi
   const configChecks = config.ok ? buildConfigChecks(config.config) : [config.check];
   const gitHookChecks = config.ok ? [checkGitPreCommitHook(opts.cwd, config.config)] : [];
   const oracleRuntime = checkOracleRuntime(config.ok ? config.config : null);
-  const checks = [codexCli, pluginCheck, ...setupChecks, ...configChecks, ...gitHookChecks, oracleRuntime];
+  const jqAvailable = detectJqAvailable();
+  const review = config.ok ? resolveCodexReview(config.config.codexReview) : undefined;
+  const jqCheck = classifyPreCommitJq({
+    gateFailClosedEnabled: Boolean(review?.enabled && review?.preCommitHook.enabled && review?.preCommitHook.failClosed),
+    jqAvailable,
+  });
+  const checks = [codexCli, pluginCheck, ...setupChecks, ...configChecks, ...gitHookChecks, oracleRuntime, jqCheck];
   const report = { checks, healthy: isHealthy(checks) };
 
   if (opts.verbose !== false) printReport(report);

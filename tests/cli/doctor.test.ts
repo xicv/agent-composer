@@ -7,6 +7,7 @@ import {
   buildConfigChecks,
   checkGitPreCommitHook,
   classifyOracleNode,
+  classifyPreCommitJq,
   isHealthy,
   resolveCodexPluginRoot,
   type DoctorCheck,
@@ -265,6 +266,28 @@ describe("doctor oracle runtime check", () => {
   it("warns when the Node runtime cannot be determined", () => {
     const check = classifyOracleNode({ oracleFound: true, nodeVersion: null, oraclePlannerConfigured: true });
     expect(check.status).toBe("warn");
+  });
+});
+
+describe("doctor pre-commit jq check", () => {
+  it("fails when a fail-closed gate is configured and jq is missing", () => {
+    const check = classifyPreCommitJq({ gateFailClosedEnabled: true, jqAvailable: false });
+
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("fail OPEN");
+  });
+
+  it("passes when a fail-closed gate is configured and jq is present", () => {
+    const check = classifyPreCommitJq({ gateFailClosedEnabled: true, jqAvailable: true });
+
+    expect(check.status).toBe("pass");
+  });
+
+  it("passes when jq is missing but the fail-closed gate is not configured", () => {
+    const check = classifyPreCommitJq({ gateFailClosedEnabled: false, jqAvailable: false });
+
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain("only required");
   });
 });
 

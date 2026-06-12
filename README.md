@@ -17,7 +17,7 @@ Combined, they turn the main Claude session into a coordinator that never writes
 
 ## Tools
 
-Twelve MCP tools, all routing work off the main Claude session:
+Fifteen MCP tools, all routing work off the main Claude session:
 
 | Tool | Executor | What it does |
 |---|---|---|
@@ -28,6 +28,9 @@ Twelve MCP tools, all routing work off the main Claude session:
 | `composer_research` | Codex CLI search | Direct docs/web/current-context lane → bounded structured summary. Runs Codex with live web search and a read-only sandbox. |
 | `composer_review` | agy | Direct diff-review lane. Ask it to run repo-appropriate targeted checks off-CC; use a reviewer model different from the author for cross-model rigor (e.g. GLM writes → agy reviews). |
 | `composer_review_claude` | Claude Code CLI | Premium second-opinion review for high-risk/security-sensitive diffs or explicit user requests. Default config runs bounded `claude -p --model opus` with read/test tools only and `--max-budget-usd 0.50`. |
+| `composer_oracle_plan` | Oracle | Opt-in synchronous ChatGPT Pro (Oracle) planning/review/debug lane; returns a bounded answer. |
+| `composer_oracle_job_start` | Oracle | Start a non-blocking ChatGPT Pro (Oracle) job; returns a jobId. |
+| `composer_oracle_job_result` | Oracle | Read an Oracle job's status/answer by jobId (optional waitMs). |
 | `composer_codex_lifecycle_decide` | Composer server | Scores lifecycle events and returns `skip`, `ask`, or `run` from project config without invoking Codex. |
 | `composer_codex_lifecycle_run` | Codex CLI companion | Runs a foreground or background advisory Codex checkpoint and persists a durable job under `.composer/codex-lifecycle/`. |
 | `composer_codex_lifecycle_result` | Composer server | Reads a lifecycle job by `jobId`, or the latest job, so background Codex output is merged back into the main loop. |

@@ -45,7 +45,22 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       signal: options.signal,
+      // Own process group on POSIX so a timeout can kill descendant
+      // processes (e.g. oracle -> Chrome, codex helpers), not just the child.
+      detached: process.platform !== "win32",
     });
+
+    const killChildTree = () => {
+      if (typeof child.pid === "number" && process.platform !== "win32") {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+          return;
+        } catch {
+          // group kill failed (already gone / not a group leader) — fall back
+        }
+      }
+      child.kill("SIGTERM");
+    };
 
     let stdout = "";
     let stderr = "";
@@ -56,14 +71,14 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
       typeof timeoutMs === "number" && timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
-            child.kill("SIGTERM");
+            killChildTree();
           }, timeoutMs)
         : null;
 
     const checkBuffer = (kind: "stdout" | "stderr", payload: string) => {
       if (payload.length > maxBuffer) {
         bufferExceeded = true;
-        child.kill("SIGTERM");
+        killChildTree();
       } else if (kind === "stdout") {
         stdout = payload;
       } else {

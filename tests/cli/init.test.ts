@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInit } from "../../src/cli/init.js";
 
+const ORACLE_SCRIPTS = [
+  "oracle-pro-safe.sh",
+  "oracle-plan-mcp.sh",
+  "composer-oracle-router-safe.sh",
+  "oracle-codex-handoff-safe.sh",
+];
+
 describe("composer init", () => {
   let cwd: string;
 
@@ -80,6 +87,33 @@ describe("composer init", () => {
     expect(cfg.codexLifecycle.thresholds.minScore).toBe(60);
     expect(cfg.codexLifecycle.fallback.enabled).toBe(false);
     expect(cfg.codexLifecycle.fallback.order).toEqual(["reviewerClaude", "reviewer", "coder"]);
+  });
+
+  it("does not install Oracle scripts or role by default", () => {
+    runInit({ cwd, verbose: false });
+    const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
+    expect(cfg.roles.oraclePlanner).toBeUndefined();
+    expect(existsSync(join(cwd, "scripts"))).toBe(false);
+  });
+
+  it("installs Oracle scripts and adds oraclePlanner when requested", () => {
+    const oracleSourceDir = mkdtempSync(join(tmpdir(), "composer-oracle-source-"));
+    try {
+      for (const name of ORACLE_SCRIPTS) {
+        writeFileSync(join(oracleSourceDir, name), "stub\n", "utf8");
+      }
+
+      runInit({ cwd, installOracle: true, oracleSourceDir, verbose: false });
+
+      for (const name of ORACLE_SCRIPTS) {
+        expect(existsSync(join(cwd, "scripts", name))).toBe(true);
+      }
+      const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
+      expect(cfg.roles.oraclePlanner.cli[0]).toBe("bash");
+      expect(cfg.roles.oraclePlanner.cli).toContain("scripts/oracle-plan-mcp.sh");
+    } finally {
+      rmSync(oracleSourceDir, { recursive: true, force: true });
+    }
   });
 
   it("does NOT overwrite an existing composer.config.json", () => {

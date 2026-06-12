@@ -45,18 +45,26 @@ scripts/oracle-pro-safe.sh --mode quick -- "Say OK and identify the model/mode y
 
 For first-time login, Oracle's manual profile may open Chrome. Complete the login once, then rerun.
 
-## 5. Composer researcher patch
+## 5. Composer integration (first-class oraclePlanner role)
 
-```bash
-node scripts/patch-composer-config-oracle-safe.mjs composer.config.json
+Oracle is an opt-in `oraclePlanner` role — do NOT repoint `researcher` (it stays
+on Codex; see ADR 0005). Add the role to your active config:
+
+```json
+"oraclePlanner": {
+  "provider": "cli",
+  "cli": ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
+  "timeoutMs": 1500000,
+  "retries": 0,
+  "maxResultChars": 14000
+}
 ```
 
-Then prompt Composer/Claude Code with force tags when needed:
+Then call it explicitly:
+- `composer_oracle_plan` (sync) for planning/review/debug on the critical path
+- `composer_oracle_job_start` + `composer_oracle_job_result` (async) for long
+  research or when you don't want to block
 
-```text
-[oracle:quick] Check whether this command is safe.
-[oracle:deep] Plan this feature and return a Codex-ready handoff.
-[oracle:review] Review the current diff for regressions.
-[oracle:debug] Root-cause this failing test.
-[codex] Do cheap read-only repository research for this question.
-```
+The `composer-oracle-router-safe.sh` script (default route = Codex, Oracle only
+on an explicit `[oracle:*]` tag) is provided for experimentation but is NOT the
+recommended wiring; prefer the first-class role above.

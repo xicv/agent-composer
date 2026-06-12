@@ -9,6 +9,10 @@
   "files": [
     "dist/",
     "plugin/",
+    "scripts/oracle-pro-safe.sh",
+    "scripts/oracle-plan-mcp.sh",
+    "scripts/composer-oracle-router-safe.sh",
+    "scripts/oracle-codex-handoff-safe.sh",
     "composer.config.schema.json",
     "README.md"
   ],

@@ -8,6 +8,7 @@ import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import {
   newOracleJob,
   readOracleJob,
+  updateOracleJob,
   writeOracleJob,
 } from "../../src/util/oracleJob.js";
 
@@ -46,6 +47,23 @@ describe("oracle job files", () => {
     const written = writeOracleJob(root, job);
 
     expect(statSync(written.resultPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("round-trips async Oracle full-answer metadata", () => {
+    const root = process.cwd();
+    const job = writeOracleJob(root, newOracleJob(root, { mode: "standard" }));
+    const updated = updateOracleJob(root, job, {
+      status: "succeeded",
+      answerText: "x",
+      answerPath: ".composer/oracle/answers/foo.md",
+      oracleSlug: "foo",
+    });
+
+    const read = readOracleJob(root, updated.jobId);
+
+    expect(read?.answerText).toBe("x");
+    expect(read?.answerPath).toBe(".composer/oracle/answers/foo.md");
+    expect(read?.oracleSlug).toBe("foo");
   });
 
   it("reconciles and persists orphaned foreign running jobs", () => {

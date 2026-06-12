@@ -35,7 +35,9 @@ import {
   readOracleJob,
   updateOracleJob,
   writeOracleJob,
+  type OracleJob,
 } from "./util/oracleJob.js";
+import { acquireOracleLock } from "./util/oracleLock.js";
 import type {
   CodexLifecycleFallback,
   ComposerConfig,
@@ -390,15 +392,27 @@ export function createComposerServer(
       const provider = registry.getProviderForRole("oraclePlanner");
       const effectivePrompt =
         mode && mode !== "auto" ? `[oracle:${mode}] ${prompt}` : prompt;
-      const result = await withProgress(extra, COMPOSER_ORACLE_PLAN, () =>
-        provider.execute({
-          prompt: effectivePrompt,
-          context: contextWithHandoff(root, context, handoffPath),
-          cwd: root,
-          signal: extra.signal,
-        }),
-      );
-      return { content: [{ type: "text", text: result.text }] };
+      const lock = acquireOracleLock(root, { label: "oracle_plan" });
+      if (!lock.acquired) {
+        throw new Error(
+          `Oracle is busy: a run is already in progress (pid ${lock.holder.pid}` +
+            `${lock.holder.jobId ? `, job ${lock.holder.jobId}` : ""}). ` +
+            `Retry shortly, or use composer_oracle_job_start for a queued async run.`,
+        );
+      }
+      try {
+        const result = await withProgress(extra, COMPOSER_ORACLE_PLAN, () =>
+          provider.execute({
+            prompt: effectivePrompt,
+            context: contextWithHandoff(root, context, handoffPath),
+            cwd: root,
+            signal: extra.signal,
+          }),
+        );
+        return { content: [{ type: "text", text: result.text }] };
+      } finally {
+        lock.handle.release();
+      }
     },
   );
 
@@ -423,36 +437,82 @@ export function createComposerServer(
     async ({ prompt, mode, context, handoffPath }) => {
       const resolvedMode = mode ?? "auto";
       const provider = registry.getProviderForRole("oraclePlanner");
-      let job = newOracleJob(root, {
-        mode: resolvedMode,
-        promptPreview: prompt.slice(0, 200),
-        handoffPath,
-      });
-      job = writeOracleJob(root, job);
+      const lock = acquireOracleLock(root, { label: "oracle_job_start" });
+      if (!lock.acquired) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "rejected",
+                  reason: "an Oracle run is already in progress",
+                  runningJobId: lock.holder.jobId ?? null,
+                  holderPid: lock.holder.pid,
+                  hint: "poll composer_oracle_job_result, or retry once the current run finishes",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      let job: OracleJob;
+      try {
+        job = newOracleJob(root, {
+          mode: resolvedMode,
+          promptPreview: prompt.slice(0, 200),
+          handoffPath,
+        });
+        job = writeOracleJob(root, job);
+      } catch (error) {
+        lock.handle.release();
+        throw error;
+      }
       const effectivePrompt =
         resolvedMode !== "auto" ? `[oracle:${resolvedMode}] ${prompt}` : prompt;
       const runner = async () => {
-        const running = updateOracleJob(root, job, {
-          status: "running",
-          startedAt: new Date().toISOString(),
-        });
         try {
-          const result = await provider.execute({
-            prompt: effectivePrompt,
-            context: contextWithHandoff(root, context, handoffPath),
-            cwd: root,
+          const running = updateOracleJob(root, job, {
+            status: "running",
+            startedAt: new Date().toISOString(),
           });
-          updateOracleJob(root, running, {
-            status: "succeeded",
-            completedAt: new Date().toISOString(),
-            answerText: result.text,
-          });
-        } catch (error) {
-          updateOracleJob(root, running, {
-            status: "failed",
-            completedAt: new Date().toISOString(),
-            error: error instanceof Error ? error.message : String(error),
-          });
+          try {
+            const result = await provider.execute({
+              prompt: effectivePrompt,
+              context: contextWithHandoff(root, context, handoffPath),
+              cwd: root,
+            });
+            let answerMeta: { answerPath?: string; oracleSlug?: string } = {};
+            try {
+              const metaPath = path.join(root, ".composer", "oracle", "answers", ".last-plan-meta.json");
+              if (fs.existsSync(metaPath)) {
+                const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as {
+                  answerPath?: unknown;
+                  oracleSlug?: unknown;
+                };
+                if (typeof meta.answerPath === "string") answerMeta.answerPath = meta.answerPath;
+                if (typeof meta.oracleSlug === "string") answerMeta.oracleSlug = meta.oracleSlug;
+              }
+            } catch {
+              // best-effort: missing/unreadable sidecar just means no answerPath
+            }
+            updateOracleJob(root, running, {
+              status: "succeeded",
+              completedAt: new Date().toISOString(),
+              answerText: result.text,
+              ...answerMeta,
+            });
+          } catch (error) {
+            updateOracleJob(root, running, {
+              status: "failed",
+              completedAt: new Date().toISOString(),
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        } finally {
+          lock.handle.release();
         }
       };
       void runner().catch(() => {

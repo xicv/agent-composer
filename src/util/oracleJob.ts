@@ -52,6 +52,8 @@ export const OracleJobSchema = z
     startedAt: z.string().datetime().optional(),
     completedAt: z.string().datetime().optional(),
     answerText: z.string().optional(),
+    answerPath: z.string().optional(),
+    oracleSlug: z.string().optional(),
     error: z.string().optional(),
   })
   .strict();

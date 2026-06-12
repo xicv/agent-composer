@@ -564,13 +564,28 @@ evaluate_review_output() {
   exit 0
 }
 
-if ! command -v jq >/dev/null 2>&1; then
-  printf 'codex pre-commit review skipped: jq missing\n' >&2
+INPUT="$(cat || true)"
+if [[ -z "$INPUT" ]]; then
   exit 0
 fi
 
-INPUT="$(cat || true)"
-if [[ -z "$INPUT" ]]; then
+# jq is required to parse the hook payload. If it is missing we cannot run the
+# gate; honor failClosed via a jq-free (Node) config read so a configured
+# fail-closed gate cannot silently fail open. Only an actual Bash `git commit`
+# payload is gated; everything else is allowed through unchanged.
+if ! command -v jq >/dev/null 2>&1; then
+  if grep -Eq '"tool_name"[[:space:]]*:[[:space:]]*"Bash"' <<<"$INPUT" \
+     && grep -Eq 'git[^"]*commit' <<<"$INPUT"; then
+    PREFLIGHT_CONFIG_PATH="${COMPOSER_CONFIG:-${CLAUDE_PROJECT_DIR:-.}/composer.config.json}"
+    PREFLIGHT_FLAGS="0 0"
+    if [[ -f "$PREFLIGHT_CONFIG_PATH" ]] && command -v node >/dev/null 2>&1; then
+      PREFLIGHT_FLAGS="$(node -e 'try{const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=c.codexReview||{};const h=r.preCommitHook||{};process.stdout.write((r.enabled===true&&h.enabled===true?"1":"0")+" "+(h.failClosed===true?"1":"0"))}catch(e){process.stdout.write("0 0")}' "$PREFLIGHT_CONFIG_PATH" 2>/dev/null || printf '0 0')"
+    fi
+    if [[ "${PREFLIGHT_FLAGS%% *}" == "1" && "${PREFLIGHT_FLAGS##* }" == "1" ]]; then
+      emit_deny "codex pre-commit review unavailable: jq not installed (fail-closed)" "⛔ Codex pre-commit gate requires jq (fail-closed). Install jq (brew install jq)."
+    fi
+  fi
+  printf 'codex pre-commit review skipped: jq not installed\n' >&2
   exit 0
 fi
 
