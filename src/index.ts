@@ -69,7 +69,12 @@ async function main(): Promise<void> {
     return;
   }
   if (subcommand === "status") {
-    runStatus(process.cwd());
+    const flags = process.argv.slice(3);
+    runStatus(process.cwd(), {
+      json: flags.includes("--json"),
+      line: flags.includes("--line"),
+      watch: flags.includes("--watch"),
+    });
     return;
   }
   if (subcommand === "install-git-hook") {

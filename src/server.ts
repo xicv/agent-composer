@@ -18,6 +18,7 @@ import { registerConfigTools } from "./tools/config.js";
 import { registerRouteTools } from "./tools/route.js";
 import { registerAuditTools } from "./tools/audit.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
+import { registerStatusTools } from "./tools/status.js";
 import { registerSessionTools } from "./tools/session.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
@@ -72,6 +73,7 @@ export function createComposerServer(
   registerAuditTools(ctx);
   registerSessionTools(ctx);
   registerWorkflowTools(ctx);
+  registerStatusTools(ctx);
 
   return server;
 }
