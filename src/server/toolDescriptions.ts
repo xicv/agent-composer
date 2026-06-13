@@ -114,3 +114,11 @@ export const ORACLE_JOB_RESULT_DESCRIPTION =
   "Returns status (queued|running|succeeded|failed) and, when succeeded, " +
   "the bounded answer text. Optional waitMs briefly blocks until the job " +
   "reaches a terminal state or the wait elapses.";
+
+export const COMPOSER_ROUTE_DECIDE = "composer_route_decide" as const;
+export const ROUTE_DECIDE_DESCRIPTION =
+  "Preview how Composer would route a task WITHOUT running anything. Returns the " +
+  "dispatch decision (route target, task class, tier, reasoning, recommended dispatch, " +
+  "estimated tokens, complexity) plus an optional Oracle escalation suggestion. Use this " +
+  "to decide which lane to call (composer_code_cli, composer_review, composer_research, " +
+  "composer_oracle_plan, …) before spending a worker call. Read-only; no side effects.";
