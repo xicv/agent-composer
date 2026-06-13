@@ -156,6 +156,44 @@ describe("SpendGuardProvider — pricing by model", () => {
   });
 });
 
+describe("SpendGuardProvider — defaultMaxTokens parameter", () => {
+  it("uses defaultMaxTokens estimate when input.maxTokens is absent and blocks a cap that 4096 would pass", async () => {
+    // glm-5.1 pricing: 0.6/MTok in + 2.2/MTok out
+    // With DEFAULT_MAX_OUTPUT_TOKENS=4096:  cost = (4096/1e6)*2.2 ≈ $0.0090
+    // With defaultMaxTokens=200000:         cost = (200000/1e6)*2.2 ≈ $0.44
+    // Cap $0.05 → passes with 4096 estimate ($0.009 < $0.05), fails with 200000 estimate ($0.44 > $0.05)
+    const inner = fakeInner({ text: "ok" }); // no tokensOut reported — estimate is used
+    const ledger = new SpendLedger();
+    const guard = new SpendGuardProvider(
+      inner,
+      { mode: "auto", maxUsdPerCall: 0.05 },
+      ledger,
+      200000,
+    );
+
+    // No input.maxTokens — should use defaultMaxTokens (200000), which exceeds the cap
+    await expect(guard.execute({ prompt: "" })).rejects.toThrow(SpendLimitError);
+    await expect(guard.execute({ prompt: "" })).rejects.toThrow(/maxUsdPerCall/);
+    expect(inner.callCount).toBe(0);
+  });
+
+  it("control: same cap passes when defaultMaxTokens is undefined (falls back to 4096 estimate)", async () => {
+    const inner = fakeInner({ text: "ok" }); // no tokensOut reported
+    const ledger = new SpendLedger();
+    // No defaultMaxTokens — falls back to DEFAULT_MAX_OUTPUT_TOKENS=4096
+    const guard = new SpendGuardProvider(
+      inner,
+      { mode: "auto", maxUsdPerCall: 0.05 },
+      ledger,
+      undefined,
+    );
+
+    // 4096-token estimate ≈ $0.009 < $0.05 → allowed
+    await expect(guard.execute({ prompt: "" })).resolves.toMatchObject({ text: "ok" });
+    expect(inner.callCount).toBe(1);
+  });
+});
+
 describe("SpendLedger", () => {
   it("starts at zero", () => {
     expect(new SpendLedger().spentUsd).toBe(0);

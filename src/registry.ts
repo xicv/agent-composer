@@ -53,15 +53,15 @@ export class ProviderRegistry {
     if (!rc) {
       throw new ProviderConfigError(role, "role not configured in composer.config.json roles");
     }
-    const created = this.maybeGuard(this.buildProvider(rc));
+    const created = this.maybeGuard(this.buildProvider(rc), rc.maxTokens);
     this.cache.set(role, created);
     return created;
   }
 
-  private maybeGuard(provider: IProvider): IProvider {
+  private maybeGuard(provider: IProvider, defaultMaxTokens?: number): IProvider {
     const auth = this.config.spendAuthorization;
     if (!auth || !isPricedProvider(provider.id)) return provider;
-    return new SpendGuardProvider(provider, auth, this.spendLedger);
+    return new SpendGuardProvider(provider, auth, this.spendLedger, defaultMaxTokens);
   }
 
   private buildProvider(roleConfig: RoleConfig): IProvider {

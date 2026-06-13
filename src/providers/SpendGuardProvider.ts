@@ -73,6 +73,7 @@ export class SpendGuardProvider implements IProvider {
     private readonly inner: IProvider,
     private readonly auth: SpendAuthorization,
     private readonly ledger: SpendLedger,
+    private readonly defaultMaxTokens?: number,
   ) {
     this.id = inner.id;
     this.modelLabel = inner.modelLabel;
@@ -94,7 +95,9 @@ export class SpendGuardProvider implements IProvider {
     const estTokensOut =
       typeof input.maxTokens === "number" && input.maxTokens > 0
         ? input.maxTokens
-        : DEFAULT_MAX_OUTPUT_TOKENS;
+        : typeof this.defaultMaxTokens === "number" && this.defaultMaxTokens > 0
+          ? this.defaultMaxTokens
+          : DEFAULT_MAX_OUTPUT_TOKENS;
     const estCallUsd = estimateUsd(this.modelLabel, estTokensIn, estTokensOut);
 
     if (this.auth.maxUsdPerCall !== undefined && estCallUsd > this.auth.maxUsdPerCall) {
