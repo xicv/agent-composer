@@ -12,6 +12,7 @@ import { ProviderRegistry } from "./registry.js";
 import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
 import { runDoctor } from "./cli/doctor.js";
+import { resolveInitInvocation } from "./cli/initArgs.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -24,11 +25,16 @@ const ENV_PATH = process.env["COMPOSER_ENV"];
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
   if (subcommand === "init") {
-    const flags = process.argv.slice(3);
-    if (flags.includes("--global")) {
+    const invocation = resolveInitInvocation(process.argv.slice(3));
+    if (invocation.kind === "error") {
+      process.stderr.write(`${invocation.message}\n`);
+      process.exit(2);
+      return;
+    }
+    if (invocation.kind === "global") {
       runGlobalInit({});
     } else {
-      runInit({ cwd: process.cwd(), installOracle: flags.includes("--oracle") });
+      runInit({ cwd: process.cwd(), installOracle: invocation.installOracle });
     }
     return;
   }
