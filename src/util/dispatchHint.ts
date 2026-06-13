@@ -12,7 +12,8 @@ export type TaskClass =
   | "research-first-code"
   | "cross-file-code"
   | "simple-code"
-  | "trivial";
+  | "trivial"
+  | "oracle-plan";
 export type RouteTarget =
   | "inline"
   | "refuse"
@@ -21,13 +22,16 @@ export type RouteTarget =
   | "task-researcher-coder"
   | "composer-code-cli"
   | "composer-code-chain"
-  | "composer-review-claude";
+  | "composer-review-claude"
+  | "composer-oracle-plan"
+  | "composer-oracle-job-start";
 export type ProviderRole =
   | "researcher"
   | "coder"
   | "coderCli"
   | "reviewer"
-  | "reviewerClaude";
+  | "reviewerClaude"
+  | "oraclePlanner";
 
 export interface DispatchSignals {
   promptChars: number;
@@ -102,6 +106,8 @@ const BUG_EXPLAIN = /\b(find|explain|identify)\b.{0,40}\bbug\b|\boff-by-one\b|\b
 const RESEARCH = /\b(research|look up|lookup|docs?|documentation|best practice|current|latest|web search)\b/i;
 const WRITE_REQUEST = /\b(add|implement|create|edit|modify|refactor|fix|write|update|change)\b/i;
 const DIFF_OR_CODE_BLOCK = /```|^diff --git |^@@ |^(?:---|\+\+\+) /m;
+const ORACLE_MARKER = /\[oracle:(quick|standard|deep|plan|review|debug|research)\]/i;
+const ORACLE_PHRASE = /\b(?:ask the oracle|consult the oracle|oracle planner|oracle plan|use chatgpt pro|chatgpt pro|gpt-5\.5-pro)\b/i;
 
 const HIGH_COMPLEXITY_TERMS: ReadonlyArray<RegExp> = [
   /\brefactor(?:ing|s|ed)?\b/i,
@@ -165,13 +171,18 @@ export function classifyDispatch(input: ClassifyInput): DispatchHint {
     route.target !== "refuse" &&
     route.target !== "review-inline";
   const tier: Tier =
-    complexityScore >= 0.6 || promptChars > 2000 || route.target === "composer-review-claude"
+    complexityScore >= 0.6 || promptChars > 2000 ||
+    route.target === "composer-review-claude" || isOracleTarget(route.target)
       ? "premium"
       : "cheap";
-  const reasoning: Reasoning =
+  const baseReasoning: Reasoning =
     complexityScore >= 0.6 ? "high" : complexityScore >= 0.25 ? "low" : "none";
+  const reasoning: Reasoning = isOracleTarget(route.target)
+    ? (route.target === "composer-oracle-job-start" ? "high" : baseReasoning === "none" ? "low" : baseReasoning)
+    : baseReasoning;
   const promptSize: PromptSize =
     route.target === "task-researcher-coder" ||
+    isOracleTarget(route.target) ||
     complexityScore >= 0.4 ||
     (hasFileRef && estOutputTokens > 800)
       ? "full"
@@ -251,6 +262,19 @@ function computeComplexityScore(
   return roundScore(clamp(score, 0, 1));
 }
 
+type OracleMode = "quick" | "standard" | "deep" | "plan" | "review" | "debug" | "research";
+
+function oracleModeFrom(corpus: string): OracleMode | null {
+  const marked = ORACLE_MARKER.exec(corpus);
+  if (marked) return marked[1]!.toLowerCase() as OracleMode;
+  if (ORACLE_PHRASE.test(corpus)) return "standard";
+  return null;
+}
+
+function isOracleTarget(target: RouteTarget): boolean {
+  return target === "composer-oracle-plan" || target === "composer-oracle-job-start";
+}
+
 function classifyRoute(input: {
   corpus: string;
   signals: DispatchSignals;
@@ -264,6 +288,21 @@ function classifyRoute(input: {
       target: "refuse",
       confidence: 0.95,
       rationale: "Tiny destructive prompt should be refused inline, not delegated.",
+    });
+  }
+
+  const oracleMode = oracleModeFrom(corpus);
+  if (oracleMode) {
+    const longMode = oracleMode === "deep" || oracleMode === "plan" || oracleMode === "research";
+    const useAsync = longMode || signals.promptChars > 4000;
+    return routePolicy({
+      taskClass: "oracle-plan",
+      target: useAsync ? "composer-oracle-job-start" : "composer-oracle-plan",
+      providerRole: "oraclePlanner",
+      confidence: 0.9,
+      rationale: useAsync
+        ? `Explicit Oracle ${oracleMode} request — long-running; start an async Oracle job and pull the result later.`
+        : `Explicit Oracle ${oracleMode} request — run the synchronous Oracle planning lane.`,
     });
   }
 

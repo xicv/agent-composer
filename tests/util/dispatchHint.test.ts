@@ -112,6 +112,58 @@ describe("classifyDispatch", () => {
     expect(hint.route.target).toBe("inline");
     expect(hint.route.taskClass).toBe("bug-explain");
   });
+
+  describe("Oracle planning lane", () => {
+    it("routes [oracle:plan] to async job-start with premium full sizing", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:plan] design the new auth module",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+      expect(hint.route.taskClass).toBe("oracle-plan");
+      expect(hint.tier).toBe("premium");
+      expect(hint.recommendDispatch).toBe(true);
+      expect(hint.promptSize).toBe("full");
+    });
+
+    it("routes [oracle:quick] to the synchronous oracle plan tool", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:quick] what flag flips strategy?",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-plan");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("routes [oracle:review] to synchronous oracle plan (short mode)", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:review] audit this diff",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-plan");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("routes [oracle:research] to async job-start (long mode)", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:research] explore distributed tracing options for our stack",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("does NOT route a plain prompt without oracle marker to oracle targets", () => {
+      const hint = classifyDispatch({
+        prompt: "implement a helper in src/util/foo.ts",
+      });
+
+      expect(hint.route.target).toBe("composer-code-cli");
+      expect(hint.route.target).not.toBe("composer-oracle-plan");
+      expect(hint.route.target).not.toBe("composer-oracle-job-start");
+    });
+  });
 });
 
 describe("buildWorkerPrompt", () => {
