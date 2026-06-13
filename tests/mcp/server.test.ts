@@ -119,6 +119,7 @@ describe("composer MCP server", () => {
       "composer_review",
       "composer_review_claude",
       "composer_route_decide",
+      "composer_workflow_plan",
     ]);
   });
 
@@ -1586,6 +1587,44 @@ describe("composer MCP server", () => {
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain("requireExplicitTag");
+    });
+  });
+
+  describe("composer_workflow_plan", () => {
+    it("returns a plan with steps as an array", async () => {
+      const { client } = await bootClient();
+      const result = await client.callTool({
+        name: "composer_workflow_plan",
+        arguments: { goal: "add session restore", workflow: "feature", mode: "fast" },
+      });
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        goal: string;
+        workflow: string;
+        mode: string;
+        steps: Array<{ tool: string; why: string }>;
+        notes: string[];
+      };
+      expect(parsed.goal).toBe("add session restore");
+      expect(parsed.workflow).toBe("feature");
+      expect(parsed.mode).toBe("fast");
+      expect(Array.isArray(parsed.steps)).toBe(true);
+    });
+
+    it("fast mode does NOT include composer_review in steps", async () => {
+      const { client } = await bootClient();
+      const result = await client.callTool({
+        name: "composer_workflow_plan",
+        arguments: { goal: "add session restore", workflow: "feature", mode: "fast" },
+      });
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        steps: Array<{ tool: string }>;
+      };
+      const tools = parsed.steps.map((s) => s.tool);
+      expect(tools).not.toContain("composer_review");
     });
   });
 
