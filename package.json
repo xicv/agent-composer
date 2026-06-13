@@ -36,6 +36,7 @@
     "test:hooks": "bash tests/hooks/run.sh",
     "test:scripts": "bash tests/scripts/run.sh",
     "test:all": "npm run test && npm run test:hooks && npm run test:scripts",
+    "ci": "npm run typecheck && npm run test && npm run test:hooks && npm run test:scripts && npm run schema:lint",
     "eval:routes": "tsx evals/scripts/route-compare.ts",
     "usage": "npx -y ccusage daily",
     "schema:lint": "ajv compile --strict=true -c ajv-formats -s composer.config.schema.json && ajv validate --strict=false -c ajv-formats -s composer.config.schema.json -d composer.config.json && ajv compile --strict=true -s plugin.schema.json && ajv validate --strict=true -s plugin.schema.json -d 'plugin/*/plugin.json'",
