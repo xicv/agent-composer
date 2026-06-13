@@ -37,4 +37,8 @@ describe("formatHelp", () => {
   it("includes note that --oracle cannot be combined with --global", () => {
     expect(formatHelp()).toContain("cannot be combined with --global");
   });
+
+  it("includes agent-composer cleanup", () => {
+    expect(formatHelp()).toContain("agent-composer cleanup");
+  });
 });
