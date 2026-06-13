@@ -2,10 +2,10 @@
 // Wave 4 M0.5 — release sync.
 //
 // Snapshots the dev `.claude/` instance into `plugin/composer-mastermind/`
-// at a version bump. Refuses to overwrite the frozen plugin without an
-// explicit --bump argument.
+// at a version bump or when explicitly invoked as a plain sync.
 //
 // Usage:
+//   node scripts/release-sync.mjs                         # sync without bumping
 //   node scripts/release-sync.mjs --check                 # dry-run, exit 1 if drift
 //   node scripts/release-sync.mjs --bump 0.2.0            # sync + bump version
 //
@@ -28,6 +28,8 @@ const SYNC_PAIRS = [
   { src: ".claude/agents/explorer.md",                  dest: "plugin/composer-mastermind/agents/explorer.md" },
   { src: ".claude/commands/evolve.md",                  dest: "plugin/composer-mastermind/commands/evolve.md" },
   { src: "scripts/boundary_guard.sh",                   dest: "plugin/composer-mastermind/hooks/boundary_guard.sh", exec: true },
+  { src: "scripts/precommit_codex_review.sh",           dest: "plugin/composer-mastermind/hooks/precommit_codex_review.sh", exec: true },
+  { src: "scripts/codex_warm_review.sh",                dest: "plugin/composer-mastermind/hooks/codex_warm_review.sh", exec: true },
   { src: "scripts/learn.sh",                            dest: "plugin/composer-mastermind/hooks/learn.sh",          exec: true },
 ];
 
@@ -38,10 +40,16 @@ function md5(path) {
 }
 
 function parseArgs(argv) {
-  const args = { check: false, bump: null };
+  const args = { check: false, bump: null, bumpProvided: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--check") args.check = true;
-    else if (argv[i] === "--bump") args.bump = argv[++i];
+    else if (argv[i] === "--bump") {
+      args.bumpProvided = true;
+      args.bump = argv[++i];
+      if (!args.bump || args.bump.startsWith("--")) {
+        throw new Error("--bump requires a semver version");
+      }
+    }
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
   return args;
@@ -56,7 +64,7 @@ function cmpSemver(a, b) {
 }
 
 function isValidSemver(s) {
-  return /^\d+\.\d+\.\d+$/.test(s);
+  return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(s);
 }
 
 export function diffSyncPairs() {
@@ -106,10 +114,6 @@ export function bumpManifestVersion(nextVersion) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.check && !args.bump) {
-    console.error("usage: release-sync.mjs --check | --bump <semver>");
-    process.exit(2);
-  }
   const records = diffSyncPairs();
   const missingSrc = records.filter((r) => r.status === "missing-source");
   if (missingSrc.length) {
@@ -127,6 +131,11 @@ function main() {
       process.exit(1);
     }
     console.log("\nrelease-sync: in sync.");
+    process.exit(0);
+  }
+  if (!args.bumpProvided) {
+    const touched = applySync();
+    console.log(`\nrelease-sync: synced ${touched} files; plugin/composer-mastermind/plugin.json unchanged`);
     process.exit(0);
   }
   // --bump path

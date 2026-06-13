@@ -27,7 +27,7 @@ describe("release-sync script", () => {
     }
   });
 
-  it("--check lists all 8 sync pairs", () => {
+  it("--check lists all sync pairs", () => {
     const r = runScript(["--check"]);
     expect(r.stdout).toContain(".claude/skills/composer-mastermind/SKILL.md");
     expect(r.stdout).toContain(".claude/agents/coder.md");
@@ -36,6 +36,8 @@ describe("release-sync script", () => {
     expect(r.stdout).toContain(".claude/agents/reviewer-claude.md");
     expect(r.stdout).toContain(".claude/commands/evolve.md");
     expect(r.stdout).toContain("scripts/boundary_guard.sh");
+    expect(r.stdout).toContain("scripts/precommit_codex_review.sh");
+    expect(r.stdout).toContain("scripts/codex_warm_review.sh");
     expect(r.stdout).toContain("scripts/learn.sh");
   });
 
@@ -43,6 +45,12 @@ describe("release-sync script", () => {
     const r = runScript(["--bump", "not.a.version"]);
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain("not semver");
+  });
+
+  it("--bump requires a version", () => {
+    const r = runScript(["--bump"]);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("--bump requires a semver version");
   });
 
   it("--bump rejects a non-greater version (no downgrade)", () => {
@@ -63,9 +71,9 @@ describe("release-sync script", () => {
     expect(r.stderr).toContain("Unknown argument");
   });
 
-  it("usage error when no args", () => {
+  it("syncs without bumping when no args are provided", () => {
     const r = runScript([]);
-    expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain("usage:");
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("plugin/composer-mastermind/plugin.json unchanged");
   });
 });

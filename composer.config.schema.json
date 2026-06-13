@@ -32,14 +32,368 @@
         },
         "coderCli": {
           "$ref": "#/$defs/roleConfig"
+        },
+        "oraclePlanner": {
+          "$ref": "#/$defs/roleConfig"
         }
       }
     },
     "spendAuthorization": {
       "$ref": "#/$defs/spendAuthorization"
+    },
+    "codexReview": {
+      "$ref": "#/$defs/codexReview"
+    },
+    "codexRescue": {
+      "$ref": "#/$defs/codexRescue"
+    },
+    "codexLifecycle": {
+      "$ref": "#/$defs/codexLifecycle"
     }
   },
   "$defs": {
+    "codexReview": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "description": "Optional Codex review-gate settings. Composer owns the trigger points; omit or disable to keep review-gate off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master opt-in switch. false keeps Codex review-gate shipped off."
+        },
+        "triggers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Composer trigger points that may request Codex review.",
+          "properties": {
+            "preCommit": {
+              "type": "boolean",
+              "description": "Run Codex review before commit when enabled."
+            },
+            "postPlan": {
+              "type": "boolean",
+              "description": "Run Codex review after planning when enabled."
+            }
+          }
+        },
+        "preCommitCommand": {
+          "type": "string",
+          "enum": [
+            "review",
+            "adversarial-review"
+          ],
+          "description": "Codex companion verb for pre-commit review. Omitted = review."
+        },
+        "postPlanCommand": {
+          "type": "string",
+          "enum": [
+            "review",
+            "adversarial-review"
+          ],
+          "description": "Codex companion verb for post-plan review. Omitted = adversarial-review."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "description": "ask: require user confirmation before invoking Codex. auto: invoke without asking. Omitted = ask."
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "foreground: wait for Codex review. background: launch review asynchronously. Omitted = background."
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "working-tree",
+            "branch"
+          ],
+          "description": "auto: infer review scope. working-tree: review local changes. branch: review against base. Omitted = auto."
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base branch for branch-scoped review. Omitted = main."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional Codex model passed to codex-companion via --model."
+        },
+        "preCommitHook": {
+          "$ref": "#/$defs/codexPreCommitHook"
+        },
+        "warmCache": {
+          "$ref": "#/$defs/codexWarmCache"
+        },
+        "notify": {
+          "$ref": "#/$defs/codexReviewNotify"
+        }
+      }
+    },
+    "codexWarmCache": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional background warm cache for the mechanical Codex pre-commit gate. Omitted or disabled = off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, Stop hooks may warm a cached Codex review verdict for the current diff."
+        },
+        "maxAgeMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Maximum age for cached pre-commit verdicts. Omitted = 30."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300000,
+          "description": "Warm review wall-clock timeout in milliseconds. Omitted = 300000."
+        }
+      }
+    },
+    "codexReviewNotify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional user notifications for Codex review-gate activity.",
+      "properties": {
+        "desktop": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, use macOS desktop notifications for sync review start and deny events."
+        }
+      }
+    },
+    "codexRescue": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional guidance-only Codex Rescue integration settings.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, skills may suggest Codex Rescue for stuck or failing work."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "default": "ask",
+          "description": "ask: request confirmation before rescue. auto: allow documented rescue flow to proceed."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "default": "gpt-5.4-mini",
+          "description": "Model label used in Codex Rescue guidance."
+        }
+      }
+    },
+    "codexLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional deterministic policy for deciding when Codex should participate beyond the mechanical review gate. It never invokes Codex by itself.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Master opt-in switch. false keeps lifecycle participation policy off."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "default": "ask",
+          "description": "ask: return ask decisions for qualified events. auto: return run decisions for qualified events."
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "default": "background",
+          "description": "Preferred Codex execution mode when the policy qualifies an event."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "default": "gpt-5.4-mini",
+          "description": "Codex model label to use for lifecycle participation prompts."
+        },
+        "triggers": {
+          "$ref": "#/$defs/codexLifecycleTriggers"
+        },
+        "thresholds": {
+          "$ref": "#/$defs/codexLifecycleThresholds"
+        },
+        "fallback": {
+          "$ref": "#/$defs/codexLifecycleFallback"
+        }
+      }
+    },
+    "codexLifecycleTriggers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Lifecycle stages where Coco may ask the policy whether Codex should participate.",
+      "properties": {
+        "postResearch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider Codex after a research result is produced."
+        },
+        "postPlan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after a plan is written, before code."
+        },
+        "postCodeApply": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after code has been applied."
+        },
+        "postTestFailure": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after targeted tests fail."
+        },
+        "afterFailedAttempts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Consider Codex after repeated failed fix attempts."
+        },
+        "preCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider lifecycle policy before commit. The mechanical codexReview preCommitHook remains the hard gate."
+        },
+        "stopWarm": {
+          "type": "boolean",
+          "default": false,
+          "description": "Consider passive Stop-time warm checks. Keep off unless background participation is desired."
+        }
+      }
+    },
+    "codexLifecycleThresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Deterministic score thresholds used by composer_codex_lifecycle_decide.",
+      "properties": {
+        "minScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 60,
+          "description": "Minimum score required to return ask/run instead of skip."
+        },
+        "minExpectedOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 500,
+          "description": "Expected output size that contributes to the lifecycle score."
+        },
+        "minChangedFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Changed-file count that contributes to the lifecycle score."
+        },
+        "minDiffLines": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 80,
+          "description": "Diff-line count that contributes to the lifecycle score."
+        },
+        "failedAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Failed attempts required before the repeated-failure score applies."
+        }
+      }
+    },
+    "codexLifecycleFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional fallback provider roles used when the primary Codex lifecycle provider is unavailable.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, lifecycle runs try fallback roles after coderCli is unavailable."
+        },
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "default": [
+            "reviewerClaude",
+            "reviewer",
+            "coder"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "researcher",
+              "coder",
+              "reviewer",
+              "reviewerClaude",
+              "coderCli"
+            ]
+          },
+          "description": "Provider role fallback order after coderCli. Duplicate coderCli entries are ignored at runtime."
+        }
+      }
+    },
+    "codexPreCommitHook": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "description": "Optional mechanical PreToolUse gate for git commit. Omitted or disabled = off.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Opt-in switch for the mechanical pre-commit gate."
+        },
+        "blockOnSeverity": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Minimum finding severity that blocks commit. Omitted = high."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Review wall-clock timeout in milliseconds. Omitted = 900000."
+        },
+        "failClosed": {
+          "type": "boolean",
+          "description": "If true, reviewer unavailability blocks commit. Omitted = false."
+        }
+      }
+    },
     "spendAuthorization": {
       "type": "object",
       "required": [

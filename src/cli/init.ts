@@ -10,9 +10,10 @@
 // Idempotent: each step checks existing state and skips if already correct.
 // Never overwrites a present, non-default file (no --force flag in this slice).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { globalConfigDir } from "../config/paths.js";
 import { installPluginAssets } from "./install-plugin.js";
 
@@ -33,6 +34,10 @@ export interface InitOptions {
   defaultBaseUrl?: string;
   /** Override the default auth token placeholder. */
   defaultAuthToken?: string;
+  /** When true, copy Oracle adapter scripts + add an opt-in oraclePlanner role. */
+  installOracle?: boolean;
+  /** Override the Oracle scripts source dir (tests inject). */
+  oracleSourceDir?: string;
 }
 
 export interface InitResult {
@@ -66,9 +71,9 @@ const DEFAULT_COMPOSER_CONFIG = {
     },
     reviewer: {
       provider: "cli",
-      cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
+      cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "110s", "-p"],
       timeoutMs: 120000,
-      retries: 0,
+      retries: 1,
     },
     reviewerClaude: {
       provider: "cli",
@@ -100,6 +105,64 @@ const DEFAULT_COMPOSER_CONFIG = {
     maxUsdPerCall: 0.5,
     maxUsdPerSession: 5.0,
   },
+  codexReview: {
+    enabled: false,
+    triggers: {
+      preCommit: true,
+      postPlan: true,
+    },
+    preCommitCommand: "adversarial-review",
+    postPlanCommand: "adversarial-review",
+    mode: "ask",
+    execution: "background",
+    scope: "auto",
+    base: "main",
+    model: "gpt-5.4-mini",
+    preCommitHook: {
+      enabled: false,
+      blockOnSeverity: "high",
+      timeoutMs: 900000,
+      failClosed: false,
+    },
+    warmCache: {
+      enabled: false,
+      maxAgeMinutes: 30,
+    },
+    notify: {
+      desktop: false,
+    },
+  },
+  codexRescue: {
+    enabled: true,
+    mode: "ask",
+    model: "gpt-5.4-mini",
+  },
+  codexLifecycle: {
+    enabled: false,
+    mode: "ask",
+    execution: "background",
+    model: "gpt-5.4-mini",
+    triggers: {
+      postResearch: false,
+      postPlan: true,
+      postCodeApply: true,
+      postTestFailure: true,
+      afterFailedAttempts: true,
+      preCommit: false,
+      stopWarm: false,
+    },
+    thresholds: {
+      minScore: 60,
+      minExpectedOutputTokens: 500,
+      minChangedFiles: 2,
+      minDiffLines: 80,
+      failedAttempts: 2,
+    },
+    fallback: {
+      enabled: false,
+      order: ["reviewerClaude", "reviewer", "coder"],
+    },
+  },
 };
 
 const DEFAULT_ENV_TEMPLATE = (baseUrl: string, token: string) => ({
@@ -109,6 +172,8 @@ const DEFAULT_ENV_TEMPLATE = (baseUrl: string, token: string) => ({
 
 const DEFAULT_BASE_URL = "https://api.z.ai/api/anthropic";
 const DEFAULT_AUTH_TOKEN_PLACEHOLDER = "<replace-with-your-glm-or-anthropic-compatible-token>";
+const BASE_GITIGNORE_ENTRIES = [".env.json", ".composer/handoffs/", ".composer/codex-lifecycle/"];
+const ORACLE_GITIGNORE_ENTRIES = [".composer/oracle/", ".composer/results/"];
 
 const DEFAULT_MCP_SETTINGS = {
   mcpServers: {
@@ -119,6 +184,26 @@ const DEFAULT_MCP_SETTINGS = {
   },
 };
 
+const ORACLE_SCRIPTS = [
+  "oracle-pro-safe.sh",
+  "oracle-plan-mcp.sh",
+  "composer-oracle-router-safe.sh",
+  "oracle-codex-handoff-safe.sh",
+];
+
+const ORACLE_PLANNER_ROLE = {
+  provider: "cli",
+  cli: ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
+  timeoutMs: 1500000,
+  retries: 0,
+  maxResultChars: 14000,
+};
+
+export function defaultOracleSourceDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolve(here, "..", "..", "scripts");
+}
+
 export function runInit(opts: InitOptions): InitResult {
   const cwd = resolve(opts.cwd);
   const steps: InitStep[] = [];
@@ -128,6 +213,10 @@ export function runInit(opts: InitOptions): InitResult {
 
   steps.push(ensureClaudeDir(cwd));
   steps.push(writeComposerConfig(cwd));
+  if (opts.installOracle) {
+    steps.push(installOracleScripts(cwd, opts.oracleSourceDir ?? defaultOracleSourceDir()));
+    steps.push(ensureOraclePlannerRole(cwd));
+  }
   steps.push(
     writeEnvJsonStub(
       cwd,
@@ -135,7 +224,10 @@ export function runInit(opts: InitOptions): InitResult {
       opts.defaultAuthToken ?? DEFAULT_AUTH_TOKEN_PLACEHOLDER,
     ),
   );
-  steps.push(ensureEnvGitignored(cwd));
+  steps.push(ensureGitignoreEntries(cwd, BASE_GITIGNORE_ENTRIES));
+  if (opts.installOracle) {
+    steps.push(ensureGitignoreEntries(cwd, ORACLE_GITIGNORE_ENTRIES));
+  }
   steps.push(wireMcpServer(cwd));
 
   for (const s of steps) {
@@ -281,6 +373,37 @@ function writeComposerConfig(cwd: string): InitStep {
   return { name: "composer.config.json", status: "created", path };
 }
 
+function installOracleScripts(cwd: string, sourceDir: string): InitStep {
+  const destDir = join(cwd, "scripts");
+  mkdirSync(destDir, { recursive: true });
+  const copied: string[] = [];
+  for (const name of ORACLE_SCRIPTS) {
+    const dest = join(destDir, name);
+    if (existsSync(dest)) continue;
+    copyFileSync(join(sourceDir, name), dest);
+    chmodSync(dest, 0o755);
+    copied.push(name);
+  }
+  return copied.length > 0
+    ? { name: "oracle scripts", status: "created", path: destDir, reason: `copied ${copied.length} script(s)` }
+    : { name: "oracle scripts", status: "skipped", path: destDir, reason: "already present" };
+}
+
+function ensureOraclePlannerRole(cwd: string): InitStep {
+  const path = join(cwd, "composer.config.json");
+  if (!existsSync(path)) {
+    return { name: "oraclePlanner role", status: "skipped", path, reason: "no composer.config.json" };
+  }
+  const config = JSON.parse(readFileSync(path, "utf8")) as { roles?: Record<string, unknown> };
+  config.roles ??= {};
+  if (config.roles["oraclePlanner"]) {
+    return { name: "oraclePlanner role", status: "skipped", path, reason: "already present" };
+  }
+  config.roles["oraclePlanner"] = ORACLE_PLANNER_ROLE;
+  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf8");
+  return { name: "oraclePlanner role", status: "updated", path, reason: "added opt-in Oracle role" };
+}
+
 function writeEnvJsonStub(cwd: string, baseUrl: string, token: string): InitStep {
   const path = join(cwd, ".env.json");
   if (existsSync(path)) {
@@ -290,19 +413,19 @@ function writeEnvJsonStub(cwd: string, baseUrl: string, token: string): InitStep
   return { name: ".env.json", status: "created", path, reason: "placeholder — fill before launching claude" };
 }
 
-function ensureEnvGitignored(cwd: string): InitStep {
+function ensureGitignoreEntries(cwd: string, entries: string[]): InitStep {
   const path = join(cwd, ".gitignore");
-  const entry = ".env.json";
-  if (!existsSync(path)) {
-    writeFileSync(path, `${entry}\n`, "utf8");
-    return { name: ".gitignore", status: "created", path, reason: `added ${entry}` };
+  let current = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const lines = current.split(/\r?\n/).map((l) => l.trim());
+  const missing = entries.filter((e) => !lines.includes(e));
+  if (missing.length === 0) {
+    return { name: ".gitignore", status: "skipped", path, reason: "entries already present" };
   }
-  const current = readFileSync(path, "utf8");
-  const hasEntry = current.split(/\r?\n/).some((line) => line.trim() === entry);
-  if (hasEntry) return { name: ".gitignore", status: "skipped", path, reason: `${entry} already listed` };
-  const next = current.endsWith("\n") ? current + entry + "\n" : current + "\n" + entry + "\n";
-  writeFileSync(path, next, "utf8");
-  return { name: ".gitignore", status: "updated", path, reason: `appended ${entry}` };
+  if (current.length > 0 && !current.endsWith("\n")) current += "\n";
+  current += missing.join("\n") + "\n";
+  const created = !existsSync(path);
+  writeFileSync(path, current, "utf8");
+  return { name: ".gitignore", status: created ? "created" : "updated", path, reason: `added ${missing.join(", ")}` };
 }
 
 function wireMcpServer(cwd: string): InitStep {

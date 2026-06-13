@@ -8,6 +8,10 @@ export interface IProviderExecuteInput {
   context?: string;
   maxTokens?: number;
   cwd?: string;
+  projectDir?: string;
+  readOnly?: boolean;
+  /** Optional model override forwarded to model-aware CLIs (currently codex exec via -m). Ignored by providers that pin their own model. */
+  model?: string;
   signal?: AbortSignal;
 }
 

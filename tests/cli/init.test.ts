@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInit } from "../../src/cli/init.js";
 
+const ORACLE_SCRIPTS = [
+  "oracle-pro-safe.sh",
+  "oracle-plan-mcp.sh",
+  "composer-oracle-router-safe.sh",
+  "oracle-codex-handoff-safe.sh",
+];
+
 describe("composer init", () => {
   let cwd: string;
 
@@ -60,8 +67,9 @@ describe("composer init", () => {
     expect(cfg.roles.coderCli.retries).toBe(0);
     expect(cfg.roles.reviewer.provider).toBe("cli");
     expect(cfg.roles.reviewer.cli).toContain("--print-timeout");
+    expect(cfg.roles.reviewer.cli).toContain("110s");
     expect(cfg.roles.reviewer.timeoutMs).toBe(120000);
-    expect(cfg.roles.reviewer.retries).toBe(0);
+    expect(cfg.roles.reviewer.retries).toBe(1);
     expect(cfg.roles.reviewerClaude).toBeDefined();
     expect(cfg.roles.reviewerClaude?.provider).toBe("cli");
     expect(cfg.roles.reviewerClaude?.cli).toContain("claude");
@@ -70,6 +78,45 @@ describe("composer init", () => {
     expect(cfg.roles.reviewerClaude?.retries).toBe(0);
     expect(cfg.spendAuthorization.mode).toBe("interactive");
     expect(cfg.spendAuthorization.maxUsdPerCall).toBe(0.5);
+    expect(cfg.codexReview.preCommitCommand).toBe("adversarial-review");
+    expect(cfg.codexReview.model).toBe("gpt-5.4-mini");
+    expect(cfg.codexLifecycle.enabled).toBe(false);
+    expect(cfg.codexLifecycle.mode).toBe("ask");
+    expect(cfg.codexLifecycle.triggers.postCodeApply).toBe(true);
+    expect(cfg.codexLifecycle.triggers.stopWarm).toBe(false);
+    expect(cfg.codexLifecycle.thresholds.minScore).toBe(60);
+    expect(cfg.codexLifecycle.fallback.enabled).toBe(false);
+    expect(cfg.codexLifecycle.fallback.order).toEqual(["reviewerClaude", "reviewer", "coder"]);
+  });
+
+  it("does not install Oracle scripts or role by default", () => {
+    runInit({ cwd, verbose: false });
+    const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
+    expect(cfg.roles.oraclePlanner).toBeUndefined();
+    expect(existsSync(join(cwd, "scripts"))).toBe(false);
+  });
+
+  it("installs Oracle scripts and adds oraclePlanner when requested", () => {
+    const oracleSourceDir = mkdtempSync(join(tmpdir(), "composer-oracle-source-"));
+    try {
+      for (const name of ORACLE_SCRIPTS) {
+        writeFileSync(join(oracleSourceDir, name), "stub\n", "utf8");
+      }
+
+      runInit({ cwd, installOracle: true, oracleSourceDir, verbose: false });
+
+      for (const name of ORACLE_SCRIPTS) {
+        expect(existsSync(join(cwd, "scripts", name))).toBe(true);
+      }
+      const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
+      expect(cfg.roles.oraclePlanner.cli[0]).toBe("bash");
+      expect(cfg.roles.oraclePlanner.cli).toContain("scripts/oracle-plan-mcp.sh");
+      const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
+      expect(ig).toContain(".composer/oracle/");
+      expect(ig).toContain(".composer/results/");
+    } finally {
+      rmSync(oracleSourceDir, { recursive: true, force: true });
+    }
   });
 
   it("does NOT overwrite an existing composer.config.json", () => {
@@ -92,27 +139,33 @@ describe("composer init", () => {
     expect(JSON.parse(readFileSync(join(cwd, ".env.json"), "utf8"))).toEqual({ secret: "real-token" });
   });
 
-  it("creates .gitignore with .env.json when missing", () => {
+  it("creates .gitignore with base runtime entries when missing", () => {
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
     expect(ig).toContain(".env.json");
+    expect(ig).toContain(".composer/handoffs/");
+    expect(ig).toContain(".composer/codex-lifecycle/");
   });
 
-  it("appends .env.json to existing .gitignore without erasing prior entries", () => {
+  it("appends base runtime entries to existing .gitignore without erasing prior entries", () => {
     writeFileSync(join(cwd, ".gitignore"), "node_modules/\ndist/\n", "utf8");
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
     expect(ig).toContain("node_modules/");
     expect(ig).toContain("dist/");
     expect(ig).toContain(".env.json");
+    expect(ig).toContain(".composer/handoffs/");
+    expect(ig).toContain(".composer/codex-lifecycle/");
   });
 
-  it("does not duplicate .env.json in .gitignore on re-run", () => {
+  it("does not duplicate runtime entries in .gitignore on re-run", () => {
     runInit({ cwd, verbose: false });
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
-    const occurrences = ig.split(/\r?\n/).filter((l) => l.trim() === ".env.json").length;
-    expect(occurrences).toBe(1);
+    const lines = ig.split(/\r?\n/).map((l) => l.trim());
+    expect(lines.filter((l) => l === ".env.json")).toHaveLength(1);
+    expect(lines.filter((l) => l === ".composer/handoffs/")).toHaveLength(1);
+    expect(lines.filter((l) => l === ".composer/codex-lifecycle/")).toHaveLength(1);
   });
 
   it("writes .claude/settings.json with mcpServers.composer entry", () => {

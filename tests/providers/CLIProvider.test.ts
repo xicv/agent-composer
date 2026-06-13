@@ -75,6 +75,20 @@ describe("CLIProvider (execFile injected)", () => {
             execFn: makeExec(""),
           }),
       ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["codex", "exec", "--sandbox=danger-full-access"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
+      expect(
+        () =>
+          new CLIProvider({
+            cli: ["npx", "-y", "@openai/codex", "exec", "--sandbox=danger-full-access"],
+            execFn: makeExec(""),
+          }),
+      ).toThrow(/unsafe Codex exec sandbox/);
     } finally {
       if (previous === undefined) delete process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"];
       else process.env["COMPOSER_ALLOW_DANGEROUS_CODEX"] = previous;
@@ -117,6 +131,183 @@ describe("CLIProvider (execFile injected)", () => {
     expect(captured[0]?.args).toContain("--output-last-message");
     expect(captured[0]?.args[captured[0]!.args.length - 1]).toBe("edit src/server.ts");
     expect(out.text).toBe("codex summary");
+  });
+
+  it("injects -C for codex exec when projectDir is set", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", projectDir: "/target/project" });
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox",
+      "workspace-write",
+    ]);
+    expect(captured[0]?.options.cwd).toBeUndefined();
+  });
+
+  it("forces read-only sandbox for advisory codex exec calls", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({
+      prompt: "review src/server.ts",
+      projectDir: "/target/project",
+      readOnly: true,
+    });
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+  });
+
+  it("does not duplicate codex -C when already present", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-C", "/configured/project", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", projectDir: "/target/project" });
+    expect(captured[0]?.args.filter((arg) => arg === "-C")).toHaveLength(1);
+    expect(captured[0]?.args.slice(0, 4)).toEqual([
+      "-C",
+      "/configured/project",
+      "exec",
+      "--sandbox",
+      "workspace-write",
+    ].slice(0, 4));
+  });
+
+  it("injects -m for codex exec when model is set", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    const args = captured[0]?.args ?? [];
+    const modelIndex = args.indexOf("-m");
+    expect(modelIndex).toBeGreaterThanOrEqual(0);
+    expect(args[modelIndex + 1]).toBe("gpt-5.4-mini");
+    expect(modelIndex).toBeLessThan(args.indexOf("exec"));
+  });
+
+  it("does not override an explicitly configured codex model", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-m", "gpt-5", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    const args = captured[0]?.args ?? [];
+    expect(args.filter((arg) => arg === "-m")).toHaveLength(1);
+    expect(args[args.indexOf("-m") + 1]).toBe("gpt-5");
+    expect(args).not.toContain("gpt-5.4-mini");
+  });
+
+  it("does not inject -m for non-codex binaries", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      execFn: makeExec("agy summary", "", captured),
+    });
+    await p.execute({ prompt: "edit src/server.ts", model: "gpt-5.4-mini" });
+    expect(captured[0]?.args).not.toContain("-m");
+  });
+
+  it("keeps configured codex -C on the hardened exec path", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["codex", "-C", "/configured/project", "exec", "--sandbox", "workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", readOnly: true });
+    expect(captured[0]?.options.cwd).toBeUndefined();
+    expect(captured[0]?.args.slice(0, 5)).toEqual([
+      "-C",
+      "/configured/project",
+      "exec",
+      "--sandbox",
+      "read-only",
+    ]);
+    expect(captured[0]?.args).toContain("--output-last-message");
+  });
+
+  it("hardens wrapped codex exec invocations", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex", "exec", "--sandbox=workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", projectDir: "/target/project", readOnly: true });
+    expect(captured[0]?.args.slice(0, 7)).toEqual([
+      "-y",
+      "@openai/codex",
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox=read-only",
+      "--output-last-message",
+    ]);
+  });
+
+  it("hardens versioned wrapped codex exec invocations", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex@0.139.0", "exec", "--sandbox=workspace-write"],
+      model: "codex-cli",
+      execFn: makeExec("codex review", "", captured),
+    });
+    await p.execute({ prompt: "review", projectDir: "/target/project", readOnly: true });
+    expect(captured[0]?.args.slice(0, 7)).toEqual([
+      "-y",
+      "@openai/codex@0.139.0",
+      "-C",
+      "/target/project",
+      "exec",
+      "--sandbox=read-only",
+      "--output-last-message",
+    ]);
+  });
+
+  it("rejects read-only execution when a wrapper is not a supported codex exec", async () => {
+    const p = new CLIProvider({
+      cli: ["npx", "-y", "@openai/codex"],
+      model: "codex-cli",
+      execFn: makeExec("should not run"),
+    });
+
+    await expect(p.execute({ prompt: "review", readOnly: true })).rejects.toThrow(
+      /readOnly execution requires a supported Codex exec CLI config/,
+    );
+  });
+
+  it("sets spawn cwd to projectDir for non-codex binaries", async () => {
+    const captured: CapturedExec[] = [];
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      cwd: "/default-root",
+      execFn: makeExec("ok", "", captured),
+    });
+    await p.execute({ prompt: "x", projectDir: "/target/project" });
+    expect(captured[0]?.options.cwd).toBe("/target/project");
+    expect(captured[0]?.args).toEqual(["-p", "x"]);
   });
 
   it("supports codex global flags before exec for web-search research", async () => {
@@ -329,6 +520,31 @@ describe("CLIProvider (replay against recorded agy tape)", () => {
       expect(replay.text).toBe(first.output.text);
     },
   );
+});
+
+describe("CLIProvider (real spawn — AbortSignal escalation wiring)", () => {
+  it("rejects when AbortSignal is already aborted before spawn", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const p = new CLIProvider({
+      cli: ["node", "-e", "setInterval(() => {}, 1000)"],
+      timeoutMs: 10_000,
+    });
+    await expect(p.execute({ prompt: "", signal: ac.signal })).rejects.toThrow();
+  });
+
+  it("rejects when AbortSignal fires after spawn starts", async () => {
+    const ac = new AbortController();
+    const p = new CLIProvider({
+      cli: ["node", "-e", "setInterval(() => {}, 1000)"],
+      timeoutMs: 10_000,
+    });
+    const execPromise = p.execute({ prompt: "", signal: ac.signal });
+    // Let the child start, then abort.
+    await new Promise<void>((r) => setTimeout(r, 50));
+    ac.abort();
+    await expect(execPromise).rejects.toThrow();
+  });
 });
 
 describe("CLIProvider retry-on-transient", () => {

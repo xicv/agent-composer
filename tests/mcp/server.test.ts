@@ -1,15 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
-import { createComposerServer } from "../../src/server.js";
+import { applyFileBlocks, createComposerServer } from "../../src/server.js";
 import { ProviderRegistry } from "../../src/registry.js";
 import { parseConfig } from "../../src/config/loader.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
 import { MockProvider } from "../../src/providers/MockProvider.js";
+import type { IProvider } from "../../src/providers/IProvider.js";
+import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 
 const allMockConfig: ComposerConfig = parseConfig({
   roles: {
@@ -18,12 +21,17 @@ const allMockConfig: ComposerConfig = parseConfig({
     reviewer: { provider: "mock", model: "reviewer-mock" },
     reviewerClaude: { provider: "mock", model: "reviewer-claude-mock" },
     coderCli: { provider: "mock", model: "coder-cli-mock" },
+    oraclePlanner: { provider: "mock", model: "oracle-planner-mock" },
   },
 });
 
-async function bootClient(root?: string) {
-  const registry = new ProviderRegistry(allMockConfig);
-  const server = createComposerServer(registry, root ? { root } : {});
+async function bootClient(
+  root?: string,
+  config: ComposerConfig = allMockConfig,
+  configPath?: string,
+) {
+  const registry = new ProviderRegistry(config);
+  const server = createComposerServer(registry, root ? { root, config, configPath } : { config, configPath });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "composer-test-client", version: "0.0.0" });
@@ -34,7 +42,60 @@ async function bootClient(root?: string) {
   return { client, server, registry };
 }
 
+async function bootClientWithProviders(
+  providers: Record<string, IProvider>,
+  root?: string,
+  config: ComposerConfig = allMockConfig,
+  configPath?: string,
+) {
+  const fallback = new MockProvider();
+  const registry = {
+    getProviderForRole(role: string): IProvider {
+      return providers[role] ?? fallback;
+    },
+  } as unknown as ProviderRegistry;
+  const server = createComposerServer(registry, root ? { root, config, configPath } : { config, configPath });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "composer-test-client", version: "0.0.0" });
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  return { client, server, registry };
+}
+
+function failingProvider(message: string): IProvider {
+  return {
+    id: "mock",
+    modelLabel: "failing-mock",
+    async healthCheck() {
+      return true;
+    },
+    async execute() {
+      throw new Error(message);
+    },
+  };
+}
+
 describe("composer MCP server", () => {
+  let composerStateDir: string | undefined;
+  let previousComposerStateDir: string | undefined;
+
+  beforeEach(() => {
+    previousComposerStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+    composerStateDir = mkdtempSync(join(tmpdir(), "composer-mcp-state-"));
+    process.env[COMPOSER_STATE_DIR_ENV] = composerStateDir;
+  });
+
+  afterEach(() => {
+    if (previousComposerStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+    else process.env[COMPOSER_STATE_DIR_ENV] = previousComposerStateDir;
+    if (composerStateDir) rmSync(composerStateDir, { recursive: true, force: true });
+    composerStateDir = undefined;
+    previousComposerStateDir = undefined;
+  });
+
   it("registers composer tools with locked and append-only names", async () => {
     const { client } = await bootClient();
     const { tools } = await client.listTools();
@@ -43,7 +104,15 @@ describe("composer MCP server", () => {
       "composer_code",
       "composer_code_chain",
       "composer_code_cli",
+      "composer_codex_lifecycle_decide",
+      "composer_codex_lifecycle_result",
+      "composer_codex_lifecycle_run",
+      "composer_config_get",
+      "composer_config_set",
       "composer_handoff_create",
+      "composer_oracle_job_result",
+      "composer_oracle_job_start",
+      "composer_oracle_plan",
       "composer_research",
       "composer_review",
       "composer_review_claude",
@@ -70,6 +139,15 @@ describe("composer MCP server", () => {
     expect(byName["composer_code_cli"]?.description).toContain("Prefer");
   });
 
+  it("declares optional projectDir on direct apply tool schemas", async () => {
+    const { client } = await bootClient();
+    const { tools } = await client.listTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+
+    expect(JSON.stringify(byName["composer_code_cli"]?.inputSchema)).toContain("projectDir");
+    expect(JSON.stringify(byName["composer_code_chain"]?.inputSchema)).toContain("projectDir");
+  });
+
   it("marks research and review tools as direct bounded off-CC lanes", async () => {
     const { client } = await bootClient();
     const { tools } = await client.listTools();
@@ -91,6 +169,21 @@ describe("composer MCP server", () => {
       readOnlyHint: true,
       openWorldHint: true,
     });
+    expect(byName["composer_oracle_plan"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      openWorldHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_oracle_job_start"]?.annotations).toMatchObject({
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_oracle_job_result"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
     expect(byName["composer_code"]?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: false,
@@ -107,6 +200,31 @@ describe("composer MCP server", () => {
       readOnlyHint: false,
       destructiveHint: false,
     });
+    expect(byName["composer_codex_lifecycle_decide"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_codex_lifecycle_run"]?.annotations).toMatchObject({
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_codex_lifecycle_result"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_config_get"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_config_set"]?.annotations).toMatchObject({
+      readOnlyHint: false,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
   });
 
   it("composer_research routes to the researcher MockProvider", async () => {
@@ -118,6 +236,58 @@ describe("composer MCP server", () => {
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     expect(block?.type).toBe("text");
     expect(block?.text).toContain("mock:find zod docs");
+  });
+
+  it("composer_oracle_plan routes to the oraclePlanner MockProvider", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_oracle_plan",
+      arguments: { prompt: "plan the storage adapter" },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    expect(block?.type).toBe("text");
+    expect(block?.text).toContain("mock:plan the storage adapter");
+  });
+
+  it("composer_oracle_plan maps mode to an [oracle:<mode>] prompt prefix", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_oracle_plan",
+      arguments: { prompt: "review this diff", mode: "review" },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    expect(block?.text).toContain("[oracle:review] review this diff");
+  });
+
+  it("composer_oracle_job_start returns a durable job id", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_oracle_job_start",
+      arguments: { prompt: "research the storage adapter landscape", mode: "research" },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    const job = JSON.parse(block!.text);
+    expect(job.jobId).toMatch(/[0-9a-f-]{36}/);
+    expect(["queued", "running", "succeeded"]).toContain(job.status);
+    expect(job.mode).toBe("research");
+  });
+
+  it("composer_oracle_job_result returns the answer once the job completes", async () => {
+    const { client } = await bootClient();
+    const started = await client.callTool({
+      name: "composer_oracle_job_start",
+      arguments: { prompt: "plan the billing adapter" },
+    });
+    const startBlock = (started.content as Array<{ type: string; text: string }>)[0];
+    const jobId = JSON.parse(startBlock!.text).jobId as string;
+    const result = await client.callTool({
+      name: "composer_oracle_job_result",
+      arguments: { jobId, waitMs: 3000 },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    const job = JSON.parse(block!.text);
+    expect(job.status).toBe("succeeded");
+    expect(job.answerText).toContain("mock:plan the billing adapter");
   });
 
   it("composer_code routes to the coder MockProvider", async () => {
@@ -153,6 +323,240 @@ describe("composer MCP server", () => {
       const provider = registry.getProviderForRole("coderCli");
       expect(provider).toBeInstanceOf(MockProvider);
       expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_oracle_plan passes the server root as provider cwd", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const { client, registry } = await bootClient(root);
+      await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "plan with oracle" },
+      });
+      const provider = registry.getProviderForRole("oraclePlanner");
+      expect(provider).toBeInstanceOf(MockProvider);
+      expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_cli validates projectDir and forwards it separately", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const target = mkdtempSync(join(tmpdir(), "composer-target-"));
+    try {
+      const { client, registry } = await bootClient(root);
+      await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "apply with codex", projectDir: target },
+      });
+      const provider = registry.getProviderForRole("coderCli");
+      expect(provider).toBeInstanceOf(MockProvider);
+      expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
+      expect((provider as MockProvider).calls[0]?.projectDir).toBe(realpathSync(target));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_cli rejects non-absolute projectDir", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_code_cli",
+      arguments: { prompt: "apply with codex", projectDir: "relative/path" },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("projectDir must be an absolute path");
+  });
+
+  it("composer_code_chain rejects path escapes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: ../outside.txt", "```txt", "bad", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("outside projectDir");
+      expect(existsSync(resolve(root, "../outside.txt"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain rejects existing symlink leaf files outside projectDir", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const outside = mkdtempSync(join(tmpdir(), "composer-outside-"));
+    try {
+      const outsideFile = join(outside, "linked.txt");
+      writeFileSync(outsideFile, "outside\n", "utf8");
+      symlinkSync(outsideFile, join(root, "linked.txt"));
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: linked.txt", "```txt", "mutated", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write through link" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("symlink target resolves outside projectDir");
+      expect(readFileSync(outsideFile, "utf8")).toBe("outside\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain rejects dangling symlink leaf files outside projectDir", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "composer-mcp-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "composer-outside-")));
+    try {
+      const outsideFile = join(outside, "missing-linked.txt");
+      symlinkSync(outsideFile, join(root, "linked.txt"));
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: linked.txt", "```txt", "mutated", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write through dangling link" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("symlink target resolves outside projectDir");
+      expect(existsSync(outsideFile)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain returns an error when apply produces zero changes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      writeFileSync(join(root, "same.txt"), "same\n", "utf8");
+      const coder = new MockProvider({
+        responses: [
+          ["FILE: same.txt", "```txt", "same", "```"].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("apply produced no changes");
+      expect(JSON.stringify(result.content)).toContain(`target was ${realpathSync(root)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain applies changed files under projectDir and reports status", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const target = mkdtempSync(join(tmpdir(), "composer-target-"));
+    try {
+      writeFileSync(join(target, "same.txt"), "same\n", "utf8");
+      const coder = new MockProvider({
+        responses: [
+          [
+            "FILE: src/new.ts",
+            "```ts",
+            "export const value = 1;",
+            "```",
+            "FILE: same.txt",
+            "```txt",
+            "same",
+            "```",
+          ].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write it", projectDir: target },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(coder.calls[0]?.cwd).toBe(realpathSync(target));
+      const text = (result.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(text).toContain(`projectDir ${realpathSync(target)}`);
+      expect(text).toContain("src/new.ts=changed");
+      expect(text).toContain("same.txt=unchanged");
+      expect(readFileSync(join(target, "src/new.ts"), "utf8")).toBe(
+        "export const value = 1;\n",
+      );
+      expect(existsSync(join(root, "src/new.ts"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("applyFileBlocks leaves no partial state when a later staged write fails", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "composer-mcp-")));
+    try {
+      writeFileSync(join(root, "a.ts"), "ORIGINAL", "utf8");
+      writeFileSync(join(root, "blocker"), "not a directory\n", "utf8");
+      const text = [
+        "FILE: a.ts",
+        "```ts",
+        "NEW",
+        "```",
+        "FILE: blocker/x.ts",
+        "```ts",
+        "export const x = 1;",
+        "```",
+      ].join("\n");
+
+      expect(() => applyFileBlocks(text, root)).toThrow();
+      expect(readFileSync(join(root, "a.ts"), "utf8")).toBe("ORIGINAL");
+      expect(readdirSync(root).filter((name) => name.startsWith(".composer-apply-"))).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_chain preserves nested fenced content with longer outer fences", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const coder = new MockProvider({
+        responses: [
+          [
+            "FILE: docs/example.md",
+            "````markdown",
+            "# Example",
+            "",
+            "```ts",
+            "export const value = 1;",
+            "```",
+            "````",
+          ].join("\n"),
+        ],
+      });
+      const { client } = await bootClientWithProviders({ coder }, root);
+      const result = await client.callTool({
+        name: "composer_code_chain",
+        arguments: { prompt: "write markdown" },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(readFileSync(join(root, "docs/example.md"), "utf8")).toBe(
+        ["# Example", "", "```ts", "export const value = 1;", "```", ""].join("\n"),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -253,6 +657,528 @@ describe("composer MCP server", () => {
       expect(existsSync(parsed.handoffPath)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_decide returns a policy-only decision", async () => {
+    const config = parseConfig({
+      ...allMockConfig,
+      codexLifecycle: {
+        enabled: true,
+        mode: "auto",
+        thresholds: { minScore: 50 },
+      },
+    });
+    const { client } = await bootClient(undefined, config);
+    const result = await client.callTool({
+      name: "composer_codex_lifecycle_decide",
+      arguments: {
+        event: "postTestFailure",
+        signals: {
+          failingTests: true,
+          failedAttempts: 2,
+        },
+      },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    const parsed = JSON.parse(block?.text ?? "{}") as {
+      action: string;
+      event: string;
+      reasons: string[];
+    };
+
+    expect(parsed.event).toBe("postTestFailure");
+    expect(parsed.action).toBe("run");
+    expect(parsed.reasons).toContain("test failure needs second opinion");
+  });
+
+  it("composer_codex_lifecycle_run returns and persists foreground results", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "auto",
+          execution: "foreground",
+          thresholds: { minScore: 50 },
+        },
+      });
+      const coderCli = new MockProvider({
+        responses: ["Verdict: foreground lifecycle result"],
+      });
+      const { client } = await bootClientWithProviders({ coderCli }, root, config);
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postTestFailure",
+          prompt: "inspect the failed test",
+          signals: { failingTests: true, failedAttempts: 2 },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        jobId: string;
+        status: string;
+        resultPath: string;
+        resultText: string;
+      };
+
+      expect(parsed.status).toBe("succeeded");
+      expect(parsed.resultText).toContain("foreground lifecycle result");
+      expect(resolve(parsed.resultPath).startsWith(`${realpathSync(composerStateDir!)}${sep}`)).toBe(true);
+      expect(resolve(parsed.resultPath).startsWith(`${realpathSync(root)}${sep}`)).toBe(false);
+      expect(existsSync(parsed.resultPath)).toBe(true);
+      expect(coderCli.calls[0]?.cwd).toBe(realpathSync(root));
+      expect(coderCli.calls[0]?.projectDir).toBe(realpathSync(root));
+      expect(coderCli.calls[0]?.readOnly).toBe(true);
+
+      const fetched = await client.callTool({
+        name: "composer_codex_lifecycle_result",
+        arguments: { jobId: parsed.jobId },
+      });
+      const fetchedBlock = (fetched.content as Array<{ type: string; text: string }>)[0];
+      expect(fetchedBlock?.text).toContain("foreground lifecycle result");
+      expect(coderCli.calls[0]?.prompt).toContain("Do not silently mutate files");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run promotes ask decisions only after confirmation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "ask",
+          execution: "foreground",
+          thresholds: { minScore: 50 },
+        },
+      });
+      const coderCli = new MockProvider({
+        responses: ["Verdict: confirmed lifecycle result"],
+      });
+      const { client } = await bootClientWithProviders({ coderCli }, root, config);
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postTestFailure",
+          prompt: "inspect the failed test after confirmation",
+          confirmed: true,
+          signals: { failingTests: true, failedAttempts: 2 },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        status: string;
+        action: string;
+        resultText: string;
+        decision: { action: string; reasons: string[] };
+      };
+
+      expect(parsed.status).toBe("succeeded");
+      expect(parsed.action).toBe("run");
+      expect(parsed.decision.action).toBe("run");
+      expect(parsed.decision.reasons).toContain("user confirmed Codex lifecycle ask");
+      expect(parsed.resultText).toContain("confirmed lifecycle result");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run does not let confirmation bypass policy skips", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "ask",
+          execution: "foreground",
+          triggers: { postCodeApply: false },
+        },
+      });
+      const coderCli = new MockProvider();
+      const { client } = await bootClientWithProviders({ coderCli }, root, config);
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postCodeApply",
+          prompt: "inspect the change",
+          confirmed: true,
+          signals: { userRequestedCodex: true },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        status: string;
+        action: string;
+        resultText: string;
+      };
+
+      expect(parsed.status).toBe("skipped");
+      expect(parsed.action).toBe("skip");
+      expect(parsed.resultText).toContain("Lifecycle policy returned skip");
+      expect(coderCli.callCount).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run makes background results retrievable by jobId", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "auto",
+          execution: "background",
+          thresholds: { minScore: 50 },
+        },
+      });
+      const coderCli = new MockProvider({
+        responses: ["Verdict: background lifecycle result"],
+      });
+      const { client } = await bootClientWithProviders({ coderCli }, root, config);
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postTestFailure",
+          prompt: "inspect the failed test in background",
+          signals: { failingTests: true, failedAttempts: 2 },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const started = JSON.parse(block?.text ?? "{}") as {
+        jobId: string;
+        status: string;
+        resultPath: string;
+      };
+
+      expect(["queued", "running", "succeeded"]).toContain(started.status);
+      expect(existsSync(started.resultPath)).toBe(true);
+
+      let fetchedText = "";
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const fetched = await client.callTool({
+          name: "composer_codex_lifecycle_result",
+          arguments: { jobId: started.jobId },
+        });
+        fetchedText = (fetched.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+        if (fetchedText.includes('"status": "succeeded"')) break;
+        await delay(10);
+      }
+
+      expect(fetchedText).toContain('"status": "succeeded"');
+      expect(fetchedText).toContain("background lifecycle result");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run persists Codex exhaustion as unavailable, not skipped", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "auto",
+          execution: "foreground",
+          thresholds: { minScore: 50 },
+        },
+      });
+      const { client } = await bootClientWithProviders(
+        { coderCli: failingProvider("Codex usage limit reached") },
+        root,
+        config,
+      );
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postTestFailure",
+          prompt: "inspect the failed test",
+          signals: { failingTests: true, failedAttempts: 2 },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        jobId: string;
+        status: string;
+        unavailableReason: string;
+        resultText: string;
+      };
+
+      expect(parsed.status).toBe("unavailable");
+      expect(parsed.unavailableReason).toBe("quota");
+      expect(parsed.resultText).toContain("without treating this as a policy skip");
+
+      const fetched = await client.callTool({
+        name: "composer_codex_lifecycle_result",
+        arguments: { jobId: parsed.jobId },
+      });
+      const fetchedText = (fetched.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(fetchedText).toContain('"status": "unavailable"');
+      expect(fetchedText).toContain('"unavailableReason": "quota"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run falls back when the primary Codex provider is unavailable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const target = mkdtempSync(join(tmpdir(), "composer-target-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: {
+          enabled: true,
+          mode: "auto",
+          execution: "foreground",
+          thresholds: { minScore: 50 },
+          fallback: {
+            enabled: true,
+            order: ["reviewerClaude", "reviewer"],
+          },
+        },
+      });
+      const reviewerClaude = new MockProvider({
+        responses: ["Verdict: fallback lifecycle result"],
+      });
+      const { client } = await bootClientWithProviders(
+        {
+          coderCli: failingProvider("Codex usage limit reached"),
+          reviewerClaude,
+        },
+        root,
+        config,
+      );
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postTestFailure",
+          prompt: "inspect the failed test with fallback",
+          projectDir: target,
+          signals: { failingTests: true, failedAttempts: 2 },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        status: string;
+        providerRole: string;
+        fallbackUsed: string;
+        resultText: string;
+        attempts: Array<{ role: string; status: string; unavailableReason?: string }>;
+      };
+
+      expect(parsed.status).toBe("succeeded");
+      expect(parsed.providerRole).toBe("reviewerClaude");
+      expect(parsed.fallbackUsed).toBe("reviewerClaude");
+      expect(parsed.resultText).toContain("fallback lifecycle result");
+      expect(parsed.attempts).toMatchObject([
+        { role: "coderCli", status: "unavailable", unavailableReason: "quota" },
+        { role: "reviewerClaude", status: "succeeded" },
+      ]);
+      expect(reviewerClaude.calls[0]?.prompt).toContain("Provider role: reviewerClaude");
+      expect(reviewerClaude.calls[0]?.cwd).not.toBe(realpathSync(target));
+      expect(existsSync(reviewerClaude.calls[0]?.cwd ?? "")).toBe(false);
+      expect(reviewerClaude.calls[0]?.projectDir).toBeUndefined();
+      expect(reviewerClaude.calls[0]?.readOnly).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_codex_lifecycle_run persists skipped decisions without calling Codex", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexLifecycle: { enabled: true, mode: "auto" },
+      });
+      const coderCli = new MockProvider();
+      const { client } = await bootClientWithProviders({ coderCli }, root, config);
+
+      const result = await client.callTool({
+        name: "composer_codex_lifecycle_run",
+        arguments: {
+          event: "postPlan",
+          prompt: "tiny plan",
+          signals: { isTrivial: true },
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        jobId: string;
+        status: string;
+        resultText: string;
+      };
+
+      expect(parsed.status).toBe("skipped");
+      expect(parsed.resultText).toContain("Codex was not run");
+      expect(coderCli.callCount).toBe(0);
+
+      const fetched = await client.callTool({
+        name: "composer_codex_lifecycle_result",
+        arguments: { jobId: parsed.jobId },
+      });
+      const fetchedText = (fetched.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(fetchedText).toContain('"status": "skipped"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_get and composer_config_set update validated active config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(allMockConfig, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, allMockConfig, configPath);
+
+      const getResult = await client.callTool({
+        name: "composer_config_get",
+        arguments: { scope: "active" },
+      });
+      const getText = (getResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(getText).toContain(configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "active",
+          codexLifecycle: {
+            enabled: true,
+            mode: "auto",
+            thresholds: { minScore: 10 },
+            fallback: {
+              enabled: true,
+              order: ["reviewerClaude", "reviewer"],
+            },
+          },
+          codexReview: {
+            enabled: true,
+            preCommitHook: {
+              enabled: true,
+              failClosed: true,
+            },
+          },
+        },
+      });
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as {
+        changed: boolean;
+        config: ComposerConfig;
+      };
+      expect(setParsed.changed).toBe(true);
+      expect(setParsed.config.codexLifecycle?.fallback.enabled).toBe(true);
+      expect(setParsed.config.codexReview?.preCommitHook?.failClosed).toBe(true);
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as ComposerConfig;
+      expect(written.codexLifecycle?.fallback.order).toEqual(["reviewerClaude", "reviewer"]);
+      expect(written.codexReview?.preCommitHook?.failClosed).toBe(true);
+
+      const decision = await client.callTool({
+        name: "composer_codex_lifecycle_decide",
+        arguments: {
+          event: "postPlan",
+          signals: {},
+        },
+      });
+      const decisionText = (decision.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(decisionText).toContain('"action": "run"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set rejects symlink config targets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const outside = mkdtempSync(join(tmpdir(), "composer-config-outside-"));
+    try {
+      const outsideConfig = join(outside, "composer.config.json");
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(outsideConfig, `${JSON.stringify(allMockConfig, null, 2)}\n`, "utf8");
+      symlinkSync(outsideConfig, configPath);
+      const { client } = await bootClient(root, allMockConfig, configPath);
+
+      const result = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "active",
+          codexLifecycle: { enabled: true, mode: "auto" },
+        },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("must not be a symlink");
+      const outsideWritten = JSON.parse(readFileSync(outsideConfig, "utf8")) as ComposerConfig;
+      expect(outsideWritten.codexLifecycle).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set active follows global fallback when no project config exists", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const xdg = mkdtempSync(join(tmpdir(), "composer-xdg-"));
+    const previousXdg = process.env["XDG_CONFIG_HOME"];
+    try {
+      process.env["XDG_CONFIG_HOME"] = xdg;
+      const globalDir = join(xdg, "composer");
+      mkdirSync(globalDir, { recursive: true });
+      const globalPath = join(globalDir, "composer.config.json");
+      writeFileSync(globalPath, `${JSON.stringify(allMockConfig, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, allMockConfig, "composer.config.json");
+
+      const getResult = await client.callTool({
+        name: "composer_config_get",
+        arguments: { scope: "active" },
+      });
+      const getText = (getResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      expect(getText).toContain(globalPath);
+
+      const activeSet = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "active",
+          codexLifecycle: { enabled: true, mode: "auto" },
+        },
+      });
+      expect(activeSet.isError).toBe(true);
+      expect(JSON.stringify(activeSet.content)).toContain("scope:\\\"global\\\"");
+
+      expect(existsSync(join(root, "composer.config.json"))).toBe(false);
+      const beforeExplicit = JSON.parse(readFileSync(globalPath, "utf8")) as ComposerConfig;
+      expect(beforeExplicit.codexLifecycle).toBeUndefined();
+
+      const globalSet = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "global",
+          codexLifecycle: { enabled: true, mode: "auto" },
+        },
+      });
+      expect(globalSet.isError).not.toBe(true);
+      const written = JSON.parse(readFileSync(globalPath, "utf8")) as ComposerConfig;
+      expect(written.codexLifecycle?.enabled).toBe(true);
+      expect(written.codexLifecycle?.mode).toBe("auto");
+    } finally {
+      if (previousXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = previousXdg;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
     }
   });
 

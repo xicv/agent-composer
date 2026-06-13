@@ -200,6 +200,9 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-05-24 | Step 5 v2 (real-eval-against-tasks scorer) | haiku-4-5 | 6.5 | $1.02 | 3.72M | 34 | 1 | 2 modified | +507 | 268/269 first pass; 1-line fp-precision fix → 269/269 green |
 | 2026-05-24 | Step 5 v3 (--length-lambda + --force-operator + EvolveDeps.pickOperator) | sonnet-4-6 | 6.9 | $1.22 | 1.99M | 31 | 1 | 4 modified | +366 | 275/275 first pass; lint clean; extra operators.ts edit was judgment call (added camelCase lookup) |
 | 2026-05-24 | Build 4 (worktree-sandbox real-eval refactor) | sonnet-4-6 | 10.3 | $1.50 (cap) | 2.02M | 34 | 1 | 3 modified | +190/-22 | Budget cap hit before commit; main session repaired 2 test bugs (ESM `vi.spyOn(fs, …)` → `vi.mock("node:fs", …)`; `.toContain` on args array) → 283/283 green |
+| 2026-06-09 | Codex review-gate (composer-driven triggers + mechanical pre-commit PreToolUse gate) | opus-4-8 orch + codex exec | n/a (interactive) | n/a | n/a | — | 4 code + 2 review | 4 new / 10 modified | ~+650 | All gates green: vitest 454/454, hook harness 45/0, script harness 14/0, ajv valid, release-sync in sync; agy review approve (2 low notes); feature ships OFF by default |
+| 2026-06-10 | Build 6 (visible + warm-cached codex gate) | opus-4-8 | ~45 | n/a | n/a | n/a | 3 | 22 modified + 2 new | +1571/-199 | systemMessage on all gate outcomes; warm-cache Stop hook + diff-hash cache; codexReview.model + codexRescue config; fixed verdict parsing (.result.verdict nested — native 'review' has no structured verdict, gate switched to adversarial-review); agy retries 1 + print-timeout 110s; dispatch_guard dedupe + removed dup registration; usage logs skip under vitest; learn.sh dedupe+cap. 461 vitest + 53 hook checks green |
+| 2026-06-12 | Oracle planner lane (`oraclePlanner` role + `composer_oracle_plan` MCP tool + v2-safe Oracle adapter scripts) | codex exec via `composer_code_cli` | n/a | n/a | n/a | n/a | 1 | config + MCP/tooling docs + scripts | n/a | `oraclePlanner` role, `composer_oracle_plan` tool, and v2-safe Oracle adapter scripts wired; tests green: 513 vitest |
 
 ### Build 1 (Step 5 v1) — findings
 
@@ -310,6 +313,20 @@ Build 4 replaced the per-task atomic-swap-on-real-skill design with a throwaway 
 - **Safety doc update.** `.claude/commands/evolve.md` had the "do not edit SKILL.md while /evolve is running" caveat removed; replaced with note that real-mode evaluates each task in a throwaway worktree.
 
 Build 4 closes the two real-eval hazards. Next concrete decision: whether to backport the worktree pattern to synthetic mode for symmetry (probably no — synthetic mode never spawns subprocesses, atomic swap there is fine).
+
+### Build 6 (codex gate visibility + warm cache) — notes
+
+- **Silent approve was by design.** The gate only surfaced `systemMessage` on blocking/error paths, so successful approvals looked like nothing happened.
+- **Verdict parsing was wrong.** The gate read the wrong response shape; Codex verdicts live under `.result.verdict`, and native `review` does not return a structured verdict, so the gate moved to `adversarial-review`.
+- **Timeouts were under real latency.** Observed p90 Codex latency was 192s against a 120s timeout, making slow-but-valid reviews look like failures.
+- **agy retries were too expensive.** The 90s print timeout saw ~32% transient failures, so retries were capped at 1 and print timeout raised to 110s.
+- **Warm cache shipped, but GLM cache stayed deferred.** The Stop hook now warms Codex through a diff-hash cache; GLM prompt cache was unused across 24 cold, small-payload calls, so it was not worth enabling yet.
+- **Test fixtures polluted usage logs.** Vitest runs wrote fake usage entries under `/tmp`, so usage logging now skips under vitest.
+- **dispatch_guard was double-registered.** Duplicate registration caused repeated guard handling; the dedupe path and extra registration removal fixed it.
+- **Gate state is now visible and covered.** `systemMessage` reports all outcomes, with 461 vitest cases and 53 hook checks green.
+- **Adversarial review paid for itself.** Live adversarial review of the build's own diff found 4 real issues across two rounds: critical dispatch_guard length-heuristic bypass, high stale-cache replay across policy change, high forgeable `/tmp` cache trust, and high `COMPOSER_CODEX_REVIEW_CMD` cache short-circuit. All fixed same-day.
+- **Verdict cache moved out of forgeable tmp.** Cache + lock now live under `${COMPOSER_STATE_DIR:-~/.cache/composer}` with 0700/0600 permissions, and uid + mode are checked before trust. Warm child lock removal is pid-ownership-checked.
+- **Warm review timeout now matches reality.** Warm review of a ~1500-line diff takes ~544s on `gpt-5.4-mini`, so `warmCache.timeoutMs` was raised to 600000 in the live global config. Repo default stays 300000.
 
 ### Third real `/evolve` run (2026-05-24, post-Build-4 sandboxed infra)
 
@@ -430,4 +447,3 @@ Five layers stacked. The circuit-breaker is closed: spawned haiku evals cannot e
 | 5 | per-task wall-time bound | `0ad57b4` | spawn hangs indefinitely (rate-limit retry, I/O wedge) |
 
 These five layers are the **structural prerequisites for ADR 0002's plugin distribution**. Without them the orchestration loop is too fragile to run unattended in arbitrary consumer projects.
-

@@ -60,7 +60,139 @@ system — spend it on planning, not on raw worker output.
 | Generate a patch WITHOUT applying (rare) | `coder` subagent (`composer_code` → `coder` applies) |
 | Reviewing a candidate patch / diff / implementation | `composer_review` directly; use `reviewer` only for high-volume isolation |
 | Claude review explicitly requested, or high-risk/security-sensitive second opinion | `composer_review_claude` directly after the default review gate |
+| Deep architecture / feature planning, migration design, hard root-cause debugging, or high-risk review where you want ChatGPT Pro's extended reasoning (opt-in) | `composer_oracle_plan` directly; advisory planning only — file edits still go through `composer_code_cli` |
 | Anything that mutates state outside the conversation (push, deploy, install) | Escalate to the user. Do not act. |
+
+When an edit targets a project other than the Composer MCP server cwd (for
+example dotfiles or another repo), pass `projectDir: "<absolute path>"` to
+`composer_code_cli` or `composer_code_chain`. Codex must trust that directory
+(a git repo or a `config.toml` projects entry) or it will refuse; do not add
+`--skip-git-repo-check`.
+
+## Oracle planning lane (ChatGPT Pro — opt-in)
+
+`composer_oracle_plan` consults ChatGPT Pro through the Oracle browser
+(`scripts/oracle-pro-safe.sh`) for extended-reasoning planning, design,
+migration, hard debugging, or high-risk review. It is OPT-IN and NOT the
+default research lane — `composer_research` stays on Codex to keep routine
+lookups fast and cheap.
+
+- Use it deliberately: a `deep` / `review` / `debug` run drives a real browser
+  ChatGPT Pro session (slow, supervised). Do not route routine research here.
+- `mode` selects thinking depth: `quick` / `standard` keep a fast model;
+  `deep` / `plan` / `review` / `debug` select ChatGPT Pro; `research` adds Deep
+  Research. Omit (`auto`) to let the script classify.
+- It is ADVISORY: the tool never edits files. Hand its plan to
+  `composer_code_cli` for implementation, then `composer_review`.
+- Requires a one-time Oracle browser login and the `oraclePlanner` role in the
+  active config. Full answers persist under `.composer/oracle/answers/`
+  (gitignored); the tool returns a bounded summary.
+- For long deep-research, large architectural reviews, or when the user says not
+  to block, use the async pair instead: `composer_oracle_job_start` returns a
+  `jobId` immediately, then `composer_oracle_job_result` (optionally with
+  `waitMs`) pulls the answer when the job reaches `succeeded`. Both run off-CC and
+  return bounded summaries.
+- Default to the synchronous `composer_oracle_plan` whenever the next step
+  depends on the answer (most planning/review). Reach for the async job pair only
+  when the answer is useful but not immediately blocking, or on an explicit
+  `[oracle:async]` request. Do not make every deep/review/debug call async.
+
+## Codex rescue (second-opinion lane)
+
+Use Codex rescue when the same bug has 2+ failed fix attempts, root-cause
+diagnosis stalls, an architecture/design fork needs cheap cross-model insurance,
+or the user asks for a second opinion.
+
+- Read root `composer.config.json` `codexRescue`: `{enabled, mode, model}`.
+  Omitted means `enabled=true`, `mode=ask`, `model=gpt-5.4-mini`.
+- If `enabled:false`, do not propose or dispatch rescue.
+- If `mode:"ask"`, propose rescue to the user first. If `mode:"auto"`,
+  dispatch only within `spendAuthorization` caps.
+- Route through the `codex:codex-rescue` subagent (Agent tool) or
+  `/codex:rescue` command.
+- ALWAYS pass the configured model. Unpinned rescue defaults to `gpt-5.4`
+  at roughly 3x cost.
+- Rescue prompt includes failing evidence only: error output, file:line refs,
+  latest failing command, changed files, and smallest repro. Do not include the
+  whole transcript, secrets, or `.env.json`.
+
+## Codex lifecycle participation
+
+Use `codexLifecycle` for ambient Codex involvement across the development
+loop. This is separate from `codexReview` (mechanical diff gate) and
+`codexRescue` (stuck-debug escalation). It answers one question: should Codex
+join this lifecycle step now?
+
+- Read root `composer.config.json` `codexLifecycle`.
+- If omitted or `enabled:false`, skip lifecycle participation. Existing
+  `composer_code_cli`, `codexReview`, and `codexRescue` rules still apply.
+- For non-trivial feature/debug work, call `composer_handoff_create` first so
+  Codex and reviewers share the same objective, constraints, files, and
+  acceptance criteria.
+- Call `composer_codex_lifecycle_decide` at eligible points with compact
+  signals: `event`, `expectedOutputTokens`, `changedFiles`, `diffLines`,
+  `failedAttempts`, `failingTests`, `touchesSecurity`, `touchesInfra`,
+  `userRequestedCodex`, `hasHandoff`, `isTrivial`, `isDestructive`, and `risk`.
+- Treat the decision literally:
+  - `skip`: do not involve Codex for this lifecycle step.
+  - `ask`: ask the user before involving Codex, naming the event and reason.
+  - `run`: Codex may participate automatically within the configured mode,
+    model, execution, and spend/safety constraints.
+- When the decision is `run`, call `composer_codex_lifecycle_run` with the
+  same event, handoff, prompt, and signals.
+- When the decision is `ask` and the user confirms, call
+  `composer_codex_lifecycle_run` with `confirmed:true`; do not set
+  `confirmed:true` for policy `skip` outcomes.
+- If lifecycle execution is `foreground`, use the returned result before
+  continuing.
+- If lifecycle execution is `background`, keep the returned `jobId` and call
+  `composer_codex_lifecycle_result` before reporting the lifecycle step done.
+  Background Codex output is not complete until its durable result record is
+  `succeeded`, `failed`, `unavailable`, or deliberately `skipped`.
+- Treat `skipped` as a policy decision and `unavailable` as a provider/session
+  failure (`auth`, `quota`, `rate_limit`, `timeout`, `cancelled`, `provider`,
+  or `unknown`). If `codexLifecycle.fallback.enabled`, Composer tries
+  `coderCli` first and then configured fallback roles such as `reviewerClaude`,
+  `reviewer`, or `coder`; always surface `providerRole`, `fallbackUsed`, and
+  the attempts list when a fallback handled the checkpoint. Optional lifecycle
+  jobs may continue after surfacing this; forced pre-commit review gates must
+  fail closed through `codexReview`.
+- Lifecycle Codex runs are companion/advisory passes. Do not let background
+  lifecycle runs silently mutate files; integrate any suggestions deliberately
+  and gate code changes through review.
+
+## Composer config tools
+
+When the user asks to turn Composer/Codex lifecycle behavior on/off, set
+fallback providers, or harden the pre-commit gate, prefer MCP config tools over
+manual JSON editing:
+
+- Call `composer_config_get` first with `scope:"active"` unless the user names
+  project or global config explicitly.
+- Call `composer_config_set` with a narrow patch for `codexLifecycle` and/or
+  `codexReview`; the server validates before writing.
+- Use `scope:"project"` for repo-local `composer.config.json` and
+  `scope:"global"` for `~/.config/composer/composer.config.json`.
+- If `scope:"active"` resolves to the user-global fallback, call
+  `composer_config_set` again with `scope:"global"` explicitly; Composer
+  refuses implicit global writes.
+- After config changes, run `agent-composer doctor` and report the effective
+  lifecycle mode, fallback order, and pre-commit gate state.
+
+Default trigger intent:
+
+| Event | Use when |
+|---|---|
+| `postPlan` | a plan is ready and design risk is non-trivial |
+| `postCodeApply` | code was applied and the diff is broad or risky |
+| `postTestFailure` | targeted checks fail after implementation |
+| `afterFailedAttempts` | the same bug/fix has failed repeatedly |
+| `postResearch` | research output needs a second synthesis pass |
+| `preCommit` | optional policy layer before the mechanical gate |
+| `stopWarm` | passive background/warm participation is configured |
+
+Never use lifecycle participation to bypass user confirmation for destructive
+actions, secret handling, deploys, pushes, or billing-affecting changes.
 
 **Class-based route policy:** route by task class, not by a blanket
 "always dispatch" rule.
@@ -146,6 +278,42 @@ dispatch that hits a real-money provider (`anthropic`,
 
 CLI providers (`Codex`, `agy`) are billed separately by the user's own auth
 and do not count toward these caps. Mock providers are always free.
+
+# Codex review gate (optional)
+
+Optional cross-LLM review lane using the OpenAI `codex` Claude Code plugin:
+a different model catches issues agy / Claude miss. OFF by default via
+`composer.config.json` `codexReview.enabled`. Run `agent-composer doctor`
+to check codex CLI, plugin availability, and current gate config.
+
+Fire Codex review at composer's OWN trigger points. Do NOT enable the plugin's
+global stop-gate; it fires on every stop.
+
+- Before a commit you are about to make (`triggers.preCommit`): run
+  `codexReview.preCommitCommand` (omitted default `review`; repo template pins
+  `adversarial-review` for structured verdicts) on the working-tree diff.
+- After a plan doc is written (`triggers.postPlan`): run
+  `codexReview.postPlanCommand` (default `adversarial-review`) on the plan
+  `.md` via focus text, challenging design before code is written.
+- Invoke via Bash: resolve plugin root from `agent-composer doctor`, then run
+  `node <root>/scripts/codex-companion.mjs <command> --background --scope <scope> [--base <base>] [--model <codexReview.model>] [focus...]`.
+- Default `execution: background`: launch with `run_in_background`, poll
+  `status` / `result`, parse review-output JSON, and surface ONLY `verdict`
+  plus one line per finding. Raw Codex output stays out.
+- Honor `codexReview.mode`: `ask` -> AskUserQuestion once before running;
+  `auto` -> run within `spendAuthorization`.
+
+## Mechanical pre-commit gate
+
+A stronger, optional enforcement: `codexReview.preCommitHook.enabled` turns the
+PreToolUse hook `precommit_codex_review.sh` into a hard gate — a `git commit`
+is DENIED when Codex review returns `needs-attention` with a finding at or above
+`preCommitHook.blockOnSeverity` (default `high`). The default is fail-open
+(`failClosed:false`), but strict local/project configs should set
+`failClosed:true`; then Codex auth, quota, rate-limit, timeout, or parse
+failures block the commit. Run `agent-composer doctor` to see the gate state.
+This is mechanical (hook-enforced), unlike the orchestrator-driven triggers
+above.
 
 # Headless invocation
 

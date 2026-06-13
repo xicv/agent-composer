@@ -11,6 +11,7 @@ import { applyEnvJson } from "./config/env.js";
 import { ProviderRegistry } from "./registry.js";
 import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
+import { runDoctor } from "./cli/doctor.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -22,20 +23,30 @@ const ENV_PATH = process.env["COMPOSER_ENV"];
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
-  const flag = process.argv[3];
   if (subcommand === "init") {
-    if (flag === "--global") {
+    const flags = process.argv.slice(3);
+    if (flags.includes("--global")) {
       runGlobalInit({});
     } else {
-      runInit({ cwd: process.cwd() });
+      runInit({ cwd: process.cwd(), installOracle: flags.includes("--oracle") });
     }
+    return;
+  }
+  if (subcommand === "doctor") {
+    const flags = process.argv.slice(3);
+    const json = flags.includes("--json");
+    const report = await runDoctor({ cwd: process.cwd(), verbose: !json });
+    if (json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    }
+    process.exit(report.healthy ? 0 : 1);
     return;
   }
 
   applyEnvJson(ENV_PATH);
   const config = loadConfig(CONFIG_PATH);
   const registry = new ProviderRegistry(config);
-  const server = createComposerServer(registry);
+  const server = createComposerServer(registry, { config, configPath: CONFIG_PATH });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Connection success message goes to stderr — stdio MCP requires stdout
