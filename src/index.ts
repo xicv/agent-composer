@@ -15,6 +15,8 @@ import { runDoctor } from "./cli/doctor.js";
 import { resolveInitInvocation } from "./cli/initArgs.js";
 import { formatHelp } from "./cli/help.js";
 import { parseCleanupArgs, runCleanup } from "./cli/cleanup.js";
+import { applyMode } from "./cli/mode.js";
+import { isModeName, MODE_NAMES } from "./config/modes.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -62,6 +64,17 @@ async function main(): Promise<void> {
       return;
     }
     runCleanup(parsed);
+    return;
+  }
+  if (subcommand === "mode") {
+    const name = process.argv[3];
+    if (!name || !isModeName(name)) {
+      process.stderr.write(`composer mode: expected one of ${MODE_NAMES.join("|")} (got ${name ?? "nothing"})\n`);
+      process.exit(2);
+      return;
+    }
+    const result = applyMode(process.cwd(), name);
+    process.stdout.write(`composer mode: ${name} ${result.changed ? "applied to" : "already set in"} ${result.path}\n`);
     return;
   }
 

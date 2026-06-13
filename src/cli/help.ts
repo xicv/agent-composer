@@ -13,6 +13,7 @@ export function formatHelp(): string {
     "  agent-composer doctor --json    Emit the diagnostics report as JSON (exit 0 healthy / 1 unhealthy)",
     "  agent-composer cleanup          Remove accumulated Composer artefacts (.composer/oracle, results, state jobs)",
     "  agent-composer cleanup --dry-run --older-than 14d   Preview what would be removed",
+    "  agent-composer mode <fast|balanced|strict>   Apply a preset (lifecycle + review gates)",
     "  agent-composer help             Show this help",
     "",
     "Notes:",
