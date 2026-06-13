@@ -459,6 +459,12 @@ Run this whenever setup feels suspicious:
 agent-composer doctor
 ```
 
+Add `--json` for a machine-readable report (full JSON on stdout; exit 0 = healthy, exit 1 = unhealthy):
+
+```bash
+agent-composer doctor --json
+```
+
 Useful local checks for contributors:
 
 ```bash
