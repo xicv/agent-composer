@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck + tests + schema
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install jq (hook tests)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Configure git identity (hook/script tests use temp repos)
+        run: |
+          git config --global user.email "ci@composer.local"
+          git config --global user.name "composer-ci"
+          git config --global init.defaultBranch main
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit/integration tests
+        run: npm run test
+
+      - name: Hook tests
+        run: npm run test:hooks
+
+      - name: Script tests
+        run: npm run test:scripts
+
+      - name: Schema lint
+        run: npm run schema:lint
