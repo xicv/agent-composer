@@ -234,6 +234,36 @@ expected-output estimate; if under 5 lines, just answer.
 
 **Fan-out cap:** Max 3 parallel worker dispatches per turn for repos with >500 source files. Beyond 3, the prompt-cache misses compound faster than the parallelism saves wall time. If file slices overlap across workers, dispatch SEQUENTIALLY — parallel workers on the same files duplicate every Read.
 
+# Control plane (status, route, workflow, session, audit)
+
+These tools make routing explicit and cheap. Prefer them over re-deriving policy from this skill every turn.
+
+- **`composer_status`** — read-only state snapshot: mode, integrations (review / lifecycle / oracle / git-hook / disabled), the active FOREGROUND worker, active/latest async jobs, latest audit facts, and a recommended next action. Inside Claude Code prefer this over the `agent-composer status` CLI — only the MCP tool sees live in-session `composer_session_*` overrides.
+- **`composer_route_decide`** — preview the route for a prompt WITHOUT executing: returns `target`, `taskClass`, `contextBudget`, and `recommendedNextTools`. Output is `compact` by default; pass `format:"full"` only when debugging the classifier. Call it before a worker dispatch when the right lane is unclear; it spends no worker tokens.
+- **`composer_workflow_plan`** — recommend (do NOT execute) the ordered tool sequence for a goal (`feature` / `debug` / `review` / `research`, tuned by mode + risk). It returns steps; you still call each tool yourself.
+- **`composer_session_get` / `composer_session_set`** — EPHEMERAL per-session overrides (mode, oracle, code_cli `profile`) that do NOT write `composer.config.json`. Use for "this session only" toggles; `clear:true` resets. For durable changes use `composer_config_set`.
+- **`composer_audit_record` / `composer_audit_read` / `composer_audit_summary`** — durable route/outcome trail. After a dispatch, record what happened (route, provider, `reviewVerdict`, `testsPassed`, `userCorrection`, `status`) so `/evolve` learns from real failures, not transcripts. Recording is EXPLICIT — these tools are never auto-called; keep `note`/`objective` short (capped on write). Read/summary to inspect route accuracy.
+
+## contextBudget (how much context to send)
+
+`composer_route_decide` returns a `contextBudget`. Honor it — send ONLY the matching context, NEVER a raw transcript:
+
+| contextBudget | Send |
+|---|---|
+| `inline` | the prompt only (or answer inline; no worker) |
+| `handoff` | a `composer_handoff_create` `handoffPath` |
+| `scoped-diff` | a `reviewScope` (let the server compute the diff) |
+| `full-brief` | handoff + the exact files / constraints |
+| `oracle-brief` | a compact problem / architecture brief, never a repo dump |
+
+## Scoped review (do not paste broad diffs)
+
+`composer_review` / `composer_review_claude` accept `reviewScope` (`staged` | `unstaged` | `working-tree` | `branch`) plus optional `base` and `reviewFiles`. Pass a scope and let the server compute the diff off-CC — do NOT paste a broad diff into the prompt. Use `staged` for pre-commit review, `working-tree` for routine review, `branch` (+ `base`) for a PR-sized review. A pasted `diff` still works but costs main-session tokens.
+
+## Codex profiles
+
+`composer_code_cli` accepts `profile` to select a `codexProfiles` lane from config (model / reasoning effort / sandbox) — e.g. a cheap `fast` lane or a `deep` lane. A session `profile` set via `composer_session_set` applies when no explicit `profile` is passed.
+
 # Explorer protocol (large-repo dispatches)
 
 For repos with >500 source files (or any unfamiliar codebase), prefer an
