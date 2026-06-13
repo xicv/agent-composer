@@ -20,6 +20,7 @@ function cleanupRoots(env: CleanupEnv): CleanupRoot[] {
     { dir: path.join(env.stateDir, "oracle-jobs"), isOracle: true, isState: true },
     { dir: path.join(env.stateDir, "oracle-locks"), isOracle: true, isState: true },
     { dir: path.join(env.stateDir, "codex-lifecycle"), isOracle: false, isState: true },
+    { dir: path.join(env.stateDir, "audit"), isOracle: false, isState: true },
   ];
 }
 

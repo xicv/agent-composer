@@ -122,3 +122,8 @@ export const ROUTE_DECIDE_DESCRIPTION =
   "estimated tokens, complexity) plus an optional Oracle escalation suggestion. Use this " +
   "to decide which lane to call (composer_code_cli, composer_review, composer_research, " +
   "composer_oracle_plan, …) before spending a worker call. Read-only; no side effects.";
+
+export const COMPOSER_AUDIT_RECORD = "composer_audit_record" as const;
+export const COMPOSER_AUDIT_READ = "composer_audit_read" as const;
+export const AUDIT_RECORD_DESCRIPTION = "Append one event to Composer's durable per-project audit/route trail (route decisions, tool calls, reviews, test outcomes, corrections). Orchestrator-driven: call this to record what a dispatch actually did so route accuracy and outcomes are auditable. Pass a stable runId to group a feature's events.";
+export const AUDIT_READ_DESCRIPTION = "Read the recent Composer audit trail (optionally filtered by runId), as JSON or a markdown summary. Use to inspect what the last run/route/worker actually did, or to export a run report.";
