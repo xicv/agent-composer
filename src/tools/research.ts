@@ -35,6 +35,7 @@ export function registerResearchTools(ctx: ServerToolContext): void {
           context: contextWithHandoff(root, context, handoffPath),
           signal: extra.signal,
         }),
+        { tracker: ctx.activeRuns },
       );
       return { content: [{ type: "text", text: result.text }] };
     },

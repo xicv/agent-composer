@@ -391,6 +391,54 @@ describe("renderStatusLine", () => {
       rmSync(tmp2, { recursive: true, force: true });
     }
   });
+
+  it("renderStatusLine with foreground run shows active:<tool-short> <age>s", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-fg-"));
+    try {
+      const s = buildStatus(tmp2);
+      s.active.foreground = [{ tool: "composer_code_cli", providerRole: undefined, ageSeconds: 42 }];
+      const line = renderStatusLine(s);
+      expect(line).toContain("active:code_cli 42s");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine with empty foreground shows active:none", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-nofg-"));
+    try {
+      const s = buildStatus(tmp2);
+      s.active.foreground = [];
+      const line = renderStatusLine(s);
+      expect(line).toContain("active:none");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine with undefined foreground shows active:none", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-undefg-"));
+    try {
+      const s = buildStatus(tmp2);
+      // foreground not set — should default to active:none
+      const line = renderStatusLine(s);
+      expect(line).toContain("active:none");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine with foreground run >= 60s shows minutes", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-fgmin-"));
+    try {
+      const s = buildStatus(tmp2);
+      s.active.foreground = [{ tool: "composer_research", providerRole: undefined, ageSeconds: 120 }];
+      const line = renderStatusLine(s);
+      expect(line).toContain("active:research 2m");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("statusEnvelope", () => {

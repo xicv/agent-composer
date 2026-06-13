@@ -89,6 +89,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
             cwd: root,
             signal: extra.signal,
           }),
+          { tracker: ctx.activeRuns },
         );
         return { content: [{ type: "text", text: result.text }] };
       } finally {

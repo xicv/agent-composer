@@ -2057,4 +2057,18 @@ describe("composer MCP server", () => {
       }
     });
   });
+
+  it("composer_status returns active.foreground as empty array when no tools are running", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "composer-status-fg-idle-"));
+    try {
+      const { client } = await bootClient(tmp);
+      const result = await client.callTool({ name: "composer_status", arguments: {} });
+      const text = (result.content as Array<{ type: string; text: string }>)[0]!.text;
+      const parsed = JSON.parse(text) as { active: { foreground?: Array<unknown> } };
+      expect(Array.isArray(parsed.active.foreground)).toBe(true);
+      expect(parsed.active.foreground).toHaveLength(0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ProviderRegistry } from "../registry.js";
 import type { ComposerConfig } from "../config/schema.js";
+import type { ActiveRunTracker } from "../server/activeRuns.js";
 
 export interface ComposerServerOptions {
   root?: string;
@@ -28,4 +29,5 @@ export interface ServerToolContext {
   getSession: () => SessionOverrides;
   setSession: (patch: Partial<SessionOverrides>) => SessionOverrides;
   resetSession: () => void;
+  activeRuns: ActiveRunTracker;
 }

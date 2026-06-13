@@ -20,6 +20,7 @@ import { registerAuditTools } from "./tools/audit.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerStatusTools } from "./tools/status.js";
 import { registerSessionTools } from "./tools/session.js";
+import { createActiveRunTracker } from "./server/activeRuns.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
 export * from "./server/toolDescriptions.js";
@@ -32,6 +33,7 @@ export function createComposerServer(
   const root = path.resolve(options.root ?? process.cwd());
   let activeConfig: ComposerConfig | undefined = options.config;
   let session: SessionOverrides = {};
+  const activeRuns = createActiveRunTracker();
   const server = new McpServer({
     name: "composer",
     version: "0.0.0",
@@ -60,6 +62,7 @@ export function createComposerServer(
       return { ...session, ...(session.oracle ? { oracle: { ...session.oracle } } : {}) };
     },
     resetSession: () => { session = {}; },
+    activeRuns,
   };
 
   registerResearchTools(ctx);
