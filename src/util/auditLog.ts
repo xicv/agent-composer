@@ -27,10 +27,25 @@ export const AuditEventSchema = z.object({
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 export type AuditEventInput = Omit<AuditEvent, "ts">;
 
+function capStr(v: string | undefined, max: number): string | undefined {
+  if (v === undefined) return undefined;
+  return v.length > max ? v.slice(0, max) : v;
+}
+
 export function appendAuditEvent(root: string, input: AuditEventInput): AuditEvent {
+  const capped: AuditEventInput = {
+    ...input,
+    objective: capStr(input.objective, 500),
+    note: capStr(input.note, 2000),
+    route: capStr(input.route, 120),
+    tool: capStr(input.tool, 120),
+    provider: capStr(input.provider, 120),
+    taskClass: capStr(input.taskClass, 120),
+    reviewVerdict: capStr(input.reviewVerdict, 120),
+  };
   const event = AuditEventSchema.parse({
     ts: new Date().toISOString(),
-    ...input,
+    ...capped,
   });
   ensureAuditDir(root);
   appendFileSync(auditLogPath(root), `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600, flag: "a" });

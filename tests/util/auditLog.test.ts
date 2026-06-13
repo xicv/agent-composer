@@ -107,6 +107,27 @@ describe("auditLog", () => {
     expect(events.length).toBe(2);
   });
 
+  it("appendAuditEvent caps oversized free-text fields before writing", () => {
+    const longNote = "n".repeat(9999);
+    const longObjective = "o".repeat(9999);
+    const longRoute = "r".repeat(999);
+
+    appendAuditEvent(projectRoot!, {
+      kind: "note",
+      runId: "r-cap",
+      note: longNote,
+      objective: longObjective,
+      route: longRoute,
+    });
+
+    const events = readAuditEvents(projectRoot!, { runId: "r-cap" });
+    expect(events).toHaveLength(1);
+    const ev = events[0]!;
+    expect(ev.note?.length).toBe(2000);
+    expect(ev.objective?.length).toBe(500);
+    expect(ev.route?.length).toBe(120);
+  });
+
   it("readAuditFailures returns only failed or userCorrection events", () => {
     appendAuditEvent(projectRoot!, { kind: "outcome", status: "succeeded" });
     appendAuditEvent(projectRoot!, { kind: "outcome", status: "failed" });
