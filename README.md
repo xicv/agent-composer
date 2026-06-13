@@ -377,7 +377,7 @@ Five resilience layers ensure unattended `/evolve` runs cannot damage the host r
 
 ## Security model
 
-- **`agent-composer` publish surface**: `dist/`, `plugin/`, `composer.config.schema.json`, `README.md`, `package.json`. No tests, no source, no `.env*` (gitignored). Current npm dry-run package size is 84.4 KB.
+- **`agent-composer` publish surface**: `dist/`, `plugin/`, `composer.config.schema.json`, `README.md`, `package.json`, `scripts/oracle-pro-safe.sh`, `scripts/oracle-plan-mcp.sh`, `scripts/composer-oracle-router-safe.sh`, `scripts/oracle-codex-handoff-safe.sh`. No tests, no source, no `.env*` (gitignored). Current npm dry-run package size is 84.4 KB.
 - **Spend caps**: per-call (`maxUsdPerCall`, default $0.50) and per-session (`maxUsdPerSession`, default $5.00) enforced in the runner before any external API call. Configurable per project.
 - **Self-evolution scope** (see ADR 0003): five layers gate any SKILL.md mutation — diff-path regex, text deny-list, stat gate, human-promote-only, audit trail. Auto-promote is permanently off the table.
 - **Boundary hook**: PreToolUse fail-closed denial of `Edit`/`Update`/`Write`/`NotebookEdit` in the orchestrator session, plus MCP write/edit/exec variants. Native Bash is allowed for inspection and verification. The C0.5 subagent tools allowlist is append-only.

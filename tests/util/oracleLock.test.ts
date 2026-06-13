@@ -41,6 +41,15 @@ describe("oracle lock files", () => {
     second.handle.release();
   });
 
+  it("rejects a second concurrent lock in the same process", () => {
+    const root = process.cwd();
+    const first = acquireOracleLock(root, { label: "first" });
+    expect(first.acquired).toBe(true);
+    const second = acquireOracleLock(root, { label: "second" });
+    expect(second.acquired).toBe(false);
+    if (first.acquired) first.handle.release();
+  });
+
   it("steals a stale lock with a dead pid", () => {
     const root = process.cwd();
     const lockPath = expectedLockPath(root);

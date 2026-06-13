@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -14,9 +14,11 @@ import path from "node:path";
 import { COMPOSER_STATE_DIR_ENV } from "./codexLifecycleJob.js";
 
 export const ORACLE_LOCK_DIR = "oracle-locks";
+const ORACLE_LOCK_TTL_MS = 30 * 60 * 1000; // generous: longer than any Oracle run
 
 type OracleLockHolder = {
   pid: number;
+  token: string;
   jobId?: string;
   label?: string;
   startedAt: string;
@@ -35,23 +37,35 @@ export function acquireOracleLock(
   info: { jobId?: string; label?: string },
 ): OracleLockResult {
   const lockPath = oracleLockPath(root);
-  const holder = {
+  const token = randomUUID();
+  const holder: OracleLockHolder = {
     pid: process.pid,
+    token,
     jobId: info.jobId,
     label: info.label,
     startedAt: new Date().toISOString(),
   };
 
   try {
-    return writeLock(lockPath, holder);
+    return writeLock(lockPath, holder, token);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 
   const existing = readLockHolder(lockPath);
-  if (!existing || existing.pid === process.pid || !isProcessAlive(existing.pid)) {
+  // Steal ONLY a malformed lock, a dead-process lock, or a stale lock.
+  // A live holder (including the SAME process) is a real concurrent holder.
+  if (!existing || !isProcessAlive(existing.pid) || isStaleLock(existing.startedAt)) {
     rmSync(lockPath, { force: true });
-    return writeLock(lockPath, holder);
+    try {
+      return writeLock(lockPath, holder, token);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        const racer = readLockHolder(lockPath);
+        if (racer) return { acquired: false, holder: racer };
+      }
+      throw error;
+    }
   }
 
   return { acquired: false, holder: existing };
@@ -66,7 +80,7 @@ function oracleLockPath(root: string): string {
   return path.join(lockRoot, `${projectStateKey(rootReal)}.lock`);
 }
 
-function writeLock(lockPath: string, holder: OracleLockHolder): OracleLockResult {
+function writeLock(lockPath: string, holder: OracleLockHolder, token: string): OracleLockResult {
   writeFileSync(lockPath, JSON.stringify(holder), {
     encoding: "utf8",
     mode: 0o600,
@@ -77,7 +91,10 @@ function writeLock(lockPath: string, holder: OracleLockHolder): OracleLockResult
     handle: {
       release: () => {
         try {
-          rmSync(lockPath, { force: true });
+          const current = readLockHolder(lockPath);
+          if (current?.pid === process.pid && current.token === token) {
+            rmSync(lockPath, { force: true });
+          }
         } catch {
           // Best-effort cleanup only.
         }
@@ -92,6 +109,7 @@ function readLockHolder(lockPath: string): OracleLockHolder | null {
     if (
       typeof parsed.pid !== "number" ||
       !Number.isInteger(parsed.pid) ||
+      typeof parsed.token !== "string" ||
       typeof parsed.startedAt !== "string"
     ) {
       return null;
@@ -123,6 +141,12 @@ function isProcessAlive(pid: number): boolean {
     // EPERM = process exists but not signalable by us -> alive.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+function isStaleLock(startedAt: string): boolean {
+  const t = Date.parse(startedAt);
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t > ORACLE_LOCK_TTL_MS;
 }
 
 function ensureDirectory(dir: string, label: string): void {

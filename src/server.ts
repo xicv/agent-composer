@@ -440,7 +440,12 @@ export function createComposerServer(
     async ({ prompt, mode, context, handoffPath }) => {
       const resolvedMode = mode ?? "auto";
       const provider = registry.getProviderForRole("oraclePlanner");
-      const lock = acquireOracleLock(root, { label: "oracle_job_start" });
+      let job = newOracleJob(root, {
+        mode: resolvedMode,
+        promptPreview: prompt.slice(0, 200),
+        handoffPath,
+      });
+      const lock = acquireOracleLock(root, { jobId: job.jobId, label: "oracle_job_start" });
       if (!lock.acquired) {
         return {
           content: [
@@ -461,13 +466,7 @@ export function createComposerServer(
           ],
         };
       }
-      let job: OracleJob;
       try {
-        job = newOracleJob(root, {
-          mode: resolvedMode,
-          promptPreview: prompt.slice(0, 200),
-          handoffPath,
-        });
         job = writeOracleJob(root, job);
       } catch (error) {
         lock.handle.release();

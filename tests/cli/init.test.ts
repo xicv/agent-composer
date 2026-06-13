@@ -111,6 +111,9 @@ describe("composer init", () => {
       const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
       expect(cfg.roles.oraclePlanner.cli[0]).toBe("bash");
       expect(cfg.roles.oraclePlanner.cli).toContain("scripts/oracle-plan-mcp.sh");
+      const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
+      expect(ig).toContain(".composer/oracle/");
+      expect(ig).toContain(".composer/results/");
     } finally {
       rmSync(oracleSourceDir, { recursive: true, force: true });
     }
@@ -136,27 +139,33 @@ describe("composer init", () => {
     expect(JSON.parse(readFileSync(join(cwd, ".env.json"), "utf8"))).toEqual({ secret: "real-token" });
   });
 
-  it("creates .gitignore with .env.json when missing", () => {
+  it("creates .gitignore with base runtime entries when missing", () => {
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
     expect(ig).toContain(".env.json");
+    expect(ig).toContain(".composer/handoffs/");
+    expect(ig).toContain(".composer/codex-lifecycle/");
   });
 
-  it("appends .env.json to existing .gitignore without erasing prior entries", () => {
+  it("appends base runtime entries to existing .gitignore without erasing prior entries", () => {
     writeFileSync(join(cwd, ".gitignore"), "node_modules/\ndist/\n", "utf8");
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
     expect(ig).toContain("node_modules/");
     expect(ig).toContain("dist/");
     expect(ig).toContain(".env.json");
+    expect(ig).toContain(".composer/handoffs/");
+    expect(ig).toContain(".composer/codex-lifecycle/");
   });
 
-  it("does not duplicate .env.json in .gitignore on re-run", () => {
+  it("does not duplicate runtime entries in .gitignore on re-run", () => {
     runInit({ cwd, verbose: false });
     runInit({ cwd, verbose: false });
     const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
-    const occurrences = ig.split(/\r?\n/).filter((l) => l.trim() === ".env.json").length;
-    expect(occurrences).toBe(1);
+    const lines = ig.split(/\r?\n/).map((l) => l.trim());
+    expect(lines.filter((l) => l === ".env.json")).toHaveLength(1);
+    expect(lines.filter((l) => l === ".composer/handoffs/")).toHaveLength(1);
+    expect(lines.filter((l) => l === ".composer/codex-lifecycle/")).toHaveLength(1);
   });
 
   it("writes .claude/settings.json with mcpServers.composer entry", () => {

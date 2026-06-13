@@ -172,6 +172,8 @@ const DEFAULT_ENV_TEMPLATE = (baseUrl: string, token: string) => ({
 
 const DEFAULT_BASE_URL = "https://api.z.ai/api/anthropic";
 const DEFAULT_AUTH_TOKEN_PLACEHOLDER = "<replace-with-your-glm-or-anthropic-compatible-token>";
+const BASE_GITIGNORE_ENTRIES = [".env.json", ".composer/handoffs/", ".composer/codex-lifecycle/"];
+const ORACLE_GITIGNORE_ENTRIES = [".composer/oracle/", ".composer/results/"];
 
 const DEFAULT_MCP_SETTINGS = {
   mcpServers: {
@@ -222,7 +224,10 @@ export function runInit(opts: InitOptions): InitResult {
       opts.defaultAuthToken ?? DEFAULT_AUTH_TOKEN_PLACEHOLDER,
     ),
   );
-  steps.push(ensureEnvGitignored(cwd));
+  steps.push(ensureGitignoreEntries(cwd, BASE_GITIGNORE_ENTRIES));
+  if (opts.installOracle) {
+    steps.push(ensureGitignoreEntries(cwd, ORACLE_GITIGNORE_ENTRIES));
+  }
   steps.push(wireMcpServer(cwd));
 
   for (const s of steps) {
@@ -408,19 +413,19 @@ function writeEnvJsonStub(cwd: string, baseUrl: string, token: string): InitStep
   return { name: ".env.json", status: "created", path, reason: "placeholder — fill before launching claude" };
 }
 
-function ensureEnvGitignored(cwd: string): InitStep {
+function ensureGitignoreEntries(cwd: string, entries: string[]): InitStep {
   const path = join(cwd, ".gitignore");
-  const entry = ".env.json";
-  if (!existsSync(path)) {
-    writeFileSync(path, `${entry}\n`, "utf8");
-    return { name: ".gitignore", status: "created", path, reason: `added ${entry}` };
+  let current = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const lines = current.split(/\r?\n/).map((l) => l.trim());
+  const missing = entries.filter((e) => !lines.includes(e));
+  if (missing.length === 0) {
+    return { name: ".gitignore", status: "skipped", path, reason: "entries already present" };
   }
-  const current = readFileSync(path, "utf8");
-  const hasEntry = current.split(/\r?\n/).some((line) => line.trim() === entry);
-  if (hasEntry) return { name: ".gitignore", status: "skipped", path, reason: `${entry} already listed` };
-  const next = current.endsWith("\n") ? current + entry + "\n" : current + "\n" + entry + "\n";
-  writeFileSync(path, next, "utf8");
-  return { name: ".gitignore", status: "updated", path, reason: `appended ${entry}` };
+  if (current.length > 0 && !current.endsWith("\n")) current += "\n";
+  current += missing.join("\n") + "\n";
+  const created = !existsSync(path);
+  writeFileSync(path, current, "utf8");
+  return { name: ".gitignore", status: created ? "created" : "updated", path, reason: `added ${missing.join(", ")}` };
 }
 
 function wireMcpServer(cwd: string): InitStep {
