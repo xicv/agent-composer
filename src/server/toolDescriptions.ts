@@ -115,6 +115,12 @@ export const ORACLE_JOB_RESULT_DESCRIPTION =
   "the bounded answer text. Optional waitMs briefly blocks until the job " +
   "reaches a terminal state or the wait elapses.";
 
+export const COMPOSER_WORKFLOW_PLAN = "composer_workflow_plan" as const;
+export const WORKFLOW_PLAN_DESCRIPTION =
+  "Recommend (do NOT execute) an ordered Composer tool sequence for a goal. Returns the steps " +
+  "(handoff/research/oracle/code_cli/review/audit) tuned by workflow kind (feature|debug|review|research), " +
+  "mode (fast|balanced|strict), and risk. Use to plan the daily happy path without hiding the underlying tools.";
+
 export const COMPOSER_ROUTE_DECIDE = "composer_route_decide" as const;
 export const ROUTE_DECIDE_DESCRIPTION =
   "Preview how Composer would route a task WITHOUT running anything. Returns the " +
