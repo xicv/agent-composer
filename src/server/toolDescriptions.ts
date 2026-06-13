@@ -133,3 +133,7 @@ export const COMPOSER_AUDIT_RECORD = "composer_audit_record" as const;
 export const COMPOSER_AUDIT_READ = "composer_audit_read" as const;
 export const AUDIT_RECORD_DESCRIPTION = "Append one event to Composer's durable per-project audit/route trail (route decisions, tool calls, reviews, test outcomes, corrections). Orchestrator-driven: call this to record what a dispatch actually did so route accuracy and outcomes are auditable. Pass a stable runId to group a feature's events.";
 export const AUDIT_READ_DESCRIPTION = "Read the recent Composer audit trail (optionally filtered by runId), as JSON or a markdown summary. Use to inspect what the last run/route/worker actually did, or to export a run report.";
+export const COMPOSER_SESSION_GET = "composer_session_get" as const;
+export const COMPOSER_SESSION_SET = "composer_session_set" as const;
+export const SESSION_SET_DESCRIPTION = "Set EPHEMERAL session overrides for this server process WITHOUT writing composer.config.json: mode (fast|balanced|strict), oracle ({enabled,defaultMode,requireExplicitTag}), and a default code_cli profile. Pass clear:true to reset. Overrides win over config for the lifetime of the process; nothing is persisted.";
+export const SESSION_GET_DESCRIPTION = "Read the current ephemeral session overrides (mode/oracle/profile) for this server process.";

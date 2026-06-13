@@ -119,6 +119,8 @@ describe("composer MCP server", () => {
       "composer_review",
       "composer_review_claude",
       "composer_route_decide",
+      "composer_session_get",
+      "composer_session_set",
       "composer_workflow_plan",
     ]);
   });
@@ -314,6 +316,100 @@ describe("composer MCP server", () => {
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     expect(block?.text).toContain("mock:apply with codex");
     expect(block?.text).toContain("ctx:src/server.ts");
+  });
+
+  describe("session tools", () => {
+    it("session_set persists mode/profile/oracle and session_get reads it back; clear resets", async () => {
+      const { client } = await bootClient(undefined, allMockConfig);
+      const setResult = await client.callTool({
+        name: "composer_session_set",
+        arguments: { mode: "fast", profile: "p1", oracle: { requireExplicitTag: true } },
+      });
+      const setBlock = (setResult.content as Array<{ type: string; text: string }>)[0];
+      const setParsed = JSON.parse(setBlock?.text ?? "{}") as {
+        mode?: string;
+        profile?: string;
+        oracle?: { requireExplicitTag?: boolean };
+      };
+      expect(setParsed.mode).toBe("fast");
+      expect(setParsed.profile).toBe("p1");
+      expect(setParsed.oracle?.requireExplicitTag).toBe(true);
+
+      const getResult = await client.callTool({
+        name: "composer_session_get",
+        arguments: {},
+      });
+      const getBlock = (getResult.content as Array<{ type: string; text: string }>)[0];
+      const getParsed = JSON.parse(getBlock?.text ?? "{}") as {
+        mode?: string;
+        profile?: string;
+        oracle?: { requireExplicitTag?: boolean };
+      };
+      expect(getParsed.mode).toBe("fast");
+      expect(getParsed.profile).toBe("p1");
+      expect(getParsed.oracle?.requireExplicitTag).toBe(true);
+
+      await client.callTool({
+        name: "composer_session_set",
+        arguments: { clear: true },
+      });
+      const resetResult = await client.callTool({
+        name: "composer_session_get",
+        arguments: {},
+      });
+      const resetBlock = (resetResult.content as Array<{ type: string; text: string }>)[0];
+      expect(JSON.parse(resetBlock?.text ?? "{}")).toEqual({});
+    });
+
+    it("session oracle overlay: session requireExplicitTag blocks untagged oracle calls", async () => {
+      const { client } = await bootClient(undefined, allMockConfig);
+      await client.callTool({
+        name: "composer_session_set",
+        arguments: { oracle: { requireExplicitTag: true } },
+      });
+      const result = await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "untagged plain prompt" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("requireExplicitTag");
+    });
+
+    it("session profile: session default profile is used when no explicit profile arg is passed", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexProfiles: { fast: { model: "gpt-5.4-mini" } },
+      });
+      const { client } = await bootClient(undefined, config);
+      await client.callTool({
+        name: "composer_session_set",
+        arguments: { profile: "nope" },
+      });
+      const result = await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "x" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("unknown profile");
+    });
+
+    it("session mode: session mode is used by workflow plan when no explicit mode arg is passed", async () => {
+      const { client } = await bootClient(undefined, allMockConfig);
+      await client.callTool({
+        name: "composer_session_set",
+        arguments: { mode: "fast" },
+      });
+      const result = await client.callTool({
+        name: "composer_workflow_plan",
+        arguments: { goal: "add login" },
+      });
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const plan = JSON.parse(block?.text ?? "{}") as {
+        steps?: Array<{ tool: string }>;
+      };
+      expect(plan.steps?.map((step) => step.tool)).not.toContain("composer_review");
+    });
   });
 
   it("composer_code_cli passes the server root as provider cwd", async () => {

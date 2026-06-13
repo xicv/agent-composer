@@ -124,11 +124,12 @@ export function registerCodeTools(ctx: ServerToolContext): void {
     async ({ prompt, context, handoffPath, projectDir, profile }, extra) => {
       const targetRoot = resolveProjectDir(projectDir, root);
       const profiles = ctx.getActiveConfig()?.codexProfiles;
-      if (profile !== undefined) {
-        const profileModel = profiles?.[profile]?.model;
+      const effectiveProfile = profile ?? ctx.getSession().profile;
+      if (effectiveProfile !== undefined) {
+        const profileModel = profiles?.[effectiveProfile]?.model;
         if (!profileModel) {
           throw new Error(
-            `composer_code_cli: unknown profile "${profile}" — define it under codexProfiles in composer.config.json.`,
+            `composer_code_cli: unknown profile "${effectiveProfile}" — define it under codexProfiles in composer.config.json.`,
           );
         }
       }
@@ -139,7 +140,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           context: contextWithHandoff(root, context, handoffPath),
           cwd: root,
           projectDir: projectDir === undefined ? undefined : targetRoot,
-          model: profile !== undefined ? profiles?.[profile]?.model : undefined,
+          model: effectiveProfile !== undefined ? profiles?.[effectiveProfile]?.model : undefined,
           signal: extra.signal,
         }),
       );

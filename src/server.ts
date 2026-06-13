@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import path from "node:path";
 import type { ProviderRegistry } from "./registry.js";
 import type { ComposerConfig } from "./config/schema.js";
-import type { ComposerServerOptions } from "./tools/context.js";
+import type { ComposerServerOptions, SessionOverrides } from "./tools/context.js";
 import { registerResearchTools } from "./tools/research.js";
 import { registerCodeTools } from "./tools/code.js";
 import { registerReviewTools } from "./tools/review.js";
@@ -18,6 +18,7 @@ import { registerConfigTools } from "./tools/config.js";
 import { registerRouteTools } from "./tools/route.js";
 import { registerAuditTools } from "./tools/audit.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
+import { registerSessionTools } from "./tools/session.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
 export * from "./server/toolDescriptions.js";
@@ -29,6 +30,7 @@ export function createComposerServer(
 ): McpServer {
   const root = path.resolve(options.root ?? process.cwd());
   let activeConfig: ComposerConfig | undefined = options.config;
+  let session: SessionOverrides = {};
   const server = new McpServer({
     name: "composer",
     version: "0.0.0",
@@ -47,6 +49,16 @@ export function createComposerServer(
     setActiveConfig: (c: ComposerConfig | undefined) => {
       activeConfig = c;
     },
+    getSession: () => ({ ...session, ...(session.oracle ? { oracle: { ...session.oracle } } : {}) }),
+    setSession: (patch: Partial<SessionOverrides>) => {
+      session = {
+        ...session,
+        ...patch,
+        ...(patch.oracle ? { oracle: { ...session.oracle, ...patch.oracle } } : {}),
+      };
+      return { ...session, ...(session.oracle ? { oracle: { ...session.oracle } } : {}) };
+    },
+    resetSession: () => { session = {}; },
   };
 
   registerResearchTools(ctx);
@@ -58,6 +70,7 @@ export function createComposerServer(
   registerConfigTools(ctx);
   registerRouteTools(ctx);
   registerAuditTools(ctx);
+  registerSessionTools(ctx);
   registerWorkflowTools(ctx);
 
   return server;

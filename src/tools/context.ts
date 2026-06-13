@@ -8,6 +8,16 @@ export interface ComposerServerOptions {
   configPath?: string;
 }
 
+export interface SessionOverrides {
+  mode?: "fast" | "balanced" | "strict";
+  oracle?: {
+    enabled?: boolean;
+    defaultMode?: "auto" | "quick" | "standard" | "deep" | "plan" | "review" | "debug" | "research";
+    requireExplicitTag?: boolean;
+  };
+  profile?: string;
+}
+
 export interface ServerToolContext {
   server: McpServer;
   registry: ProviderRegistry;
@@ -15,4 +25,7 @@ export interface ServerToolContext {
   options: ComposerServerOptions;
   getActiveConfig: () => ComposerConfig | undefined;
   setActiveConfig: (config: ComposerConfig | undefined) => void;
+  getSession: () => SessionOverrides;
+  setSession: (patch: Partial<SessionOverrides>) => SessionOverrides;
+  resetSession: () => void;
 }

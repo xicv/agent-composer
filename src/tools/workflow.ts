@@ -26,7 +26,7 @@ export function registerWorkflowTools(ctx: ServerToolContext): void {
       },
     },
     async (input) => {
-      const plan = planWorkflow(input);
+      const plan = planWorkflow({ ...input, mode: input.mode ?? ctx.getSession().mode });
       return { content: [{ type: "text", text: JSON.stringify(plan, null, 2) }] };
     },
   );
