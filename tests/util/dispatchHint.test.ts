@@ -4,6 +4,7 @@ import {
   buildWorkerPrompt,
   classifyDispatch,
   type WorkerPromptParts,
+  type ContextBudget,
 } from "../../src/util/dispatchHint.js";
 
 describe("classifyDispatch", () => {
@@ -18,6 +19,7 @@ describe("classifyDispatch", () => {
     expect(hint.signals.complexityScore).toBe(0);
     expect(hint.route.target).toBe("inline");
     expect(hint.route.taskClass).toBe("trivial");
+    expect(hint.contextBudget).toBe("inline" satisfies ContextBudget);
   });
 
   it("dispatches multi-file architecture refactors with premium full sizing", () => {
@@ -38,6 +40,8 @@ describe("classifyDispatch", () => {
     expect(hint.route.taskClass).toBe("cross-file-code");
     expect(hint.route.providerRole).toBe("coderCli");
     expect(hint.route.requiresReview).toBe(true);
+    // promptSize is "full" for this cross-file-code route → full-brief
+    expect(hint.contextBudget).toBe("full-brief" satisfies ContextBudget);
   });
 
   it("does not dispatch tiny destructive prompts", () => {
@@ -73,6 +77,7 @@ describe("classifyDispatch", () => {
     expect(hint.tier).toBe("cheap");
     expect(hint.route.target).toBe("task-reviewer");
     expect(hint.route.providerRole).toBe("reviewer");
+    expect(hint.contextBudget).toBe("scoped-diff" satisfies ContextBudget);
   });
 
   it("uses premium reviewer only when explicitly requested", () => {
@@ -125,6 +130,7 @@ describe("classifyDispatch", () => {
       expect(hint.tier).toBe("premium");
       expect(hint.recommendDispatch).toBe(true);
       expect(hint.promptSize).toBe("full");
+      expect(hint.contextBudget).toBe("oracle-brief" satisfies ContextBudget);
     });
 
     it("routes [oracle:quick] to the synchronous oracle plan tool", () => {
