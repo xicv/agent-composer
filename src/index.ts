@@ -33,7 +33,12 @@ async function main(): Promise<void> {
     return;
   }
   if (subcommand === "doctor") {
-    const report = await runDoctor({ cwd: process.cwd() });
+    const flags = process.argv.slice(3);
+    const json = flags.includes("--json");
+    const report = await runDoctor({ cwd: process.cwd(), verbose: !json });
+    if (json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    }
     process.exit(report.healthy ? 0 : 1);
     return;
   }
