@@ -16,6 +16,7 @@ import { registerHandoffTools } from "./tools/handoff.js";
 import { registerCodexLifecycleTools } from "./tools/codexLifecycle.js";
 import { registerConfigTools } from "./tools/config.js";
 import { registerRouteTools } from "./tools/route.js";
+import { registerAuditTools } from "./tools/audit.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
 export * from "./server/toolDescriptions.js";
@@ -55,6 +56,7 @@ export function createComposerServer(
   registerCodexLifecycleTools(ctx);
   registerConfigTools(ctx);
   registerRouteTools(ctx);
+  registerAuditTools(ctx);
 
   return server;
 }

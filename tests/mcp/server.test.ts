@@ -101,6 +101,8 @@ describe("composer MCP server", () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "composer_audit_read",
+      "composer_audit_record",
       "composer_code",
       "composer_code_chain",
       "composer_code_cli",
@@ -1379,6 +1381,53 @@ describe("composer MCP server", () => {
     expect(block?.type).toBe("text");
     const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
     expect(parsed.route.target).toBe("composer-code-cli");
+  });
+
+  it("composer_audit_record and composer_audit_read round-trip through the audit trail", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-audit-roundtrip-"));
+    try {
+      const { client } = await bootClient(root);
+
+      // Record an event
+      const recordResult = await client.callTool({
+        name: "composer_audit_record",
+        arguments: {
+          kind: "outcome",
+          runId: "r1",
+          route: "composer_code_cli",
+          status: "succeeded",
+          changedFiles: 3,
+        },
+      });
+      expect(recordResult.isError).not.toBe(true);
+      const recordBlock = (recordResult.content as Array<{ type: string; text: string }>)[0];
+      const recorded = JSON.parse(recordBlock?.text ?? "{}") as { kind: string; runId: string; status: string };
+      expect(recorded.kind).toBe("outcome");
+      expect(recorded.runId).toBe("r1");
+      expect(recorded.status).toBe("succeeded");
+
+      // Read back as JSON filtered by runId
+      const readJsonResult = await client.callTool({
+        name: "composer_audit_read",
+        arguments: { runId: "r1" },
+      });
+      expect(readJsonResult.isError).not.toBe(true);
+      const readBlock = (readJsonResult.content as Array<{ type: string; text: string }>)[0];
+      const events = JSON.parse(readBlock?.text ?? "[]") as Array<{ runId: string }>;
+      expect(events.length).toBeGreaterThanOrEqual(1);
+      expect(events.every((e) => e.runId === "r1")).toBe(true);
+
+      // Read back as markdown
+      const readMdResult = await client.callTool({
+        name: "composer_audit_read",
+        arguments: { runId: "r1", format: "markdown" },
+      });
+      expect(readMdResult.isError).not.toBe(true);
+      const mdBlock = (readMdResult.content as Array<{ type: string; text: string }>)[0];
+      expect(mdBlock?.text).toContain("r1");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("composer_review accepts reviewScope:staged from a temp git repo instead of inline diff", async () => {
