@@ -116,6 +116,7 @@ describe("composer MCP server", () => {
       "composer_research",
       "composer_review",
       "composer_review_claude",
+      "composer_route_decide",
     ]);
   });
 
@@ -1354,5 +1355,69 @@ describe("composer MCP server", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("composer_route_decide routes [oracle:plan] prompt to composer-oracle-job-start", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_route_decide",
+      arguments: { prompt: "[oracle:plan] design the auth module" },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    expect(block?.type).toBe("text");
+    const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
+    expect(parsed.route.target).toBe("composer-oracle-job-start");
+  });
+
+  it("composer_route_decide routes a simple implementation prompt to composer-code-cli", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_route_decide",
+      arguments: { prompt: "implement a helper in src/util/foo.ts" },
+    });
+    const block = (result.content as Array<{ type: string; text: string }>)[0];
+    expect(block?.type).toBe("text");
+    const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
+    expect(parsed.route.target).toBe("composer-code-cli");
+  });
+
+  it("composer_review accepts reviewScope:staged from a temp git repo instead of inline diff", async () => {
+    // Set up a temp git repo with a staged change
+    const root = mkdtempSync(join(tmpdir(), "composer-review-scope-"));
+    try {
+      const { execSync } = await import("node:child_process");
+      execSync("git init", { cwd: root });
+      execSync('git config user.email "test@test.com"', { cwd: root });
+      execSync('git config user.name "Test"', { cwd: root });
+      // Create initial commit so HEAD exists
+      writeFileSync(join(root, "hello.ts"), "export const x = 1;\n", "utf8");
+      execSync("git add hello.ts", { cwd: root });
+      execSync('git commit -m "init"', { cwd: root });
+      // Now stage a change
+      writeFileSync(join(root, "hello.ts"), "export const x = 2;\n", "utf8");
+      execSync("git add hello.ts", { cwd: root });
+
+      const { client } = await bootClient(root);
+      const result = await client.callTool({
+        name: "composer_review",
+        arguments: { prompt: "review", reviewScope: "staged" },
+      });
+      // Should succeed (no isError) and the mock provider should have received the diff context
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      // MockProvider echoes back the context — it should contain the diff text
+      expect(block?.text).toContain("hello.ts");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_review errors when neither diff nor reviewScope is provided", async () => {
+    const { client } = await bootClient();
+    const result = await client.callTool({
+      name: "composer_review",
+      arguments: { prompt: "review" },
+    });
+    expect(result.isError).toBe(true);
   });
 });

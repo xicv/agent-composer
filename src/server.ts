@@ -13,6 +13,7 @@ import { registerOracleTools } from "./tools/oracle.js";
 import { registerHandoffTools } from "./tools/handoff.js";
 import { registerCodexLifecycleTools } from "./tools/codexLifecycle.js";
 import { registerConfigTools } from "./tools/config.js";
+import { registerRouteTools } from "./tools/route.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
 export * from "./server/toolDescriptions.js";
@@ -49,6 +50,7 @@ export function createComposerServer(
   registerHandoffTools(ctx);
   registerCodexLifecycleTools(ctx);
   registerConfigTools(ctx);
+  registerRouteTools(ctx);
 
   return server;
 }

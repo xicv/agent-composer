@@ -2,6 +2,7 @@ import { z } from "zod";
 import { withProgress } from "../server/progress.js";
 import { contextWithHandoff } from "../server/handoffContext.js";
 import { applyFileBlocks, resolveProjectDir } from "../util/applyFileBlocks.js";
+import { computeReviewDiff } from "../util/reviewDiff.js";
 import {
   COMPOSER_RESEARCH,
   COMPOSER_CODE,
@@ -87,8 +88,11 @@ export function registerResearchTools(ctx: ServerToolContext): void {
       description: REVIEW_DESCRIPTION,
       inputSchema: {
         prompt: z.string().min(1),
-        diff: z.string().min(1),
+        diff: z.string().min(1).optional(),
         handoffPath: z.string().optional(),
+        reviewScope: z.enum(["staged", "unstaged", "working-tree", "branch"]).optional(),
+        reviewFiles: z.array(z.string().min(1)).optional(),
+        base: z.string().min(1).optional(),
       },
       annotations: {
         title: "Composer Review",
@@ -98,12 +102,19 @@ export function registerResearchTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ prompt, diff, handoffPath }, extra) => {
+    async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base }, extra) => {
+      const effectiveDiff =
+        reviewScope !== undefined
+          ? computeReviewDiff(root, reviewScope, { base, files: reviewFiles })
+          : diff;
+      if (!effectiveDiff) {
+        throw new Error("composer_review: provide either `diff` or `reviewScope`.");
+      }
       const provider = registry.getProviderForRole("reviewer");
       const result = await withProgress(extra, COMPOSER_REVIEW, () =>
         provider.execute({
           prompt,
-          context: contextWithHandoff(root, diff, handoffPath),
+          context: contextWithHandoff(root, effectiveDiff, handoffPath),
           signal: extra.signal,
         }),
       );
@@ -117,8 +128,11 @@ export function registerResearchTools(ctx: ServerToolContext): void {
       description: REVIEW_CLAUDE_DESCRIPTION,
       inputSchema: {
         prompt: z.string().min(1),
-        diff: z.string().min(1),
+        diff: z.string().min(1).optional(),
         handoffPath: z.string().optional(),
+        reviewScope: z.enum(["staged", "unstaged", "working-tree", "branch"]).optional(),
+        reviewFiles: z.array(z.string().min(1)).optional(),
+        base: z.string().min(1).optional(),
       },
       annotations: {
         title: "Composer Review (Claude Premium)",
@@ -128,12 +142,19 @@ export function registerResearchTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ prompt, diff, handoffPath }, extra) => {
+    async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base }, extra) => {
+      const effectiveDiff =
+        reviewScope !== undefined
+          ? computeReviewDiff(root, reviewScope, { base, files: reviewFiles })
+          : diff;
+      if (!effectiveDiff) {
+        throw new Error("composer_review_claude: provide either `diff` or `reviewScope`.");
+      }
       const provider = registry.getProviderForRole("reviewerClaude");
       const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, () =>
         provider.execute({
           prompt,
-          context: contextWithHandoff(root, diff, handoffPath),
+          context: contextWithHandoff(root, effectiveDiff, handoffPath),
           cwd: root,
           signal: extra.signal,
         }),
