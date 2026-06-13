@@ -41,6 +41,11 @@ Environment overrides:
   ORACLE_PRO_REATTACH_DELAY      default: 30s
   ORACLE_PRO_REATTACH_INTERVAL   default: 2m
   ORACLE_PRO_REATTACH_TIMEOUT    default: 2m
+
+Secret file protection:
+  --file paths matching known secret patterns (.env, *.pem, *.key, id_rsa, .aws/credentials,
+  *secret*, *token*, *credential*, *password*, etc.) are rejected before upload.
+  Set ORACLE_PRO_ALLOW_SECRET_FILES=1 to override (use with caution).
 USAGE
 }
 
@@ -145,6 +150,25 @@ esac
 OUT_DIR="${ORACLE_PRO_OUTPUT_DIR:-.composer/oracle/answers}"
 CTX_DIR="${ORACLE_PRO_CONTEXT_DIR:-.composer/oracle/context}"
 mkdir -p "$OUT_DIR" "$CTX_DIR"
+
+is_secret_file() {
+  # Returns 0 (true) if $1 looks like a secret/credential file we must not upload.
+  local p base lc
+  p="$1"
+  base="${p##*/}"
+  lc="$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')"
+  case "$lc" in
+    .env|.env.*|*.pem|*.key|*.p12|*.pfx|*.keystore|*.jks|*.kdbx|*.ppk|id_rsa|id_dsa|id_ecdsa|id_ed25519|.npmrc|.netrc|.pgpass)
+      return 0 ;;
+    *secret*|*token*|*credential*|*password*)
+      return 0 ;;
+  esac
+  case "$p" in
+    */.ssh/*|*/.aws/credentials|*/.gnupg/*)
+      return 0 ;;
+  esac
+  return 1
+}
 
 safe_slug() {
   local s="$1"
@@ -256,7 +280,11 @@ add_supported_flag ARGS --heartbeat "${ORACLE_PRO_HEARTBEAT:-30}"
 
 # File inputs. Pass user files first, then auto context.
 for f in "${FILES[@]}"; do
-  [[ -n "$f" ]] && ARGS+=(--file "$f")
+  [[ -n "$f" ]] || continue
+  if is_secret_file "$f" && [[ "${ORACLE_PRO_ALLOW_SECRET_FILES:-0}" != "1" ]]; then
+    die "refusing to upload potential secret file: $f (matches secret denylist). Rename/relocate it, or set ORACLE_PRO_ALLOW_SECRET_FILES=1 to override."
+  fi
+  ARGS+=(--file "$f")
 done
 for f in "${AUTO_FILES[@]}"; do
   [[ -n "$f" ]] && ARGS+=(--file "$f")
