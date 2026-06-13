@@ -17,6 +17,8 @@ import { formatHelp } from "./cli/help.js";
 import { parseCleanupArgs, runCleanup } from "./cli/cleanup.js";
 import { applyMode } from "./cli/mode.js";
 import { isModeName, MODE_NAMES } from "./config/modes.js";
+import { runStatus } from "./cli/status.js";
+import { runInstallGitHook } from "./cli/installGitHook.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -64,6 +66,14 @@ async function main(): Promise<void> {
       return;
     }
     runCleanup(parsed);
+    return;
+  }
+  if (subcommand === "status") {
+    runStatus(process.cwd());
+    return;
+  }
+  if (subcommand === "install-git-hook") {
+    runInstallGitHook(process.cwd());
     return;
   }
   if (subcommand === "mode") {
