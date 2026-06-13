@@ -19,9 +19,10 @@ export function registerStatusTools(ctx: ServerToolContext): void {
     async () => {
       const status = buildStatus(ctx.root);
       const session = ctx.getSession();
+      const sv = Object.keys(session).length > 0 ? session : undefined;
       const result = {
-        ...statusEnvelope(status),
-        session: Object.keys(session).length > 0 ? session : undefined,
+        ...statusEnvelope(status, sv),
+        session: sv,
       };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
