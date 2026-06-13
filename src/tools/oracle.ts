@@ -55,8 +55,19 @@ export function registerOracleTools(ctx: ServerToolContext): void {
     },
     async ({ prompt, mode, context, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("oraclePlanner");
+      const oracleCfg = ctx.getActiveConfig()?.oracle;
+      const resolvedMode = mode ?? oracleCfg?.defaultMode ?? "auto";
+      if (
+        oracleCfg?.requireExplicitTag === true &&
+        resolvedMode === "auto" &&
+        !/\[oracle:(quick|standard|deep|plan|review|debug|research)\]/i.test(prompt)
+      ) {
+        throw new Error(
+          "composer_oracle_plan: oracle.requireExplicitTag is set — pass an explicit mode (quick|standard|deep|plan|review|debug|research) or tag the prompt with [oracle:<mode>].",
+        );
+      }
       const effectivePrompt =
-        mode && mode !== "auto" ? `[oracle:${mode}] ${prompt}` : prompt;
+        resolvedMode !== "auto" ? `[oracle:${resolvedMode}] ${prompt}` : prompt;
       const lock = acquireOracleLock(root, { label: "oracle_plan" });
       if (!lock.acquired) {
         throw new Error(
@@ -100,7 +111,17 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, mode, context, handoffPath }) => {
-      const resolvedMode = mode ?? "auto";
+      const oracleCfg = ctx.getActiveConfig()?.oracle;
+      const resolvedMode = mode ?? oracleCfg?.defaultMode ?? "auto";
+      if (
+        oracleCfg?.requireExplicitTag === true &&
+        resolvedMode === "auto" &&
+        !/\[oracle:(quick|standard|deep|plan|review|debug|research)\]/i.test(prompt)
+      ) {
+        throw new Error(
+          "composer_oracle_job_start: oracle.requireExplicitTag is set — pass an explicit mode (quick|standard|deep|plan|review|debug|research) or tag the prompt with [oracle:<mode>].",
+        );
+      }
       const provider = registry.getProviderForRole("oraclePlanner");
       let job = newOracleJob(root, {
         mode: resolvedMode,

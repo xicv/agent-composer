@@ -111,6 +111,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         context: z.string().optional(),
         handoffPath: z.string().optional(),
         projectDir: z.string().optional(),
+        profile: z.string().min(1).optional(),
       },
       annotations: {
         title: "Composer Code (CLI apply)",
@@ -120,8 +121,17 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         idempotentHint: false,
       },
     },
-    async ({ prompt, context, handoffPath, projectDir }, extra) => {
+    async ({ prompt, context, handoffPath, projectDir, profile }, extra) => {
       const targetRoot = resolveProjectDir(projectDir, root);
+      const profiles = ctx.getActiveConfig()?.codexProfiles;
+      if (profile !== undefined) {
+        const profileModel = profiles?.[profile]?.model;
+        if (!profileModel) {
+          throw new Error(
+            `composer_code_cli: unknown profile "${profile}" — define it under codexProfiles in composer.config.json.`,
+          );
+        }
+      }
       const provider = registry.getProviderForRole("coderCli");
       const result = await withProgress(extra, COMPOSER_CODE_CLI, () =>
         provider.execute({
@@ -129,6 +139,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           context: contextWithHandoff(root, context, handoffPath),
           cwd: root,
           projectDir: projectDir === undefined ? undefined : targetRoot,
+          model: profile !== undefined ? profiles?.[profile]?.model : undefined,
           signal: extra.signal,
         }),
       );

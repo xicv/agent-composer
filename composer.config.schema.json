@@ -49,6 +49,27 @@
     },
     "codexLifecycle": {
       "$ref": "#/$defs/codexLifecycle"
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultMode": {
+          "enum": ["auto", "quick", "standard", "deep", "plan", "review", "debug", "research"]
+        },
+        "requireExplicitTag": { "type": "boolean" }
+      }
+    },
+    "codexProfiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model"],
+        "properties": {
+          "model": { "type": "string", "minLength": 1 }
+        }
+      }
     }
   },
   "$defs": {

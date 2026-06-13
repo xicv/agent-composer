@@ -244,6 +244,20 @@ export const CodexLifecycleSchema = z
 export type CodexLifecycle = z.infer<typeof CodexLifecycleSchema>;
 export type CodexLifecycleInput = z.input<typeof CodexLifecycleSchema>;
 
+export const OracleConfigSchema = z
+  .object({
+    defaultMode: z
+      .enum(["auto", "quick", "standard", "deep", "plan", "review", "debug", "research"])
+      .optional(),
+    requireExplicitTag: z.boolean().optional(),
+  })
+  .strict();
+export type OracleConfig = z.infer<typeof OracleConfigSchema>;
+
+export const CodexProfileSchema = z.object({ model: z.string().min(1) }).strict();
+export const CodexProfilesSchema = z.record(z.string().min(1), CodexProfileSchema);
+export type CodexProfiles = z.infer<typeof CodexProfilesSchema>;
+
 export const ComposerConfigSchema = z
   .object({
     roles: z
@@ -260,6 +274,8 @@ export const ComposerConfigSchema = z
     codexReview: CodexReviewSchema.optional(),
     codexRescue: CodexRescueSchema.optional(),
     codexLifecycle: CodexLifecycleSchema.optional(),
+    oracle: OracleConfigSchema.optional(),
+    codexProfiles: CodexProfilesSchema.optional(),
   })
   .strict();
 export type ComposerConfig = z.infer<typeof ComposerConfigSchema>;
