@@ -7,6 +7,7 @@ import {
 import { MockProvider } from "../src/providers/MockProvider.js";
 import { AnthropicCompatibleProvider } from "../src/providers/AnthropicCompatibleProvider.js";
 import { CLIProvider } from "../src/providers/CLIProvider.js";
+import { SpendGuardProvider } from "../src/providers/SpendGuardProvider.js";
 import { parseConfig } from "../src/config/loader.js";
 import type { ComposerConfig } from "../src/config/schema.js";
 
@@ -226,5 +227,66 @@ describe("ProviderRegistry — multi-role resolution", () => {
     expect((reg.getProviderForRole("reviewer") as MockProvider).modelLabel).toBe(
       "v-mock",
     );
+  });
+});
+
+describe("ProviderRegistry — spend guard", () => {
+  const stashedKey = process.env["TEST_ANTHROPIC_KEY"];
+  beforeEach(() => {
+    process.env["TEST_ANTHROPIC_KEY"] = "test-glm-key";
+  });
+  afterEach(() => {
+    if (stashedKey === undefined) delete process.env["TEST_ANTHROPIC_KEY"];
+    else process.env["TEST_ANTHROPIC_KEY"] = stashedKey;
+  });
+
+  function makeGuardedConfig() {
+    return parseConfig({
+      roles: {
+        researcher: { provider: "mock" },
+        coder: {
+          provider: "anthropic",
+          baseUrl: "https://api.z.ai/api/anthropic",
+          apiKeyEnv: "TEST_ANTHROPIC_KEY",
+          model: "glm-4.6",
+        },
+        reviewer: { provider: "mock" },
+      },
+      spendAuthorization: {
+        mode: "auto",
+        maxUsdPerCall: 0.5,
+        maxUsdPerSession: 50,
+      },
+    });
+  }
+
+  it("wraps a priced anthropic role in SpendGuardProvider", () => {
+    const reg = new ProviderRegistry(makeGuardedConfig());
+    const p = reg.getProviderForRole("coder");
+    expect(p).toBeInstanceOf(SpendGuardProvider);
+    expect(p.id).toBe("anthropic");
+    expect(p.modelLabel).toBe("glm-4.6");
+  });
+
+  it("does NOT wrap mock (free) roles even when spendAuthorization is set", () => {
+    const reg = new ProviderRegistry(makeGuardedConfig());
+    const p = reg.getProviderForRole("researcher");
+    expect(p).toBeInstanceOf(MockProvider);
+    expect(p).not.toBeInstanceOf(SpendGuardProvider);
+  });
+
+  it("bare anthropic role WITHOUT spendAuthorization is NOT wrapped (existing behaviour unchanged)", () => {
+    // makeConfig() from the top of this file never sets spendAuthorization.
+    const reg = new ProviderRegistry(
+      makeConfig({
+        provider: "anthropic",
+        baseUrl: "https://api.z.ai/api/anthropic",
+        apiKeyEnv: "TEST_ANTHROPIC_KEY",
+        model: "glm-4.6",
+      }),
+    );
+    const p = reg.getProviderForRole("coder");
+    expect(p).toBeInstanceOf(AnthropicCompatibleProvider);
+    expect(p).not.toBeInstanceOf(SpendGuardProvider);
   });
 });

@@ -8,6 +8,7 @@ import type { IProvider } from "./providers/IProvider.js";
 import { MockProvider } from "./providers/MockProvider.js";
 import { AnthropicCompatibleProvider } from "./providers/AnthropicCompatibleProvider.js";
 import { CLIProvider } from "./providers/CLIProvider.js";
+import { SpendGuardProvider, SpendLedger, isPricedProvider } from "./providers/SpendGuardProvider.js";
 import type {
   ComposerConfig,
   RoleConfig,
@@ -41,6 +42,7 @@ export class ProviderConfigError extends Error {
 
 export class ProviderRegistry {
   private readonly cache = new Map<RoleName, IProvider>();
+  private readonly spendLedger = new SpendLedger();
 
   constructor(private readonly config: ComposerConfig) {}
 
@@ -51,9 +53,15 @@ export class ProviderRegistry {
     if (!rc) {
       throw new ProviderConfigError(role, "role not configured in composer.config.json roles");
     }
-    const created = this.buildProvider(rc);
+    const created = this.maybeGuard(this.buildProvider(rc));
     this.cache.set(role, created);
     return created;
+  }
+
+  private maybeGuard(provider: IProvider): IProvider {
+    const auth = this.config.spendAuthorization;
+    if (!auth || !isPricedProvider(provider.id)) return provider;
+    return new SpendGuardProvider(provider, auth, this.spendLedger);
   }
 
   private buildProvider(roleConfig: RoleConfig): IProvider {
