@@ -55,7 +55,12 @@ export function registerOracleTools(ctx: ServerToolContext): void {
     },
     async ({ prompt, mode, context, handoffPath }, extra) => {
       const provider = registry.getProviderForRole("oraclePlanner");
-      const oracleCfg = ctx.getActiveConfig()?.oracle;
+      const cfgOracle = ctx.getActiveConfig()?.oracle;
+      const sessOracle = ctx.getSession().oracle;
+      const oracleCfg = {
+        defaultMode: sessOracle?.defaultMode ?? cfgOracle?.defaultMode,
+        requireExplicitTag: sessOracle?.requireExplicitTag ?? cfgOracle?.requireExplicitTag,
+      };
       const resolvedMode = mode ?? oracleCfg?.defaultMode ?? "auto";
       if (
         oracleCfg?.requireExplicitTag === true &&
@@ -111,7 +116,12 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, mode, context, handoffPath }) => {
-      const oracleCfg = ctx.getActiveConfig()?.oracle;
+      const cfgOracle = ctx.getActiveConfig()?.oracle;
+      const sessOracle = ctx.getSession().oracle;
+      const oracleCfg = {
+        defaultMode: sessOracle?.defaultMode ?? cfgOracle?.defaultMode,
+        requireExplicitTag: sessOracle?.requireExplicitTag ?? cfgOracle?.requireExplicitTag,
+      };
       const resolvedMode = mode ?? oracleCfg?.defaultMode ?? "auto";
       if (
         oracleCfg?.requireExplicitTag === true &&
