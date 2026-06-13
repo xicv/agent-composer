@@ -103,6 +103,7 @@ describe("composer MCP server", () => {
     expect(names).toEqual([
       "composer_audit_read",
       "composer_audit_record",
+      "composer_audit_summary",
       "composer_code",
       "composer_code_chain",
       "composer_code_cli",
@@ -391,6 +392,33 @@ describe("composer MCP server", () => {
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain("unknown profile");
+    });
+
+    it("session profile: composer_code_cli forwards reasoningEffort and sandbox from profile to provider", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexProfiles: { fast: { model: "glm-x", reasoningEffort: "low", sandbox: "workspace-write" } },
+      });
+      const captured: Array<import("../../src/providers/IProvider.js").IProviderExecuteInput> = [];
+      const capturingProvider: import("../../src/providers/IProvider.js").IProvider = {
+        id: "mock",
+        modelLabel: "capturing-mock",
+        async healthCheck() { return true; },
+        async execute(input) {
+          captured.push(input);
+          return { text: "ok" };
+        },
+      };
+      const { client } = await bootClientWithProviders({ coderCli: capturingProvider }, undefined, config);
+      const result = await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "x", profile: "fast" },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.model).toBe("glm-x");
+      expect(captured[0]?.reasoningEffort).toBe("low");
+      expect(captured[0]?.sandbox).toBe("workspace-write");
     });
 
     it("session mode: session mode is used by workflow plan when no explicit mode arg is passed", async () => {
@@ -1554,6 +1582,55 @@ describe("composer MCP server", () => {
       expect(readMdResult.isError).not.toBe(true);
       const mdBlock = (readMdResult.content as Array<{ type: string; text: string }>)[0];
       expect(mdBlock?.text).toContain("r1");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_audit_summary aggregates recorded events", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-audit-summary-"));
+    try {
+      const { client } = await bootClient(root);
+
+      // Record two events
+      await client.callTool({
+        name: "composer_audit_record",
+        arguments: {
+          kind: "outcome",
+          route: "composer_code_cli",
+          status: "succeeded",
+          testsPassed: true,
+        },
+      });
+      await client.callTool({
+        name: "composer_audit_record",
+        arguments: {
+          kind: "outcome",
+          route: "composer_code_cli",
+          status: "failed",
+          testsPassed: false,
+        },
+      });
+
+      // Call composer_audit_summary
+      const summaryResult = await client.callTool({
+        name: "composer_audit_summary",
+        arguments: {},
+      });
+      expect(summaryResult.isError).not.toBe(true);
+      const summaryBlock = (summaryResult.content as Array<{ type: string; text: string }>)[0];
+      const summary = JSON.parse(summaryBlock?.text ?? "{}") as {
+        total: number;
+        byRoute: Record<string, number>;
+        byStatus: Record<string, number>;
+        tests: { passed: number; failed: number };
+      };
+
+      expect(summary.total).toBe(2);
+      expect(summary.byRoute["composer_code_cli"]).toBe(2);
+      expect(summary.byStatus["failed"]).toBe(1);
+      expect(summary.tests.passed).toBe(1);
+      expect(summary.tests.failed).toBe(1);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

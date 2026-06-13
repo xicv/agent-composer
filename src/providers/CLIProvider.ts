@@ -228,6 +228,8 @@ export class CLIProvider implements IProvider {
         projectDir: input.projectDir,
         readOnly: input.readOnly,
         model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        sandbox: input.sandbox,
       });
       const startedAt = Date.now();
       try {
@@ -294,7 +296,7 @@ export class CLIProvider implements IProvider {
     bin: string,
     staticArgs: ReadonlyArray<string>,
     prompt: string,
-    options: { projectDir?: string; readOnly?: boolean; model?: string } = {},
+    options: { projectDir?: string; readOnly?: boolean; model?: string; reasoningEffort?: "low" | "medium" | "high"; sandbox?: "read-only" | "workspace-write" } = {},
   ): { args: string[]; cwd?: string; finalMessagePath?: string; cleanup: () => void } {
     const args = [...staticArgs];
     let tempDir: string | undefined;
@@ -313,6 +315,12 @@ export class CLIProvider implements IProvider {
       }
       if (options.model && !CLIProvider.hasCodexModel(args)) {
         args.splice(CLIProvider.codexExecCommandIndex(bin, args), 0, "-m", options.model);
+      }
+      if (options.reasoningEffort && !CLIProvider.hasCodexReasoningEffort(args)) {
+        args.splice(CLIProvider.codexExecCommandIndex(bin, args), 0, "-c", `model_reasoning_effort=${options.reasoningEffort}`);
+      }
+      if (options.sandbox && !options.readOnly && CLIProvider.findSandboxValue(args) === undefined) {
+        args.splice(CLIProvider.codexExecCommandIndex(bin, args), 0, "-s", options.sandbox);
       }
       if (options.readOnly) {
         CLIProvider.forceCodexReadOnlySandbox(bin, args);
@@ -440,6 +448,10 @@ export class CLIProvider implements IProvider {
     return args.some(
       (arg) => arg === "-m" || arg === "--model" || arg.startsWith("--model="),
     );
+  }
+
+  private static hasCodexReasoningEffort(args: ReadonlyArray<string>): boolean {
+    return args.some((a) => a.startsWith("model_reasoning_effort="));
   }
 
   private static findFlagValue(

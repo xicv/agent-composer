@@ -451,6 +451,47 @@ describe("CLIProvider (execFile injected)", () => {
     const p = new CLIProvider({ cli: ["nonexistent-binary"], execFn: exec });
     await expect(p.execute({ prompt: "x" })).rejects.toThrow(/ENOENT/);
   });
+
+  it("prepareArgs injects -c model_reasoning_effort=high for codex exec", () => {
+    const args = ["exec", "--sandbox", "workspace-write"];
+    const result = CLIProvider.prepareArgs("codex", args, "prompt", { reasoningEffort: "high" });
+    result.cleanup();
+    const joined = result.args.join(" ");
+    expect(joined).toContain("-c model_reasoning_effort=high");
+    expect(result.args.indexOf("-c")).toBeLessThan(result.args.indexOf("exec"));
+  });
+
+  it("prepareArgs injects -s workspace-write for codex exec when sandbox set and not readOnly", () => {
+    const args = ["exec", "--sandbox", "workspace-write"];
+    const result = CLIProvider.prepareArgs("codex", args, "prompt", { sandbox: "workspace-write" });
+    result.cleanup();
+    // The existing --sandbox workspace-write in staticArgs is already present, so findSandboxValue returns it
+    // and no second -s is injected. Test with a config that has NO sandbox in staticArgs:
+    const args2 = ["exec"];
+    const result2 = CLIProvider.prepareArgs("codex", args2, "prompt", { sandbox: "workspace-write" });
+    result2.cleanup();
+    expect(result2.args).toContain("-s");
+    expect(result2.args[result2.args.indexOf("-s") + 1]).toBe("workspace-write");
+  });
+
+  it("prepareArgs does NOT inject -s when sandbox set but readOnly=true (readOnly wins)", () => {
+    const args = ["exec"];
+    const result = CLIProvider.prepareArgs("codex", args, "prompt", { sandbox: "workspace-write", readOnly: true });
+    result.cleanup();
+    // readOnly forces read-only via forceCodexReadOnlySandbox — sandbox from profile is NOT injected
+    expect(result.args).not.toContain("workspace-write");
+    // But read-only sandbox IS present
+    expect(result.args.join(" ")).toContain("read-only");
+  });
+
+  it("prepareArgs does not inject -c or -s for non-codex binaries", () => {
+    const args = ["-p"];
+    const result = CLIProvider.prepareArgs("agy", args, "prompt", { reasoningEffort: "high", sandbox: "workspace-write" });
+    result.cleanup();
+    expect(result.args).not.toContain("-c");
+    expect(result.args).not.toContain("-s");
+    expect(result.args).not.toContain("model_reasoning_effort=high");
+  });
 });
 
 describe("CLIProvider (real spawn — default execFn against node binary)", () => {

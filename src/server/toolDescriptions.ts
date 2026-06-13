@@ -137,3 +137,5 @@ export const COMPOSER_SESSION_GET = "composer_session_get" as const;
 export const COMPOSER_SESSION_SET = "composer_session_set" as const;
 export const SESSION_SET_DESCRIPTION = "Set EPHEMERAL session overrides for this server process WITHOUT writing composer.config.json: mode (fast|balanced|strict), oracle ({enabled,defaultMode,requireExplicitTag}), and a default code_cli profile. Pass clear:true to reset. Overrides win over config for the lifetime of the process; nothing is persisted.";
 export const SESSION_GET_DESCRIPTION = "Read the current ephemeral session overrides (mode/oracle/profile) for this server process.";
+export const COMPOSER_AUDIT_SUMMARY = "composer_audit_summary" as const;
+export const AUDIT_SUMMARY_DESCRIPTION = "Aggregate the Composer audit trail into counts by kind/status/route, review verdicts, test pass/fail, user corrections, and recent failures. Use to see route accuracy and outcome trends at a glance (evidence for /evolve).";
