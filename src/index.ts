@@ -13,6 +13,7 @@ import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
 import { runDoctor } from "./cli/doctor.js";
 import { resolveInitInvocation } from "./cli/initArgs.js";
+import { formatHelp } from "./cli/help.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -24,6 +25,10 @@ const ENV_PATH = process.env["COMPOSER_ENV"];
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
+  if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+    process.stdout.write(`${formatHelp()}\n`);
+    return;
+  }
   if (subcommand === "init") {
     const invocation = resolveInitInvocation(process.argv.slice(3));
     if (invocation.kind === "error") {

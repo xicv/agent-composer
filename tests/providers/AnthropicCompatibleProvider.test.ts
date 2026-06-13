@@ -246,6 +246,30 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     expect(stream).toHaveBeenCalledTimes(1);
     expect(stream.mock.calls[0]?.[1]).toBeUndefined();
   });
+
+  it("propagates a timeout error from finalMessage()", async () => {
+    stream.mockReturnValue({ finalMessage: () => Promise.reject(new Error("Request timed out.")) });
+    const p = buildProvider();
+    await expect(p.execute({ prompt: "x" })).rejects.toThrow(/timed out/i);
+  });
+
+  it("propagates an AbortError when the signal aborts", async () => {
+    const abortErr = Object.assign(new Error("Request was aborted."), { name: "AbortError" });
+    stream.mockReturnValue({ finalMessage: () => Promise.reject(abortErr) });
+    const controller = new AbortController();
+    controller.abort();
+    const p = buildProvider();
+    await expect(p.execute({ prompt: "x", signal: controller.signal })).rejects.toThrow(/abort/i);
+    expect(stream.mock.calls[0]?.[1]).toEqual({ signal: controller.signal });
+  });
+
+  it("propagates a generic provider error", async () => {
+    stream.mockReturnValue({
+      finalMessage: () => Promise.reject(new Error("overloaded_error")),
+    });
+    const p = buildProvider();
+    await expect(p.execute({ prompt: "x" })).rejects.toThrow(/overloaded/i);
+  });
 });
 
 const ANTHROPIC_TAPE = path.resolve(

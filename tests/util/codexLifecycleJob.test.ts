@@ -123,6 +123,30 @@ describe("codex lifecycle job files", () => {
     );
   });
 
+  it("classifies Anthropic/GLM SDK error shapes", () => {
+    expect(classifyCodexLifecycleUnavailable(new Error("Request timed out."))).toBe("timeout");
+    expect(
+      classifyCodexLifecycleUnavailable(
+        Object.assign(new Error("Request was aborted."), { name: "AbortError" }),
+      ),
+    ).toBe("cancelled");
+    expect(
+      classifyCodexLifecycleUnavailable(new Error("529 overloaded_error: server is overloaded")),
+    ).toBe("rate_limit");
+    expect(classifyCodexLifecycleUnavailable(new Error("Connection error."))).toBe("rate_limit");
+    expect(
+      classifyCodexLifecycleUnavailable(new Error("getaddrinfo ENOTFOUND api.z.ai")),
+    ).toBe("rate_limit");
+    expect(
+      classifyCodexLifecycleUnavailable(new Error("401 authentication_error: invalid x-api-key")),
+    ).toBe("auth");
+    expect(
+      classifyCodexLifecycleUnavailable(
+        new Error("insufficient_quota: billing hard limit reached"),
+      ),
+    ).toBe("quota");
+  });
+
   it("round-trips queued jobs from the current process without reconciliation", () => {
     const root = mkdtempSync(join(tmpdir(), "composer-life-"));
     const state = mkdtempSync(join(tmpdir(), "composer-life-state-"));
