@@ -3,6 +3,7 @@ import {
   buildReflectionPrompt,
   reflectViaProvider,
   type ReflectionInput,
+  type AuditFailure,
 } from "../../src/evolve/reflection.js";
 import type { IProvider } from "../../src/providers/IProvider.js";
 
@@ -26,6 +27,28 @@ describe("buildReflectionPrompt", () => {
   it("omits ecosystem section when empty", () => {
     const p = buildReflectionPrompt({ ...input, currentEcosystem: "" });
     expect(p).not.toMatch(/## Current ecosystem/i);
+  });
+
+  it("includes audit failures section when auditFailures provided", () => {
+    const failures: AuditFailure[] = [
+      { route: "composer_code_cli", taskClass: "cross-file-code", status: "failed", note: "review caught a missing await" },
+      { route: "composer_oracle_plan", userCorrection: true },
+    ];
+    const p = buildReflectionPrompt({ ...input, auditFailures: failures });
+    expect(p).toContain("Recent route/audit failures");
+    expect(p).toContain("composer_code_cli");
+    expect(p).toContain("user-corrected");
+    expect(p).toContain("review caught a missing await");
+  });
+
+  it("omits audit failures section when auditFailures is absent", () => {
+    const p = buildReflectionPrompt({ ...input });
+    expect(p).not.toContain("Recent route/audit failures");
+  });
+
+  it("omits audit failures section when auditFailures is empty array", () => {
+    const p = buildReflectionPrompt({ ...input, auditFailures: [] });
+    expect(p).not.toContain("Recent route/audit failures");
   });
 });
 

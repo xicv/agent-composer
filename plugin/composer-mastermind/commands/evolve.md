@@ -52,6 +52,10 @@ The summary prints to stdout:
 - Task descriptions in `evals/tasks.jsonl` are passed verbatim to the reflection provider — keep that file under version control to retain a clear trust boundary.
 - **SKILL.md edits are safe during a real-mode run.** Each task eval runs in a throwaway `git worktree` at `/tmp/composer-eval-<pid>-<taskId>`. The candidate skill is written only into the worktree copy; the real repo's SKILL.md is never touched during evaluation. You can freely edit SKILL.md in your editor while `/evolve --eval-mode real` is running.
 
+## Evidence
+
+The reflection mutator now receives recent route/audit failures from the durable audit trail (`composer_audit_record` → `readAuditFailures`). Up to 20 recent failures (events with `status=failed` or `userCorrection=true`) are extracted from the audit log and injected into the reflection prompt before the current-ecosystem section. This means proposed skill rewrites are driven by real routing and outcome failures — wrong route choice, unnecessary Oracle use, issues a review caught after the fact, user-corrected routes — not just synthetic scorer signals.
+
 ## v1 caveat
 
 The v1 scorer is synthetic (heuristic-based):

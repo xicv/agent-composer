@@ -3,6 +3,8 @@ import { runEvolve, rotateHoldout } from "../../src/evolve/runner.js";
 import type { EvolveDeps, EvolveTask } from "../../src/evolve/runner.js";
 import { addCounterexample } from "../../src/evolve/operators.js";
 import type { IProvider } from "../../src/providers/IProvider.js";
+import { buildReflectionPrompt } from "../../src/evolve/reflection.js";
+import type { AuditFailure } from "../../src/evolve/reflection.js";
 
 function silentProvider(reply: string = ""): IProvider {
   return {
@@ -172,6 +174,44 @@ describe("runEvolve — orchestrator integration", () => {
       budget: { maxCalls: 2, maxUsd: 100 },
     });
     expect(result.stoppedAt).toBe("budget");
+  });
+
+  it("auditFailures threads into reflection prompt and runEvolve completes without crash", async () => {
+    const auditFailures: AuditFailure[] = [
+      { route: "composer_code_cli", taskClass: "cross-file-code", status: "failed", note: "review caught a missing await" },
+      { route: "composer_oracle_plan", userCorrection: true },
+    ];
+
+    // Verify buildReflectionPrompt includes the audit-failure section (unit-level assertion
+    // directly on the prompt builder, since intercepting the reflect call inside runEvolve
+    // would require provider-level spy setup beyond the existing harness pattern).
+    const promptWithFailures = buildReflectionPrompt({
+      parent: "## Skill\n",
+      taskTranscripts: [],
+      auditFailures,
+    });
+    expect(promptWithFailures).toContain("Recent route/audit failures");
+    expect(promptWithFailures).toContain("composer_code_cli");
+    expect(promptWithFailures).toContain("user-corrected");
+
+    // Also verify runEvolve completes successfully when auditFailures is passed.
+    const deps: EvolveDeps = {
+      reflectionProvider: silentProvider("## Better\n"),
+      researchProvider: silentProvider("snap"),
+      evaluate: async () => ({ score: 0.5, transcripts: [] }),
+      reReplicate: async () => true,
+      skillDomain: "test",
+      postflightOverride: async () => ({ accept: true, reason: "test" }),
+    };
+    const result = await runEvolve({
+      parent: "## Skill\n",
+      tasks,
+      deps,
+      maxRounds: 0,
+      auditFailures,
+    });
+    expect(result.winner).toBe("## Skill\n");
+    expect(result.stoppedAt).toBe("maxRounds");
   });
 
   it("postflight reject keeps parent as winner", async () => {
