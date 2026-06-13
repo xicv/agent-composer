@@ -149,7 +149,10 @@ const ORACLE_JOB_START_DESCRIPTION =
   "runs, or when the user explicitly says not to block. For normal " +
   "planning that the next step depends on, prefer the synchronous " +
   "composer_oracle_plan instead. Poll composer_oracle_job_result with the " +
-  "jobId to retrieve the answer. Advisory only — never edits files.";
+  "jobId to retrieve the answer. Advisory only — never edits files. Runs " +
+  "non-blocking WITHIN the Composer server process (server-lifetime), not an " +
+  "OS-detached worker — if the server restarts mid-run the job is reconciled " +
+  "to 'failed'.";
 
 const ORACLE_JOB_RESULT_DESCRIPTION =
   "Read a durable Oracle job by jobId (or the latest when omitted). " +

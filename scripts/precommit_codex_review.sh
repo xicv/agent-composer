@@ -45,6 +45,10 @@ json_escape_fallback() {
 
 emit_json() {
   local message="$1"
+  if [[ "${GITHOOK:-0}" == "1" ]]; then
+    printf '%s\n' "$message" >&2
+    return 0
+  fi
   jq -nc --arg systemMessage "$message" \
     '{systemMessage:$systemMessage,suppressOutput:true}' 2>/dev/null \
     || printf '{"systemMessage":"%s","suppressOutput":true}\n' "$(json_escape_fallback "$message")"
@@ -53,6 +57,11 @@ emit_json() {
 emit_deny() {
   local reason="$1"
   local message="${2:-$reason}"
+  if [[ "${GITHOOK:-0}" == "1" ]]; then
+    printf '%s\n' "$message" >&2
+    printf 'commit blocked by Codex pre-commit review: %s\n' "$reason" >&2
+    exit 1
+  fi
   jq -nc --arg r "$reason" --arg systemMessage "$message" \
     '{systemMessage:$systemMessage,suppressOutput:true,hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"deny", permissionDecisionReason:$r}}' 2>/dev/null \
     || printf '{"systemMessage":"%s","suppressOutput":true,"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$(json_escape_fallback "$message")" "$(json_escape_fallback "$reason")"
@@ -564,18 +573,15 @@ evaluate_review_output() {
   exit 0
 }
 
-INPUT="$(cat || true)"
-if [[ -z "$INPUT" ]]; then
-  exit 0
+GITHOOK=0
+if [[ "${1:-}" == "--git-hook" || "${COMPOSER_PRECOMMIT_GITHOOK:-}" == "1" ]]; then
+  GITHOOK=1
 fi
 
-# jq is required to parse the hook payload. If it is missing we cannot run the
-# gate; honor failClosed via a jq-free (Node) config read so a configured
-# fail-closed gate cannot silently fail open. Only an actual Bash `git commit`
-# payload is gated; everything else is allowed through unchanged.
-if ! command -v jq >/dev/null 2>&1; then
-  if grep -Eq '"tool_name"[[:space:]]*:[[:space:]]*"Bash"' <<<"$INPUT" \
-     && grep -Eq 'git[^"]*commit' <<<"$INPUT"; then
+if [[ "$GITHOOK" == "1" ]]; then
+  # Real git pre-commit hook: git provides no PreToolUse JSON on stdin. jq is
+  # still needed to parse config; if it is missing, honor failClosed via Node.
+  if ! command -v jq >/dev/null 2>&1; then
     PREFLIGHT_CONFIG_PATH="${COMPOSER_CONFIG:-${CLAUDE_PROJECT_DIR:-.}/composer.config.json}"
     PREFLIGHT_FLAGS="0 0"
     if [[ -f "$PREFLIGHT_CONFIG_PATH" ]] && command -v node >/dev/null 2>&1; then
@@ -584,28 +590,53 @@ if ! command -v jq >/dev/null 2>&1; then
     if [[ "${PREFLIGHT_FLAGS%% *}" == "1" && "${PREFLIGHT_FLAGS##* }" == "1" ]]; then
       emit_deny "codex pre-commit review unavailable: jq not installed (fail-closed)" "⛔ Codex pre-commit gate requires jq (fail-closed). Install jq (brew install jq)."
     fi
+    printf 'codex pre-commit review skipped: jq not installed\n' >&2
+    exit 0
   fi
-  printf 'codex pre-commit review skipped: jq not installed\n' >&2
-  exit 0
-fi
+else
+  INPUT="$(cat || true)"
+  if [[ -z "$INPUT" ]]; then
+    exit 0
+  fi
 
-TOOL="$(jq -r '.tool_name // empty' <<<"$INPUT" 2>/dev/null || true)"
-if [[ -z "$TOOL" ]]; then
-  exit 0
-fi
-if [[ "$TOOL" != "Bash" ]]; then
-  exit 0
-fi
+  # jq is required to parse the hook payload. If it is missing we cannot run the
+  # gate; honor failClosed via a jq-free (Node) config read so a configured
+  # fail-closed gate cannot silently fail open. Only an actual Bash `git commit`
+  # payload is gated; everything else is allowed through unchanged.
+  if ! command -v jq >/dev/null 2>&1; then
+    if grep -Eq '"tool_name"[[:space:]]*:[[:space:]]*"Bash"' <<<"$INPUT" \
+       && grep -Eq 'git[^"]*commit' <<<"$INPUT"; then
+      PREFLIGHT_CONFIG_PATH="${COMPOSER_CONFIG:-${CLAUDE_PROJECT_DIR:-.}/composer.config.json}"
+      PREFLIGHT_FLAGS="0 0"
+      if [[ -f "$PREFLIGHT_CONFIG_PATH" ]] && command -v node >/dev/null 2>&1; then
+        PREFLIGHT_FLAGS="$(node -e 'try{const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=c.codexReview||{};const h=r.preCommitHook||{};process.stdout.write((r.enabled===true&&h.enabled===true?"1":"0")+" "+(h.failClosed===true?"1":"0"))}catch(e){process.stdout.write("0 0")}' "$PREFLIGHT_CONFIG_PATH" 2>/dev/null || printf '0 0')"
+      fi
+      if [[ "${PREFLIGHT_FLAGS%% *}" == "1" && "${PREFLIGHT_FLAGS##* }" == "1" ]]; then
+        emit_deny "codex pre-commit review unavailable: jq not installed (fail-closed)" "⛔ Codex pre-commit gate requires jq (fail-closed). Install jq (brew install jq)."
+      fi
+    fi
+    printf 'codex pre-commit review skipped: jq not installed\n' >&2
+    exit 0
+  fi
 
-COMMAND_TEXT="$(jq -r '.tool_input.command // empty' <<<"$INPUT" 2>/dev/null || true)"
-if [[ -z "$COMMAND_TEXT" ]]; then
-  exit 0
-fi
-if grep -Eq '(^|[^[:alnum:]])(commit-tree|commit-graph)([^[:alnum:]]|$)|--dry-run' <<<"$COMMAND_TEXT"; then
-  exit 0
-fi
-if ! grep -Eq '(^|[^[:alnum:]])git([[:space:]]|[[:space:]].*[[:space:]])commit([[:space:]]|$)' <<<"$COMMAND_TEXT"; then
-  exit 0
+  TOOL="$(jq -r '.tool_name // empty' <<<"$INPUT" 2>/dev/null || true)"
+  if [[ -z "$TOOL" ]]; then
+    exit 0
+  fi
+  if [[ "$TOOL" != "Bash" ]]; then
+    exit 0
+  fi
+
+  COMMAND_TEXT="$(jq -r '.tool_input.command // empty' <<<"$INPUT" 2>/dev/null || true)"
+  if [[ -z "$COMMAND_TEXT" ]]; then
+    exit 0
+  fi
+  if grep -Eq '(^|[^[:alnum:]])(commit-tree|commit-graph)([^[:alnum:]]|$)|--dry-run' <<<"$COMMAND_TEXT"; then
+    exit 0
+  fi
+  if ! grep -Eq '(^|[^[:alnum:]])git([[:space:]]|[[:space:]].*[[:space:]])commit([[:space:]]|$)' <<<"$COMMAND_TEXT"; then
+    exit 0
+  fi
 fi
 
 CONFIG_PATH="${COMPOSER_CONFIG:-${CLAUDE_PROJECT_DIR:-.}/composer.config.json}"

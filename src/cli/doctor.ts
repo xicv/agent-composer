@@ -515,14 +515,20 @@ export function checkGitPreCommitHook(cwd: string, config: ComposerConfig): Doct
   }
 
   return installed.ok
-    ? {
-        name: "git: pre-commit hook",
-        status: "warn",
-        detail:
-          `${hookPath} calls scripts/precommit_codex_review.sh, but that script is a Claude ` +
-          `PreToolUse gate that always exits 0 and cannot block a terminal \`git commit\` — ` +
-          `terminal commits are NOT mechanically gated; the Codex gate only covers Claude-issued Bash commits`,
-      }
+    ? installed.gitHookMode
+      ? {
+          name: "git: pre-commit hook",
+          status: "pass",
+          detail: `terminal git commit gated by ${hookPath} (--git-hook mode)`,
+        }
+      : {
+          name: "git: pre-commit hook",
+          status: "warn",
+          detail:
+            `${hookPath} calls scripts/precommit_codex_review.sh but NOT in --git-hook mode — ` +
+            `it only gates Claude-issued PreToolUse commits, not a terminal \`git commit\`. ` +
+            `Make the hook run \`precommit_codex_review.sh --git-hook\` to block terminal commits.`,
+        }
     : {
         name: "git: pre-commit hook",
         status: "fail",
@@ -540,7 +546,9 @@ function resolveGitHookPath(cwd: string): string | null {
   return hookPath.length > 0 ? resolve(cwd, hookPath) : null;
 }
 
-function inspectComposerGitHook(hookPath: string): { ok: true } | { ok: false; reason: string } {
+function inspectComposerGitHook(
+  hookPath: string,
+): { ok: true; gitHookMode: boolean } | { ok: false; reason: string } {
   if (!existsSync(hookPath)) return { ok: false, reason: `${hookPath} is missing` };
 
   try {
@@ -551,7 +559,8 @@ function inspectComposerGitHook(hookPath: string): { ok: true } | { ok: false; r
     if (!text.includes("scripts/precommit_codex_review.sh")) {
       return { ok: false, reason: `${hookPath} does not call scripts/precommit_codex_review.sh` };
     }
-    return { ok: true };
+    const gitHookMode = text.includes("--git-hook") || text.includes("COMPOSER_PRECOMMIT_GITHOOK");
+    return { ok: true, gitHookMode };
   } catch (error) {
     return { ok: false, reason: errorMessage(error) };
   }

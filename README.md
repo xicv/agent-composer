@@ -212,6 +212,14 @@ exhaustion, rate limits, timeouts, or invalid review output block gated commits
 instead of silently allowing them. `agent-composer doctor` checks both the
 config and whether the local Git pre-commit bridge is installed and executable.
 
+To also gate manual terminal commits, install a git hook that runs the gate in
+`--git-hook` mode (it exits non-zero to abort the commit on a blocking verdict):
+
+```bash
+printf '#!/usr/bin/env bash\nexec "$(git rev-parse --show-toplevel)/scripts/precommit_codex_review.sh" --git-hook\n' \
+  > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
 The remaining local bypass is Git's own `git commit --no-verify`; protect that
 path with branch protection or CI if every commit path must be enforced.
 

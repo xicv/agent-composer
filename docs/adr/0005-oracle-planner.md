@@ -56,6 +56,10 @@ stay fast/cheap on Codex to protect the token/latency North Star).
   manual browser login.
 - Full answers persist under `.composer/oracle/answers/` (gitignored); the tool
   returns only a bounded summary to keep the main context lean.
+- Async Oracle jobs are non-blocking within the Composer server process
+  (server-lifetime), not OS-detached durable workers; a job is reconciled to
+  `failed` if the server restarts before it completes. A truly detached durable
+  lane is out of scope.
 - Live use requires the active runtime config to include the `oraclePlanner`
   role and a logged-in Oracle browser profile.
 

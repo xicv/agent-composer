@@ -320,7 +320,7 @@ describe("doctor git pre-commit hook check", () => {
     });
   });
 
-  it("warns when the Git hook calls Composer's Codex review gate", () => {
+  it("warns when the Git hook calls Composer's Codex review gate without git-hook mode", () => {
     const hookPath = join(tmp, ".git", "hooks", "pre-commit");
     writeFileSync(
       hookPath,
@@ -340,7 +340,31 @@ describe("doctor git pre-commit hook check", () => {
     expect(check).toMatchObject({
       name: "git: pre-commit hook",
       status: "warn",
-      detail: expect.stringContaining("cannot block a terminal"),
+      detail: expect.stringContaining("NOT in --git-hook mode"),
+    });
+  });
+
+  it("passes when the Git hook calls Composer's Codex review gate in git-hook mode", () => {
+    const hookPath = join(tmp, ".git", "hooks", "pre-commit");
+    writeFileSync(
+      hookPath,
+      "#!/usr/bin/env bash\nexec \"$PWD/scripts/precommit_codex_review.sh\" --git-hook\n",
+      "utf8",
+    );
+    chmodSync(hookPath, 0o755);
+
+    const check = checkGitPreCommitHook(tmp, {
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true },
+      },
+    });
+
+    expect(check).toMatchObject({
+      name: "git: pre-commit hook",
+      status: "pass",
+      detail: expect.stringContaining("terminal git commit gated"),
     });
   });
 
@@ -350,7 +374,7 @@ describe("doctor git pre-commit hook check", () => {
     const hookPath = join(tmp, ".git", "hooks", "pre-commit");
     writeFileSync(
       hookPath,
-      "#!/usr/bin/env bash\nexec \"$PWD/scripts/precommit_codex_review.sh\"\n",
+      "#!/usr/bin/env bash\nexec \"$PWD/scripts/precommit_codex_review.sh\" --git-hook\n",
       "utf8",
     );
     chmodSync(hookPath, 0o755);
@@ -365,8 +389,8 @@ describe("doctor git pre-commit hook check", () => {
 
     expect(check).toMatchObject({
       name: "git: pre-commit hook",
-      status: "warn",
-      detail: expect.stringContaining("cannot block a terminal"),
+      status: "pass",
+      detail: expect.stringContaining("terminal git commit gated"),
     });
   });
 });
