@@ -269,7 +269,7 @@ export function classifyCodexLifecycleUnavailable(
     return "quota";
   }
   if (
-    /\b(rate limit|rate-limit|too many requests|temporarily unavailable|overloaded|econnreset|ecconnreset|503|429)\b/.test(
+    /\b(rate limit|rate-limit|too many requests|temporarily unavailable|overloaded|overloaded_error|econnreset|ecconnreset|econnrefused|enotfound|fetch failed|socket hang up|connection error|529|503|429)\b/.test(
       normalized,
     )
   ) {
