@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 import { buildStatus, renderStatusLine, statusEnvelope } from "../../src/cli/status.js";
 import { newOracleJob, writeOracleJob } from "../../src/util/oracleJob.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
@@ -65,6 +66,7 @@ describe("buildStatus", () => {
     expect(status.integrations.codexReview).toBe(false);
     expect(status.integrations.codexLifecycle).toBe(false);
     expect(status.integrations.oraclePlanner).toBe(false);
+    expect(status.integrations.gitHook).toBe("off");
     expect(status.integrations.gitHookInstalled).toBe(false);
     expect(status.recommendation.nextAction).toBe("agent-composer init");
   });
@@ -86,6 +88,7 @@ describe("buildStatus", () => {
     expect(status.integrations.codexReview).toBe(false);
     expect(status.integrations.codexLifecycle).toBe(false);
     expect(status.integrations.oraclePlanner).toBe(false);
+    expect(status.integrations.gitHook).toBe("off");
     expect(status.integrations.gitHookInstalled).toBe(false);
   });
 
@@ -267,24 +270,126 @@ describe("buildStatus", () => {
     expect(status.active.oracleJob).toBeDefined();
     expect(status.active.oracleJob?.status).toBe("running");
   });
+
+  describe("gitHook tri-state", () => {
+    function makeGitRepo(dir: string): void {
+      execSync("git init", { cwd: dir, stdio: "ignore" });
+      execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "ignore" });
+      execSync('git config user.name "Test"', { cwd: dir, stdio: "ignore" });
+    }
+
+    it("gitHook is 'off' when no pre-commit hook is present", () => {
+      makeGitRepo(tmp);
+      const status = buildStatus(tmp);
+      expect(status.integrations.gitHook).toBe("off");
+      expect(status.integrations.gitHookInstalled).toBe(false);
+    });
+
+    it("gitHook is 'on' when hook references script AND --git-hook marker", () => {
+      makeGitRepo(tmp);
+      const hooksDir = join(tmp, ".git", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const hookPath = join(hooksDir, "pre-commit");
+      writeFileSync(hookPath, "#!/bin/sh\nbash scripts/precommit_codex_review.sh --git-hook\n", "utf8");
+      chmodSync(hookPath, 0o755);
+      const status = buildStatus(tmp);
+      expect(status.integrations.gitHook).toBe("on");
+      expect(status.integrations.gitHookInstalled).toBe(true);
+    });
+
+    it("gitHook is 'warn' when hook references script but NOT --git-hook marker", () => {
+      makeGitRepo(tmp);
+      const hooksDir = join(tmp, ".git", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const hookPath = join(hooksDir, "pre-commit");
+      writeFileSync(hookPath, "#!/bin/sh\nbash scripts/precommit_codex_review.sh\n", "utf8");
+      chmodSync(hookPath, 0o755);
+      const status = buildStatus(tmp);
+      expect(status.integrations.gitHook).toBe("warn");
+      expect(status.integrations.gitHookInstalled).toBe(true);
+    });
+
+    it("gitHook is 'off' when hook is not executable", () => {
+      makeGitRepo(tmp);
+      const hooksDir = join(tmp, ".git", "hooks");
+      mkdirSync(hooksDir, { recursive: true });
+      const hookPath = join(hooksDir, "pre-commit");
+      writeFileSync(hookPath, "#!/bin/sh\nbash scripts/precommit_codex_review.sh --git-hook\n", "utf8");
+      chmodSync(hookPath, 0o644);
+      const status = buildStatus(tmp);
+      expect(status.integrations.gitHook).toBe("off");
+      expect(status.integrations.gitHookInstalled).toBe(false);
+    });
+  });
 });
 
 describe("renderStatusLine", () => {
   it("returns a single line starting with 'CMP ' containing R: L: O: H: and no objective text", () => {
-    const s = buildStatus(mkdtempSync(join(tmpdir(), "composer-renderline-")));
-    const line = renderStatusLine(s);
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-"));
+    try {
+      const s = buildStatus(tmp2);
+      const line = renderStatusLine(s);
 
-    expect(line.trim().split("\n").length).toBe(1);
-    expect(line).toMatch(/^CMP /);
-    expect(line).toContain("R:");
-    expect(line).toContain("L:");
-    expect(line).toContain("O:");
-    expect(line).toContain("H:");
-    // Must NOT contain objective/prompt/note style text
-    expect(line).not.toContain("objective");
-    expect(line).not.toContain("prompt");
-    expect(line).not.toContain("note");
-    expect(line).toContain("next:");
+      expect(line.trim().split("\n").length).toBe(1);
+      expect(line).toMatch(/^CMP /);
+      expect(line).toContain("R:");
+      expect(line).toContain("L:");
+      expect(line).toContain("O:");
+      expect(line).toContain("H:");
+      // Must NOT contain objective/prompt/note style text
+      expect(line).not.toContain("objective");
+      expect(line).not.toContain("prompt");
+      expect(line).not.toContain("note");
+      expect(line).toContain("next:");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine without session does NOT include 'P:' segment", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-nosession-"));
+    try {
+      const s = buildStatus(tmp2);
+      const line = renderStatusLine(s);
+      expect(line).not.toContain("P:");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine with session profile includes 'P:<profile>' after mode", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-session-"));
+    try {
+      const s = buildStatus(tmp2);
+      const line = renderStatusLine(s, { mode: "strict", profile: "deep", oracle: { enabled: true } });
+      expect(line).toMatch(/^CMP strict · P:deep /);
+      expect(line).toContain("P:deep");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renderStatusLine session mode overrides config mode in display", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-sessionmode-"));
+    try {
+      const s = buildStatus(tmp2);
+      const line = renderStatusLine(s, { mode: "fast" });
+      expect(line).toMatch(/^CMP fast /);
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("H: segment uses tri-state gitHook value (off/warn/on)", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-hstate-"));
+    try {
+      const s = buildStatus(tmp2);
+      // No git repo → gitHook is "off"
+      const line = renderStatusLine(s);
+      expect(line).toContain("H:off");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
   });
 });
 
@@ -298,6 +403,18 @@ describe("statusEnvelope", () => {
       expect(typeof envelope.line).toBe("string");
       expect(envelope.line).toMatch(/^CMP /);
       expect(envelope.line).toContain("next:");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("statusEnvelope with session renders session mode and profile in line", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-envelope-session-"));
+    try {
+      const status = buildStatus(tmp2);
+      const envelope = statusEnvelope(status, { mode: "balanced", profile: "fast" });
+      expect(envelope.version).toBe(1);
+      expect(envelope.line).toMatch(/^CMP balanced · P:fast /);
     } finally {
       rmSync(tmp2, { recursive: true, force: true });
     }

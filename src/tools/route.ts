@@ -13,6 +13,7 @@ export function registerRouteTools(ctx: ServerToolContext): void {
         prompt: z.string().min(1),
         description: z.string().optional(),
         subagentType: z.string().optional(),
+        format: z.enum(["compact", "full"]).optional(),
       },
       annotations: {
         title: "Composer Route Decide",
@@ -22,7 +23,7 @@ export function registerRouteTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ prompt, description, subagentType }) => {
+    async ({ prompt, description, subagentType, format }) => {
       const hint = classifyDispatch({ prompt, description, subagentType });
       const isOracle = hint.route.target === "composer-oracle-plan" || hint.route.target === "composer-oracle-job-start";
       const oracleEscalation =
@@ -34,8 +35,21 @@ export function registerRouteTools(ctx: ServerToolContext): void {
           : null;
       const recommendedNextTools = nextToolsFor(hint.route.target);
       const statusLine = `route=${hint.route.target} class=${hint.route.taskClass} budget=${hint.contextBudget}`;
+      const full = format === "full";
+      const payload = full
+        ? { ...hint, oracleEscalation, recommendedNextTools, statusLine }
+        : {
+            target: hint.route.target,
+            taskClass: hint.route.taskClass,
+            contextBudget: hint.contextBudget,
+            confidence: hint.route.confidence,
+            requiresReview: hint.route.requiresReview,
+            recommendedNextTools,
+            statusLine,
+            ...(oracleEscalation ? { oracleEscalation } : {}),
+          };
       return {
-        content: [{ type: "text", text: JSON.stringify({ ...hint, oracleEscalation, recommendedNextTools, statusLine }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
       };
     },
   );
@@ -44,8 +58,9 @@ export function registerRouteTools(ctx: ServerToolContext): void {
 function nextToolsFor(target: string): string[] {
   switch (target) {
     case "composer-code-cli":
-    case "composer-code-chain":
       return ["composer_handoff_create", "composer_code_cli", "composer_review"];
+    case "composer-code-chain":
+      return ["composer_handoff_create", "composer_code_chain", "composer_review"];
     case "task-researcher-coder":
       return ["composer_research", "composer_handoff_create", "composer_code_cli", "composer_review"];
     case "task-reviewer":

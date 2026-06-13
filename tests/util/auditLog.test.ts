@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import {
+  AuditEventSchema,
   appendAuditEvent,
   readAuditEvents,
   readAuditFailures,
@@ -126,6 +127,26 @@ describe("auditLog", () => {
     expect(ev.note?.length).toBe(2000);
     expect(ev.objective?.length).toBe(500);
     expect(ev.route?.length).toBe(120);
+  });
+
+  it("a 9999-char note is still readable after cap-on-append", () => {
+    appendAuditEvent(projectRoot!, {
+      kind: "note",
+      runId: "r-readable",
+      note: "x".repeat(9999),
+    });
+    const events = readAuditEvents(projectRoot!, { runId: "r-readable" });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.note?.length).toBe(2000);
+  });
+
+  it("AuditEventSchema.safeParse rejects a raw object with a 600-char objective", () => {
+    const result = AuditEventSchema.safeParse({
+      ts: new Date().toISOString(),
+      kind: "note",
+      objective: "o".repeat(600),
+    });
+    expect(result.success).toBe(false);
   });
 
   it("readAuditFailures returns only failed or userCorrection events", () => {

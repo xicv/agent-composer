@@ -26,6 +26,7 @@ export interface ComposerStatus {
     codexReview: boolean;
     codexLifecycle: boolean;
     oraclePlanner: boolean;
+    gitHook: "off" | "warn" | "on";
     gitHookInstalled: boolean;
     composerDisabled: boolean;
   };
@@ -88,7 +89,7 @@ function recommend(params: {
   };
 }
 
-function detectGitHook(root: string): boolean {
+function detectGitHook(root: string): "off" | "warn" | "on" {
   const result = spawnSync("git", ["-C", root, "rev-parse", "--git-path", "hooks/pre-commit"], {
     encoding: "utf8",
     timeout: 10000,
@@ -99,14 +100,18 @@ function detectGitHook(root: string): boolean {
   } else {
     hookPath = resolve(root, result.stdout.trim());
   }
-  if (!existsSync(hookPath)) return false;
+  if (!existsSync(hookPath)) return "off";
   try {
     const stat = statSync(hookPath);
-    if (!stat.isFile()) return false;
+    if (!stat.isFile()) return "off";
+    const isExecutable = (stat.mode & 0o111) !== 0;
+    if (!isExecutable) return "off";
     const text = readFileSync(hookPath, "utf8");
-    return text.includes("precommit_codex_review.sh");
+    if (!text.includes("precommit_codex_review.sh")) return "off";
+    if (text.includes("--git-hook") || text.includes("COMPOSER_PRECOMMIT_GITHOOK")) return "on";
+    return "warn";
   } catch {
-    return false;
+    return "off";
   }
 }
 
@@ -143,11 +148,13 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
 
   const composerDisabled = isComposerDisabled({ projectDir: root });
 
+  const gitHook = detectGitHook(root);
   const integrations: ComposerStatus["integrations"] = {
     codexReview: Boolean(config?.codexReview?.enabled),
     codexLifecycle: Boolean(config?.codexLifecycle?.enabled),
     oraclePlanner: Boolean(config?.roles?.oraclePlanner),
-    gitHookInstalled: detectGitHook(root),
+    gitHook,
+    gitHookInstalled: gitHook !== "off",
     composerDisabled,
   };
 
@@ -228,20 +235,30 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
   };
 }
 
-export function renderStatusLine(s: ComposerStatus): string {
-  const mode = s.config.mode ?? (s.config.exists ? "custom" : "no-config");
+export interface StatusSessionView {
+  mode?: string;
+  oracle?: { enabled?: boolean; defaultMode?: string; requireExplicitTag?: boolean };
+  profile?: string;
+}
+
+export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView): string {
+  const mode = session?.mode ?? s.config.mode ?? (s.config.exists ? "custom" : "no-config");
   const R = s.integrations.codexReview ? "on" : "off";
   const L = s.integrations.codexLifecycle ? "on" : "off";
   const oJob = s.active.oracleJob;
   let O: string;
   if (oJob && (oJob.status === "running" || oJob.status === "queued")) {
     O = `busy ${Math.round(oJob.ageSeconds / 60)}m`;
+  } else if (session?.oracle?.enabled === true) {
+    O = "idle";
+  } else if (session?.oracle?.enabled === false) {
+    O = "off";
   } else if (s.integrations.oraclePlanner) {
     O = "idle";
   } else {
     O = "off";
   }
-  const H = s.integrations.gitHookInstalled ? "on" : "off";
+  const H = s.integrations.gitHook;
 
   const lastParts = [
     s.latest.tool ? `tool=${s.latest.tool}` : null,
@@ -260,7 +277,8 @@ export function renderStatusLine(s: ComposerStatus): string {
 
   const disabledPart = s.integrations.composerDisabled ? " · DISABLED" : "";
   const next = s.recommendation.nextAction ?? "-";
-  return `CMP ${mode} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · last:${last} · next:${next}`;
+  const profilePart = session?.profile ? ` · P:${session.profile}` : "";
+  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · last:${last} · next:${next}`;
 }
 
 export function renderStatusHuman(s: ComposerStatus): string {
@@ -279,7 +297,13 @@ export function renderStatusHuman(s: ComposerStatus): string {
       lines.push(`  oracle.requireExplicitTag: ${String(s.config.oracleRequireExplicitTag)}`);
     }
   }
-  lines.push(`  git pre-commit:   ${s.integrations.gitHookInstalled ? "installed" : "not installed"}`);
+  const gitHookLabel =
+    s.integrations.gitHook === "on"
+      ? "installed, blocking (--git-hook)"
+      : s.integrations.gitHook === "warn"
+        ? "installed, NOT --git-hook (Claude PreToolUse only)"
+        : "not installed";
+  lines.push(`  git pre-commit:   ${gitHookLabel}`);
   if (s.integrations.composerDisabled) {
     lines.push("  COMPOSER_DISABLED: true");
   }
@@ -310,8 +334,9 @@ export function renderStatusHuman(s: ComposerStatus): string {
 
 export function statusEnvelope(
   status: ComposerStatus,
+  session?: StatusSessionView,
 ): { version: number; line: string } & ComposerStatus {
-  return { version: 1, ...status, line: renderStatusLine(status) };
+  return { version: 1, ...status, line: renderStatusLine(status, session) };
 }
 
 export function runStatus(
@@ -327,6 +352,12 @@ export function runStatus(
         prevLen = line.length;
         process.stdout.write(`\r${padded}`);
       };
+      const cleanup = () => {
+        process.stdout.write("\n");
+        process.exit(0);
+      };
+      process.on("SIGINT", cleanup);
+      process.on("SIGTERM", cleanup);
       tick();
       setInterval(tick, 2000);
     } else {
