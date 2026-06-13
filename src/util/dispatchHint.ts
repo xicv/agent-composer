@@ -32,6 +32,7 @@ export type ProviderRole =
   | "reviewer"
   | "reviewerClaude"
   | "oraclePlanner";
+export type ContextBudget = "inline" | "handoff" | "scoped-diff" | "full-brief" | "oracle-brief";
 
 export interface DispatchSignals {
   promptChars: number;
@@ -59,6 +60,7 @@ export interface DispatchHint {
   tier: Tier;
   reasoning: Reasoning;
   promptSize: PromptSize;
+  contextBudget: ContextBudget;
   recommendDispatch: boolean;
   route: RoutePolicy;
   rationale: string;
@@ -189,10 +191,13 @@ export function classifyDispatch(input: ClassifyInput): DispatchHint {
       ? "full"
       : "lite";
 
+  const contextBudget = contextBudgetFor(route.target, promptSize);
+
   return {
     tier,
     reasoning,
     promptSize,
+    contextBudget,
     recommendDispatch,
     route,
     rationale: rationaleFor({ recommendDispatch, route, signals }),
@@ -381,6 +386,28 @@ function classifyRoute(input: {
     confidence: 0.55,
     rationale: "No strong route signal; default to inline to avoid unnecessary cold dispatch.",
   });
+}
+
+function contextBudgetFor(target: RouteTarget, promptSize: PromptSize): ContextBudget {
+  switch (target) {
+    case "inline":
+    case "refuse":
+    case "review-inline":
+      return "inline";
+    case "composer-oracle-plan":
+    case "composer-oracle-job-start":
+      return "oracle-brief";
+    case "task-reviewer":
+    case "composer-review-claude":
+      return "scoped-diff";
+    case "task-researcher-coder":
+      return "full-brief";
+    case "composer-code-cli":
+    case "composer-code-chain":
+      return promptSize === "full" ? "full-brief" : "handoff";
+    default:
+      return "handoff";
+  }
 }
 
 function routePolicy(policy: Omit<RoutePolicy, "requiresReview"> & { requiresReview?: boolean }): RoutePolicy {

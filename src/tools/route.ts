@@ -32,9 +32,30 @@ export function registerRouteTools(ctx: ServerToolContext): void {
               reason: "High complexity — consider the opt-in Oracle planning lane (tag [oracle:plan]).",
             }
           : null;
+      const recommendedNextTools = nextToolsFor(hint.route.target);
+      const statusLine = `route=${hint.route.target} class=${hint.route.taskClass} budget=${hint.contextBudget}`;
       return {
-        content: [{ type: "text", text: JSON.stringify({ ...hint, oracleEscalation }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ ...hint, oracleEscalation, recommendedNextTools, statusLine }, null, 2) }],
       };
     },
   );
+}
+
+function nextToolsFor(target: string): string[] {
+  switch (target) {
+    case "composer-code-cli":
+    case "composer-code-chain":
+      return ["composer_handoff_create", "composer_code_cli", "composer_review"];
+    case "task-researcher-coder":
+      return ["composer_research", "composer_handoff_create", "composer_code_cli", "composer_review"];
+    case "task-reviewer":
+    case "composer-review-claude":
+      return ["composer_review"];
+    case "composer-oracle-plan":
+      return ["composer_oracle_plan"];
+    case "composer-oracle-job-start":
+      return ["composer_oracle_job_start", "composer_oracle_job_result"];
+    default:
+      return [];
+  }
 }

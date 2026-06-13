@@ -1524,8 +1524,16 @@ describe("composer MCP server", () => {
     });
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     expect(block?.type).toBe("text");
-    const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
+    const parsed = JSON.parse(block?.text ?? "{}") as {
+      route: { target: string };
+      contextBudget: string;
+      recommendedNextTools: string[];
+      statusLine: string;
+    };
     expect(parsed.route.target).toBe("composer-oracle-plan");
+    expect(parsed.contextBudget).toBe("oracle-brief");
+    expect(Array.isArray(parsed.recommendedNextTools)).toBe(true);
+    expect(parsed.statusLine).toContain("budget=");
   });
 
   it("composer_route_decide routes a simple implementation prompt to composer-code-cli", async () => {
@@ -1536,8 +1544,17 @@ describe("composer MCP server", () => {
     });
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     expect(block?.type).toBe("text");
-    const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
+    const parsed = JSON.parse(block?.text ?? "{}") as {
+      route: { target: string };
+      contextBudget: string;
+      recommendedNextTools: string[];
+      statusLine: string;
+    };
     expect(parsed.route.target).toBe("composer-code-cli");
+    expect(parsed.contextBudget).toMatch(/^(full-brief|handoff)$/);
+    expect(Array.isArray(parsed.recommendedNextTools)).toBe(true);
+    expect(parsed.recommendedNextTools.length).toBeGreaterThan(0);
+    expect(parsed.statusLine).toContain("budget=");
   });
 
   it("composer_audit_record and composer_audit_read round-trip through the audit trail", async () => {
