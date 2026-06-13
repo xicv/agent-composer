@@ -114,12 +114,12 @@ describe("classifyDispatch", () => {
   });
 
   describe("Oracle planning lane", () => {
-    it("routes [oracle:plan] to async job-start with premium full sizing", () => {
+    it("routes [oracle:plan] to synchronous oracle plan (sync default)", () => {
       const hint = classifyDispatch({
         prompt: "[oracle:plan] design the new auth module",
       });
 
-      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.target).toBe("composer-oracle-plan");
       expect(hint.route.providerRole).toBe("oraclePlanner");
       expect(hint.route.taskClass).toBe("oracle-plan");
       expect(hint.tier).toBe("premium");
@@ -145,9 +145,47 @@ describe("classifyDispatch", () => {
       expect(hint.route.providerRole).toBe("oraclePlanner");
     });
 
-    it("routes [oracle:research] to async job-start (long mode)", () => {
+    it("routes [oracle:research] to async job-start (research always async)", () => {
       const hint = classifyDispatch({
         prompt: "[oracle:research] explore distributed tracing options for our stack",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("routes [oracle:deep] with short prompt to synchronous oracle plan", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:deep] analyze the retry strategy",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-plan");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("routes [oracle:plan] with explicit async request to async job-start", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:plan] design X — don't block, run in the background",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+    });
+
+    it("routes [oracle:async] bare marker to async job-start as standard mode", () => {
+      const hint = classifyDispatch({
+        prompt: "[oracle:async] design X",
+      });
+
+      expect(hint.route.target).toBe("composer-oracle-job-start");
+      expect(hint.route.providerRole).toBe("oraclePlanner");
+      expect(hint.route.taskClass).toBe("oracle-plan");
+    });
+
+    it("routes a very large [oracle:plan] prompt (>6000 chars) to async job-start", () => {
+      const bigBody = "x".repeat(6100);
+      const hint = classifyDispatch({
+        prompt: `[oracle:plan] design the migration — ${bigBody}`,
       });
 
       expect(hint.route.target).toBe("composer-oracle-job-start");

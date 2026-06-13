@@ -145,7 +145,11 @@ export function registerConfigTools(ctx: ServerToolContext): void {
           .optional(),
         oracle: z
           .object({
-            enabled: z.boolean(),
+            enabled: z.boolean().optional(),
+            defaultMode: z
+              .enum(["auto", "quick", "standard", "deep", "plan", "review", "debug", "research"])
+              .optional(),
+            requireExplicitTag: z.boolean().optional(),
           })
           .strict()
           .optional(),

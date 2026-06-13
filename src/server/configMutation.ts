@@ -52,7 +52,7 @@ export function applyComposerConfigPatch(
   patch: {
     codexLifecycle?: unknown;
     codexReview?: unknown;
-    oracle?: { enabled?: boolean };
+    oracle?: { enabled?: boolean; defaultMode?: string; requireExplicitTag?: boolean };
   },
 ): Record<string, unknown> {
   const next = cloneJsonObject(before);
@@ -68,18 +68,26 @@ export function applyComposerConfigPatch(
       readRecord(patch.codexReview),
     );
   }
-  if (patch.oracle?.enabled !== undefined) {
-    const roles = readRecord(next["roles"]);
-    if (patch.oracle.enabled) {
-      if (!isRecord(roles["oraclePlanner"])) {
-        roles["oraclePlanner"] = cloneJsonObject(
-          ORACLE_PLANNER_ROLE as unknown as Record<string, unknown>,
-        );
+  if (patch.oracle) {
+    if (patch.oracle.enabled !== undefined) {
+      const roles = readRecord(next["roles"]);
+      if (patch.oracle.enabled) {
+        if (!isRecord(roles["oraclePlanner"])) {
+          roles["oraclePlanner"] = cloneJsonObject(
+            ORACLE_PLANNER_ROLE as unknown as Record<string, unknown>,
+          );
+        }
+      } else {
+        delete roles["oraclePlanner"];
       }
-    } else {
-      delete roles["oraclePlanner"];
+      next["roles"] = roles;
     }
-    next["roles"] = roles;
+    const behavior: Record<string, unknown> = {};
+    if (patch.oracle.defaultMode !== undefined) behavior["defaultMode"] = patch.oracle.defaultMode;
+    if (patch.oracle.requireExplicitTag !== undefined) behavior["requireExplicitTag"] = patch.oracle.requireExplicitTag;
+    if (Object.keys(behavior).length > 0) {
+      next["oracle"] = deepMergeRecords(readRecord(next["oracle"]), behavior);
+    }
   }
   return next;
 }

@@ -106,8 +106,9 @@ const BUG_EXPLAIN = /\b(find|explain|identify)\b.{0,40}\bbug\b|\boff-by-one\b|\b
 const RESEARCH = /\b(research|look up|lookup|docs?|documentation|best practice|current|latest|web search)\b/i;
 const WRITE_REQUEST = /\b(add|implement|create|edit|modify|refactor|fix|write|update|change)\b/i;
 const DIFF_OR_CODE_BLOCK = /```|^diff --git |^@@ |^(?:---|\+\+\+) /m;
-const ORACLE_MARKER = /\[oracle:(quick|standard|deep|plan|review|debug|research)\]/i;
+const ORACLE_MARKER = /\[oracle:(quick|standard|deep|plan|review|debug|research|async)\]/i;
 const ORACLE_PHRASE = /\b(?:ask the oracle|consult the oracle|oracle planner|oracle plan|use chatgpt pro|chatgpt pro|gpt-5\.5-pro)\b/i;
+const ORACLE_ASYNC = /\[oracle:async\]|\bdon'?t block\b|\bdo not block\b|\bin the background\b|\brun (?:this )?async\b|\bnon[- ]blocking\b|\basynchronous\b/i;
 
 const HIGH_COMPLEXITY_TERMS: ReadonlyArray<RegExp> = [
   /\brefactor(?:ing|s|ed)?\b/i,
@@ -266,7 +267,12 @@ type OracleMode = "quick" | "standard" | "deep" | "plan" | "review" | "debug" | 
 
 function oracleModeFrom(corpus: string): OracleMode | null {
   const marked = ORACLE_MARKER.exec(corpus);
-  if (marked) return marked[1]!.toLowerCase() as OracleMode;
+  if (marked) {
+    const captured = marked[1]!.toLowerCase();
+    // [oracle:async] is a bare async marker — treat it as standard mode; the
+    // ORACLE_ASYNC regex will independently flip it to an async dispatch.
+    return captured === "async" ? "standard" : (captured as OracleMode);
+  }
   if (ORACLE_PHRASE.test(corpus)) return "standard";
   return null;
 }
@@ -293,16 +299,16 @@ function classifyRoute(input: {
 
   const oracleMode = oracleModeFrom(corpus);
   if (oracleMode) {
-    const longMode = oracleMode === "deep" || oracleMode === "plan" || oracleMode === "research";
-    const useAsync = longMode || signals.promptChars > 4000;
+    const asyncRequested = ORACLE_ASYNC.test(corpus);
+    const useAsync = asyncRequested || oracleMode === "research" || signals.promptChars > 6000;
     return routePolicy({
       taskClass: "oracle-plan",
       target: useAsync ? "composer-oracle-job-start" : "composer-oracle-plan",
       providerRole: "oraclePlanner",
       confidence: 0.9,
       rationale: useAsync
-        ? `Explicit Oracle ${oracleMode} request — long-running; start an async Oracle job and pull the result later.`
-        : `Explicit Oracle ${oracleMode} request — run the synchronous Oracle planning lane.`,
+        ? `Explicit Oracle ${oracleMode} request — async dispatch (${asyncRequested ? "explicitly requested" : oracleMode === "research" ? "research mode" : "very large prompt"}); start an async Oracle job and pull the result later.`
+        : `Explicit Oracle ${oracleMode} request — synchronous dispatch (planning/analysis typically blocks the next step; use [oracle:async] or \`don't block\` to force async).`,
     });
   }
 
