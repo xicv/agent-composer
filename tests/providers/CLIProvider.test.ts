@@ -522,6 +522,31 @@ describe("CLIProvider (replay against recorded agy tape)", () => {
   );
 });
 
+describe("CLIProvider (real spawn — AbortSignal escalation wiring)", () => {
+  it("rejects when AbortSignal is already aborted before spawn", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const p = new CLIProvider({
+      cli: ["node", "-e", "setInterval(() => {}, 1000)"],
+      timeoutMs: 10_000,
+    });
+    await expect(p.execute({ prompt: "", signal: ac.signal })).rejects.toThrow();
+  });
+
+  it("rejects when AbortSignal fires after spawn starts", async () => {
+    const ac = new AbortController();
+    const p = new CLIProvider({
+      cli: ["node", "-e", "setInterval(() => {}, 1000)"],
+      timeoutMs: 10_000,
+    });
+    const execPromise = p.execute({ prompt: "", signal: ac.signal });
+    // Let the child start, then abort.
+    await new Promise<void>((r) => setTimeout(r, 50));
+    ac.abort();
+    await expect(execPromise).rejects.toThrow();
+  });
+});
+
 describe("CLIProvider retry-on-transient", () => {
   function makeFlakyExec(
     outcomes: Array<{ throw?: string; stdout?: string }>,

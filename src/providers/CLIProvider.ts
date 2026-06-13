@@ -50,22 +50,44 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
       detached: process.platform !== "win32",
     });
 
+    const escalateKill = () => {
+      if (typeof child.pid === "number" && process.platform !== "win32") {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+          return;
+        } catch {
+          // group already gone — fall back to direct kill
+        }
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // child already exited
+      }
+    };
+
     const killChildTree = () => {
       if (typeof child.pid === "number" && process.platform !== "win32") {
         try {
           process.kill(-child.pid, "SIGTERM");
-          return;
         } catch {
-          // group kill failed (already gone / not a group leader) — fall back
+          child.kill("SIGTERM");
         }
+      } else {
+        child.kill("SIGTERM");
       }
-      child.kill("SIGTERM");
+      // Escalate to SIGKILL if the tree ignores SIGTERM within the grace window.
+      if (!killTimer) {
+        killTimer = setTimeout(escalateKill, KILL_GRACE_MS);
+        killTimer.unref?.();
+      }
     };
 
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let bufferExceeded = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
     const timer =
       typeof timeoutMs === "number" && timeoutMs > 0
@@ -74,6 +96,14 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
             killChildTree();
           }, timeoutMs)
         : null;
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        killChildTree();
+      } else {
+        options.signal.addEventListener("abort", killChildTree, { once: true });
+      }
+    }
 
     const checkBuffer = (kind: "stdout" | "stderr", payload: string) => {
       if (payload.length > maxBuffer) {
@@ -95,11 +125,13 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
 
     child.once("error", (err) => {
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       reject(err);
     });
 
     child.once("close", (code, signal) => {
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       if (timedOut) {
         return reject(
           new Error(`CLIProvider: '${file}' timed out after ${timeoutMs}ms`),
@@ -141,6 +173,7 @@ const DEFAULT_TIMEOUT_MS = 15 * 60_000; // Long enough for Codex apply flows, st
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024; // 32 MB.
 const DEFAULT_RETRIES = 2; // agy/CLI agents occasionally "time out waiting for response" — retry transient failures.
 const DEFAULT_MAX_RESULT_CHARS = 16_000;
+const KILL_GRACE_MS = 5000; // SIGTERM grace before escalating to SIGKILL on a stuck child tree.
 
 export class CLIProvider implements IProvider {
   readonly id: ProviderId = "cli";
