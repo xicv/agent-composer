@@ -1182,6 +1182,148 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("composer_config_set oracle.enabled:true adds oraclePlanner role to config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configWithoutOracle = parseConfig({
+        roles: {
+          researcher: { provider: "mock", model: "researcher-mock" },
+          coder: { provider: "mock", model: "coder-mock" },
+          reviewer: { provider: "mock", model: "reviewer-mock" },
+          reviewerClaude: { provider: "mock", model: "reviewer-claude-mock" },
+          coderCli: { provider: "mock", model: "coder-cli-mock" },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(configWithoutOracle, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, configWithoutOracle, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          oracle: { enabled: true },
+        },
+      });
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean; config: { roles: Record<string, unknown> } };
+      expect(setParsed.changed).toBe(true);
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as { roles: Record<string, unknown> };
+      expect(written.roles["oraclePlanner"]).toBeDefined();
+      const role = written.roles["oraclePlanner"] as { provider: string; cli: string[] };
+      expect(role.provider).toBe("cli");
+      expect(role.cli).toContain("scripts/oracle-plan-mcp.sh");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set oracle.enabled:true does not clobber an existing oraclePlanner role", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configWithOracle = parseConfig({
+        roles: {
+          researcher: { provider: "mock", model: "researcher-mock" },
+          coder: { provider: "mock", model: "coder-mock" },
+          reviewer: { provider: "mock", model: "reviewer-mock" },
+          reviewerClaude: { provider: "mock", model: "reviewer-claude-mock" },
+          coderCli: { provider: "mock", model: "coder-cli-mock" },
+          oraclePlanner: { provider: "mock", model: "custom-oracle" },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(configWithOracle, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, configWithOracle, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          oracle: { enabled: true },
+        },
+      });
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean };
+      // No change because oraclePlanner already present
+      expect(setParsed.changed).toBe(false);
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as {
+        roles: Record<string, { provider: string; model?: string }>;
+      };
+      expect(written.roles["oraclePlanner"]?.provider).toBe("mock");
+      expect(written.roles["oraclePlanner"]?.model).toBe("custom-oracle");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set oracle.enabled:false removes oraclePlanner role from config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(allMockConfig, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, allMockConfig, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          oracle: { enabled: false },
+        },
+      });
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean };
+      expect(setParsed.changed).toBe(true);
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as { roles: Record<string, unknown> };
+      expect(written.roles["oraclePlanner"]).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set oracle dryRun:true does not write the file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configWithoutOracle = parseConfig({
+        roles: {
+          researcher: { provider: "mock", model: "researcher-mock" },
+          coder: { provider: "mock", model: "coder-mock" },
+          reviewer: { provider: "mock", model: "reviewer-mock" },
+          reviewerClaude: { provider: "mock", model: "reviewer-claude-mock" },
+          coderCli: { provider: "mock", model: "coder-cli-mock" },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      const originalContent = `${JSON.stringify(configWithoutOracle, null, 2)}\n`;
+      writeFileSync(configPath, originalContent, "utf8");
+      const { client } = await bootClient(root, configWithoutOracle, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          dryRun: true,
+          oracle: { enabled: true },
+        },
+      });
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean; dryRun: boolean };
+      expect(setParsed.dryRun).toBe(true);
+      expect(setParsed.changed).toBe(true);
+
+      // File must be unchanged on disk
+      expect(readFileSync(configPath, "utf8")).toBe(originalContent);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("worker tools can receive shared handoff context by path", async () => {
     const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
     try {

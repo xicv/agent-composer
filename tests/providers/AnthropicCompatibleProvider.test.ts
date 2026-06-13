@@ -9,24 +9,36 @@ import { TapeProvider, loadTape } from "../util/recorder.js";
 
 function makeFakeClient(): {
   client: AnthropicLike;
-  create: ReturnType<typeof vi.fn>;
+  stream: ReturnType<typeof vi.fn>;
 } {
-  const create = vi.fn();
+  const stream = vi.fn().mockReturnValue({
+    finalMessage: () => Promise.resolve({
+      content: [{ type: "text", text: "" }],
+      usage: { input_tokens: 0, output_tokens: 0 },
+    }),
+  });
   return {
-    create,
-    client: { messages: { create } },
+    stream,
+    client: { messages: { stream } },
   };
+}
+
+function setStreamResult(
+  stream: ReturnType<typeof vi.fn>,
+  result: { content: Array<{ type: string; text?: string; id?: string; name?: string }>; usage: { input_tokens: number; output_tokens: number } },
+): void {
+  stream.mockReturnValue({ finalMessage: () => Promise.resolve(result) });
 }
 
 describe("AnthropicCompatibleProvider (DI client mocked)", () => {
   let factoryCalls: Array<{ baseURL: string; apiKey: string }>;
-  let create: ReturnType<typeof vi.fn>;
+  let stream: ReturnType<typeof vi.fn>;
   let fakeClient: AnthropicLike;
 
   beforeEach(() => {
     factoryCalls = [];
     const f = makeFakeClient();
-    create = f.create;
+    stream = f.stream;
     fakeClient = f.client;
   });
 
@@ -95,16 +107,16 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     await expect(buildProvider().healthCheck()).resolves.toBe(true);
   });
 
-  it("execute() forwards prompt + maxTokens to messages.create", async () => {
-    create.mockResolvedValue({
+  it("execute() forwards prompt + maxTokens to messages.stream", async () => {
+    setStreamResult(stream, {
       content: [{ type: "text", text: "OK" }],
       usage: { input_tokens: 5, output_tokens: 1 },
     });
     const p = buildProvider();
     const out = await p.execute({ prompt: "hello", maxTokens: 99 });
 
-    expect(create).toHaveBeenCalledTimes(1);
-    const params = create.mock.calls[0]?.[0];
+    expect(stream).toHaveBeenCalledTimes(1);
+    const params = stream.mock.calls[0]?.[0];
     expect(params).toMatchObject({
       model: "glm-4.6",
       max_tokens: 99,
@@ -115,24 +127,24 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
   });
 
   it("execute() defaults max_tokens to 4096 when not provided", async () => {
-    create.mockResolvedValue({
+    setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     const p = buildProvider();
     await p.execute({ prompt: "p" });
-    const params = create.mock.calls[0]?.[0];
+    const params = stream.mock.calls[0]?.[0];
     expect(params?.max_tokens).toBe(4096);
   });
 
   it("execute() prepends context as a separate text block", async () => {
-    create.mockResolvedValue({
+    setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     const p = buildProvider();
     await p.execute({ prompt: "p", context: "CTX-PAYLOAD" });
-    const params = create.mock.calls[0]?.[0];
+    const params = stream.mock.calls[0]?.[0];
     const userMsg = params?.messages?.[0];
     const flat = JSON.stringify(userMsg);
     expect(flat).toContain("CTX-PAYLOAD");
@@ -140,7 +152,7 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
   });
 
   it("execute() joins multiple text blocks in the response", async () => {
-    create.mockResolvedValue({
+    setStreamResult(stream, {
       content: [
         { type: "text", text: "Part A. " },
         { type: "text", text: "Part B." },
@@ -154,7 +166,7 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
   });
 
   it("execute() forwards thinking block when type=enabled", async () => {
-    create.mockResolvedValue({
+    setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
@@ -167,19 +179,19 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
       clientFactory: () => fakeClient,
     });
     await p.execute({ prompt: "p" });
-    const params = create.mock.calls[0]?.[0];
+    const params = stream.mock.calls[0]?.[0];
     expect(params?.thinking).toEqual({ type: "enabled", budget_tokens: 32768 });
     expect(params?.max_tokens).toBe(65536);
   });
 
   it("execute() omits thinking block when not configured", async () => {
-    create.mockResolvedValue({
+    setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     const p = buildProvider();
     await p.execute({ prompt: "p" });
-    const params = create.mock.calls[0]?.[0];
+    const params = stream.mock.calls[0]?.[0];
     expect(params?.thinking).toBeUndefined();
   });
 
@@ -209,6 +221,30 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
           clientFactory: () => fakeClient,
         }),
     ).toThrow(/must be less than max_tokens/);
+  });
+
+  it("execute() passes AbortSignal as 2nd arg to stream when provided", async () => {
+    setStreamResult(stream, {
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const controller = new AbortController();
+    const { signal } = controller;
+    const p = buildProvider();
+    await p.execute({ prompt: "p", signal });
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(stream.mock.calls[0]?.[1]).toEqual({ signal });
+  });
+
+  it("execute() passes undefined as 2nd arg to stream when no signal", async () => {
+    setStreamResult(stream, {
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const p = buildProvider();
+    await p.execute({ prompt: "p" });
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(stream.mock.calls[0]?.[1]).toBeUndefined();
   });
 });
 

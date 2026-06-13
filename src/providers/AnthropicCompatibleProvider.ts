@@ -2,13 +2,8 @@
 // Anthropic-compatible endpoint and any future compatible host.
 // Real network calls happen here; tests inject a fake via clientFactory.
 //
-// KNOWN BUG: provider uses non-streaming messages.create. The Anthropic SDK
-// refuses non-streaming requests when configured size suggests >10 min
-// duration ("Streaming is required for operations that may take longer than
-// 10 minutes"). Workaround: keep role.maxTokens ≲ 16k and
-// role.thinking.budgetTokens ≲ 8k. Proper fix: switch to .stream()
-// (or .create({stream:true})) and aggregate events — requires updating
-// AnthropicLike interface + test mocks.
+// Uses messages.stream().finalMessage() so long/extended-thinking operations
+// are not refused by the SDK's 10-minute non-streaming guard.
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -19,9 +14,15 @@ import type {
 } from "./IProvider.js";
 
 /** Minimal shape we need from the Anthropic client — eases DI in tests. */
+export interface AnthropicMessageStream {
+  finalMessage: () => Promise<AnthropicCreateResult>;
+}
 export interface AnthropicLike {
   messages: {
-    create: (params: AnthropicCreateParams) => Promise<AnthropicCreateResult>;
+    stream: (
+      params: AnthropicCreateParams,
+      options?: { signal?: AbortSignal },
+    ) => AnthropicMessageStream;
   };
 }
 
@@ -123,7 +124,11 @@ export class AnthropicCompatibleProvider implements IProvider {
     if (this.thinking) params.thinking = this.thinking;
 
     const startedAt = Date.now();
-    const msg = await this.client.messages.create(params);
+    const stream = this.client.messages.stream(
+      params,
+      input.signal ? { signal: input.signal } : undefined,
+    );
+    const msg = await stream.finalMessage();
     const durationMs = Date.now() - startedAt;
 
     // Best-effort GLM cache-hit telemetry
