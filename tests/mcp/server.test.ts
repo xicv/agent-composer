@@ -122,6 +122,7 @@ describe("composer MCP server", () => {
       "composer_route_decide",
       "composer_session_get",
       "composer_session_set",
+      "composer_status",
       "composer_workflow_plan",
     ]);
   });
@@ -1849,6 +1850,76 @@ describe("composer MCP server", () => {
         arguments: { prompt: "apply a fix", profile: "fast" },
       });
       expect(result.isError).not.toBe(true);
+    });
+  });
+
+  describe("composer_status", () => {
+    it("returns integrations + config in JSON", async () => {
+      const root = mkdtempSync(join(tmpdir(), "composer-status-mcp-"));
+      const previousStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+      const previousComposerConfig = process.env["COMPOSER_CONFIG"];
+      const stateDir = mkdtempSync(join(tmpdir(), "composer-status-mcp-state-"));
+      process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
+      delete process.env["COMPOSER_CONFIG"];
+      try {
+        const { client } = await bootClient(root);
+        const result = await client.callTool({
+          name: "composer_status",
+          arguments: {},
+        });
+        expect(result.isError).not.toBe(true);
+        const block = (result.content as Array<{ type: string; text: string }>)[0];
+        const parsed = JSON.parse(block?.text ?? "{}") as {
+          config: { exists: boolean };
+          integrations: { codexReview: boolean; codexLifecycle: boolean };
+          active: Record<string, unknown>;
+          recommendation: { nextAction: string };
+        };
+        expect(parsed.config.exists).toBe(false);
+        expect(parsed.integrations.codexReview).toBe(false);
+        expect(typeof parsed.active).toBe("object");
+        expect(parsed.recommendation.nextAction).toBe("agent-composer init");
+      } finally {
+        if (previousStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+        else process.env[COMPOSER_STATE_DIR_ENV] = previousStateDir;
+        if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
+        else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+        rmSync(root, { recursive: true, force: true });
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("overlays live session when session is set before calling composer_status", async () => {
+      const root = mkdtempSync(join(tmpdir(), "composer-status-session-"));
+      const previousStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+      const previousComposerConfig = process.env["COMPOSER_CONFIG"];
+      const stateDir = mkdtempSync(join(tmpdir(), "composer-status-session-state-"));
+      process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
+      delete process.env["COMPOSER_CONFIG"];
+      try {
+        const { client } = await bootClient(root);
+        await client.callTool({
+          name: "composer_session_set",
+          arguments: { mode: "fast" },
+        });
+        const result = await client.callTool({
+          name: "composer_status",
+          arguments: {},
+        });
+        expect(result.isError).not.toBe(true);
+        const block = (result.content as Array<{ type: string; text: string }>)[0];
+        const parsed = JSON.parse(block?.text ?? "{}") as {
+          session?: { mode?: string };
+        };
+        expect(parsed.session?.mode).toBe("fast");
+      } finally {
+        if (previousStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+        else process.env[COMPOSER_STATE_DIR_ENV] = previousStateDir;
+        if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
+        else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+        rmSync(root, { recursive: true, force: true });
+        rmSync(stateDir, { recursive: true, force: true });
+      }
     });
   });
 });

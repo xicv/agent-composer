@@ -139,3 +139,8 @@ export const SESSION_SET_DESCRIPTION = "Set EPHEMERAL session overrides for this
 export const SESSION_GET_DESCRIPTION = "Read the current ephemeral session overrides (mode/oracle/profile) for this server process.";
 export const COMPOSER_AUDIT_SUMMARY = "composer_audit_summary" as const;
 export const AUDIT_SUMMARY_DESCRIPTION = "Aggregate the Composer audit trail into counts by kind/status/route, review verdicts, test pass/fail, user corrections, and recent failures. Use to see route accuracy and outcome trends at a glance (evidence for /evolve).";
+export const COMPOSER_STATUS = "composer_status" as const;
+export const STATUS_DESCRIPTION =
+  "Read a structured snapshot of Composer state: mode, integrations (review/lifecycle/oracle/git-hook/disabled), " +
+  "active Oracle/Codex jobs, latest audit event, live session overrides, and a recommended next action. " +
+  "Use to see what's happening without reading logs.";
