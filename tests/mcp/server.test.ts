@@ -1420,4 +1420,125 @@ describe("composer MCP server", () => {
     });
     expect(result.isError).toBe(true);
   });
+
+  describe("oracle config — requireExplicitTag + defaultMode", () => {
+    it("composer_oracle_plan rejects a plain prompt when requireExplicitTag is true (no mode, no tag)", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        oracle: { requireExplicitTag: true },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "design the auth module" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("requireExplicitTag");
+    });
+
+    it("composer_oracle_plan succeeds with explicit mode when requireExplicitTag is true", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        oracle: { requireExplicitTag: true },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "design the auth module", mode: "plan" },
+      });
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      expect(block?.text).toContain("[oracle:plan]");
+    });
+
+    it("composer_oracle_plan succeeds with an inline [oracle:<mode>] tag when requireExplicitTag is true", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        oracle: { requireExplicitTag: true },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "[oracle:deep] design the storage layer" },
+      });
+      expect(result.isError).not.toBe(true);
+    });
+
+    it("composer_oracle_plan applies oracle.defaultMode when no mode arg is given", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        oracle: { defaultMode: "deep" },
+      });
+      const capturedPrompts: string[] = [];
+      const capturingProvider: import("../../src/providers/IProvider.js").IProvider = {
+        id: "mock",
+        modelLabel: "capturing-mock",
+        async healthCheck() { return true; },
+        async execute(input) {
+          capturedPrompts.push(input.prompt);
+          return { text: `mock:${input.prompt}` };
+        },
+      };
+      const { client } = await bootClientWithProviders(
+        { oraclePlanner: capturingProvider },
+        undefined,
+        config,
+      );
+      const result = await client.callTool({
+        name: "composer_oracle_plan",
+        arguments: { prompt: "plan the billing adapter" },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(capturedPrompts[0]).toContain("[oracle:deep]");
+      expect(capturedPrompts[0]).toContain("plan the billing adapter");
+    });
+
+    it("composer_oracle_job_start rejects a plain prompt when requireExplicitTag is true", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        oracle: { requireExplicitTag: true },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_oracle_job_start",
+        arguments: { prompt: "research the storage landscape" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("requireExplicitTag");
+    });
+  });
+
+  describe("codexProfiles — composer_code_cli profile parameter", () => {
+    it("composer_code_cli fails with an unknown profile name", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexProfiles: {
+          fast: { model: "gpt-5.4-mini" },
+        },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "apply a fix", profile: "nonexistent" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain("unknown profile");
+      expect(JSON.stringify(result.content)).toContain("nonexistent");
+    });
+
+    it("composer_code_cli succeeds with a known profile", async () => {
+      const config = parseConfig({
+        ...allMockConfig,
+        codexProfiles: {
+          fast: { model: "gpt-5.4-mini" },
+        },
+      });
+      const { client } = await bootClient(undefined, config);
+      const result = await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "apply a fix", profile: "fast" },
+      });
+      expect(result.isError).not.toBe(true);
+    });
+  });
 });

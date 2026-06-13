@@ -14,6 +14,7 @@ import {
   isGlobalComposerConfigPath,
 } from "../server/configMutation.js";
 import { parseConfig } from "../config/loader.js";
+import { modePatch } from "../config/modes.js";
 import type { ServerToolContext } from "./context.js";
 
 export function registerConfigTools(ctx: ServerToolContext): void {
@@ -148,6 +149,7 @@ export function registerConfigTools(ctx: ServerToolContext): void {
           })
           .strict()
           .optional(),
+        mode: z.enum(["fast", "balanced", "strict"]).optional(),
       },
       annotations: {
         title: "Composer Config Set",
@@ -157,7 +159,7 @@ export function registerConfigTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ scope, dryRun, codexLifecycle, codexReview, oracle }) => {
+    async ({ scope, dryRun, codexLifecycle, codexReview, oracle, mode }) => {
       const requestedScope = scope ?? "active";
       const target = resolveComposerConfigTarget(root, ctx.options.configPath, requestedScope);
       if (requestedScope === "active" && isGlobalComposerConfigPath(target.path)) {
@@ -170,7 +172,12 @@ export function registerConfigTools(ctx: ServerToolContext): void {
       }
       const beforeRaw = fs.readFileSync(target.path, "utf8");
       const before = JSON.parse(beforeRaw) as Record<string, unknown>;
-      const next = applyComposerConfigPatch(before, { codexLifecycle, codexReview, oracle });
+      const preset = mode ? modePatch(mode) : undefined;
+      const next = applyComposerConfigPatch(before, {
+        codexLifecycle: codexLifecycle ?? preset?.codexLifecycle,
+        codexReview: codexReview ?? preset?.codexReview,
+        oracle,
+      });
       const parsed = parseConfig(next);
       const nextRaw = `${JSON.stringify(parsed, null, 2)}\n`;
       const changed = beforeRaw !== nextRaw;
