@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalConfigDir } from "../config/paths.js";
+import { ORACLE_PLANNER_ROLE } from "../config/oracleRole.js";
 import { installPluginAssets } from "./install-plugin.js";
 
 export type InitStepStatus = "created" | "updated" | "skipped";
@@ -190,14 +191,6 @@ const ORACLE_SCRIPTS = [
   "composer-oracle-router-safe.sh",
   "oracle-codex-handoff-safe.sh",
 ];
-
-const ORACLE_PLANNER_ROLE = {
-  provider: "cli",
-  cli: ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
-  timeoutMs: 1500000,
-  retries: 0,
-  maxResultChars: 14000,
-};
 
 export function defaultOracleSourceDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -399,7 +392,7 @@ function ensureOraclePlannerRole(cwd: string): InitStep {
   if (config.roles["oraclePlanner"]) {
     return { name: "oraclePlanner role", status: "skipped", path, reason: "already present" };
   }
-  config.roles["oraclePlanner"] = ORACLE_PLANNER_ROLE;
+  config.roles["oraclePlanner"] = { ...ORACLE_PLANNER_ROLE, cli: [...ORACLE_PLANNER_ROLE.cli] };
   writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf8");
   return { name: "oraclePlanner role", status: "updated", path, reason: "added opt-in Oracle role" };
 }

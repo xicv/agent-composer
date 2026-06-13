@@ -84,7 +84,8 @@ export const CONFIG_GET_DESCRIPTION =
 export const CONFIG_SET_DESCRIPTION =
   "Safely update Composer config toggles from Claude Code. Supports Codex " +
   "lifecycle, lifecycle fallback, and pre-commit review gate settings; validates " +
-  "the resulting composer.config.json before writing.";
+  "the resulting composer.config.json before writing. " +
+  "Can also enable/disable the opt-in Oracle planning lane via oracle.enabled (adds/removes roles.oraclePlanner).";
 
 export const ORACLE_PLAN_DESCRIPTION =
   "Opt-in planning/review/debug lane backed by ChatGPT Pro through the " +
