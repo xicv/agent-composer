@@ -29,7 +29,7 @@ import { runPreflight, type PreflightSnapshot } from "./preflight.js";
 import { runPostflight, type Verdict } from "./postflight.js";
 import { reflectViaProvider } from "./reflection.js";
 import type { IProvider } from "../providers/IProvider.js";
-import type { TaskTranscript } from "./reflection.js";
+import type { TaskTranscript, AuditFailure } from "./reflection.js";
 
 export interface EvolveTask {
   id: string;
@@ -64,6 +64,7 @@ export interface EvolveOptions {
   reRunSamples?: number;
   budget?: EvolveBudgetConfig;
   lengthLambda?: number;
+  auditFailures?: ReadonlyArray<AuditFailure>;
 }
 
 export interface EvolveRoundLog {
@@ -109,6 +110,7 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
     reRunSamples = 3,
     budget = DEFAULT_EVOLVE_BUDGET,
     lengthLambda,
+    auditFailures,
   } = opts;
 
   const guard = new EvolveBudgetGuard(budget);
@@ -173,6 +175,7 @@ export async function runEvolve(opts: EvolveOptions): Promise<EvolveResult> {
           parent: text,
           taskTranscripts: failing,
           currentEcosystem: preflight.text,
+          auditFailures,
         }),
     };
 

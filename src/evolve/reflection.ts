@@ -17,10 +17,20 @@ export interface TaskTranscript {
   outcome: string;
 }
 
+export interface AuditFailure {
+  route?: string;
+  taskClass?: string;
+  reviewVerdict?: string;
+  status?: string;
+  userCorrection?: boolean;
+  note?: string;
+}
+
 export interface ReflectionInput {
   parent: string;
   taskTranscripts: ReadonlyArray<TaskTranscript>;
   currentEcosystem?: string;
+  auditFailures?: ReadonlyArray<AuditFailure>;
 }
 
 export function buildReflectionPrompt(input: ReflectionInput): string {
@@ -38,6 +48,20 @@ export function buildReflectionPrompt(input: ReflectionInput): string {
   for (const t of input.taskTranscripts) {
     lines.push(`- task: ${t.task}`);
     lines.push(`  outcome: ${t.outcome}`);
+  }
+  if (input.auditFailures && input.auditFailures.length > 0) {
+    lines.push("", "## Recent route/audit failures (real outcomes from the audit trail)");
+    lines.push("Bias the rewrite to avoid these: wrong route choice, unnecessary Oracle use, issues a review caught after the fact, and routes the user corrected.");
+    for (const f of input.auditFailures.slice(0, 10)) {
+      const bits = [
+        f.route && `route=${f.route}`,
+        f.taskClass && `class=${f.taskClass}`,
+        f.status && `status=${f.status}`,
+        f.reviewVerdict && `review=${f.reviewVerdict}`,
+        f.userCorrection ? "user-corrected" : undefined,
+      ].filter(Boolean).join(" ");
+      lines.push(`- ${bits}${f.note ? ` — ${f.note}` : ""}`);
+    }
   }
   if (input.currentEcosystem && input.currentEcosystem.trim().length > 0) {
     lines.push("", "## Current ecosystem", input.currentEcosystem);

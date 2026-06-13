@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { runEvolve, type EvolveOptions, type EvolveDeps } from "../src/evolve/runner.js";
+import { readAuditFailures } from "../src/util/auditLog.js";
 import { OPERATOR_BY_CLI_NAME, VALID_OPERATOR_CLI_NAMES } from "../src/evolve/operators.js";
 import { AnthropicCompatibleProvider } from "../src/providers/AnthropicCompatibleProvider.js";
 import { CLIProvider } from "../src/providers/CLIProvider.js";
@@ -628,6 +629,16 @@ async function main(): Promise<void> {
       : {}),
   };
 
+  let auditFailures: Array<{ route?: string; taskClass?: string; reviewVerdict?: string; status?: string; userCorrection?: boolean; note?: string }> = [];
+  try {
+    auditFailures = readAuditFailures(process.cwd(), { limit: 20 }).map((e) => ({
+      route: e.route, taskClass: e.taskClass, reviewVerdict: e.reviewVerdict,
+      status: e.status, userCorrection: e.userCorrection, note: e.note,
+    }));
+  } catch {
+    // best-effort: no audit trail yet is fine
+  }
+
   const opts: EvolveOptions = {
     parent: skillText,
     tasks,
@@ -635,6 +646,7 @@ async function main(): Promise<void> {
     maxRounds: args.maxRounds,
     budget: { maxCalls: 100, maxUsd: args.budgetUsd },
     ...(args.lengthLambda !== undefined ? { lengthLambda: args.lengthLambda } : {}),
+    auditFailures,
   };
 
   const result = await runEvolve(opts);
