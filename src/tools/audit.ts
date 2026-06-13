@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { appendAuditEvent, readAuditEvents, renderAuditMarkdown } from "../util/auditLog.js";
-import { COMPOSER_AUDIT_RECORD, COMPOSER_AUDIT_READ, AUDIT_RECORD_DESCRIPTION, AUDIT_READ_DESCRIPTION } from "../server/toolDescriptions.js";
+import { appendAuditEvent, readAuditEvents, renderAuditMarkdown, summarizeAudit } from "../util/auditLog.js";
+import { COMPOSER_AUDIT_RECORD, COMPOSER_AUDIT_READ, AUDIT_RECORD_DESCRIPTION, AUDIT_READ_DESCRIPTION, COMPOSER_AUDIT_SUMMARY, AUDIT_SUMMARY_DESCRIPTION } from "../server/toolDescriptions.js";
 import type { ServerToolContext } from "./context.js";
 
 export function registerAuditTools(ctx: ServerToolContext): void {
@@ -64,6 +64,19 @@ export function registerAuditTools(ctx: ServerToolContext): void {
         ? renderAuditMarkdown(events)
         : JSON.stringify(events, null, 2);
       return { content: [{ type: "text", text }] };
+    },
+  );
+
+  server.registerTool(
+    COMPOSER_AUDIT_SUMMARY,
+    {
+      description: AUDIT_SUMMARY_DESCRIPTION,
+      inputSchema: { limit: z.number().int().min(1).max(10000).optional() },
+      annotations: { title: "Composer Audit Summary", readOnlyHint: true, openWorldHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ limit }) => {
+      const events = readAuditEvents(ctx.root, { limit: limit ?? 1000 });
+      return { content: [{ type: "text", text: JSON.stringify(summarizeAudit(events), null, 2) }] };
     },
   );
 }

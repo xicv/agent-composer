@@ -8,6 +8,7 @@ import {
   readAuditEvents,
   readAuditFailures,
   renderAuditMarkdown,
+  summarizeAudit,
 } from "../../src/util/auditLog.js";
 
 describe("auditLog", () => {
@@ -128,5 +129,79 @@ describe("auditLog", () => {
     expect(md.length).toBeGreaterThan(0);
     expect(md).toContain("r1");
     expect(md).toContain("(no run)");
+  });
+
+  describe("summarizeAudit", () => {
+    it("counts total, byKind, byStatus, byRoute correctly", () => {
+      const events = [
+        appendAuditEvent(projectRoot!, { kind: "route-decision", route: "composer_code_cli", status: "succeeded" }),
+        appendAuditEvent(projectRoot!, { kind: "outcome", route: "composer_code_cli", status: "failed" }),
+        appendAuditEvent(projectRoot!, { kind: "outcome", route: "composer_review", status: "succeeded" }),
+      ];
+      const summary = summarizeAudit(events);
+      expect(summary.total).toBe(3);
+      expect(summary.byKind["route-decision"]).toBe(1);
+      expect(summary.byKind["outcome"]).toBe(2);
+      expect(summary.byStatus["succeeded"]).toBe(2);
+      expect(summary.byStatus["failed"]).toBe(1);
+      expect(summary.byRoute["composer_code_cli"]).toBe(2);
+      expect(summary.byRoute["composer_review"]).toBe(1);
+    });
+
+    it("counts testsPassed and testsFailed", () => {
+      const events = [
+        appendAuditEvent(projectRoot!, { kind: "test", testsPassed: true }),
+        appendAuditEvent(projectRoot!, { kind: "test", testsPassed: true }),
+        appendAuditEvent(projectRoot!, { kind: "test", testsPassed: false }),
+      ];
+      const summary = summarizeAudit(events);
+      expect(summary.tests.passed).toBe(2);
+      expect(summary.tests.failed).toBe(1);
+    });
+
+    it("counts userCorrections and includes them in recentFailures", () => {
+      const events = [
+        appendAuditEvent(projectRoot!, { kind: "note", userCorrection: true }),
+        appendAuditEvent(projectRoot!, { kind: "outcome", status: "succeeded" }),
+        appendAuditEvent(projectRoot!, { kind: "outcome", status: "failed" }),
+      ];
+      const summary = summarizeAudit(events);
+      expect(summary.userCorrections).toBe(1);
+      expect(summary.recentFailures).toHaveLength(2);
+      expect(summary.recentFailures.every(
+        (e) => e.status === "failed" || e.userCorrection === true
+      )).toBe(true);
+    });
+
+    it("recentFailures contains at most 5 entries", () => {
+      const many = Array.from({ length: 8 }, (_, i) =>
+        appendAuditEvent(projectRoot!, { kind: "outcome", status: "failed", note: `fail-${i}` })
+      );
+      const summary = summarizeAudit(many);
+      expect(summary.recentFailures).toHaveLength(5);
+    });
+
+    it("counts reviewVerdicts", () => {
+      const events = [
+        appendAuditEvent(projectRoot!, { kind: "review", reviewVerdict: "approved" }),
+        appendAuditEvent(projectRoot!, { kind: "review", reviewVerdict: "approved" }),
+        appendAuditEvent(projectRoot!, { kind: "review", reviewVerdict: "needs-attention" }),
+      ];
+      const summary = summarizeAudit(events);
+      expect(summary.reviewVerdicts["approved"]).toBe(2);
+      expect(summary.reviewVerdicts["needs-attention"]).toBe(1);
+    });
+
+    it("returns zeroed summary for empty events array", () => {
+      const summary = summarizeAudit([]);
+      expect(summary.total).toBe(0);
+      expect(summary.byKind).toEqual({});
+      expect(summary.byStatus).toEqual({});
+      expect(summary.byRoute).toEqual({});
+      expect(summary.reviewVerdicts).toEqual({});
+      expect(summary.tests).toEqual({ passed: 0, failed: 0 });
+      expect(summary.userCorrections).toBe(0);
+      expect(summary.recentFailures).toEqual([]);
+    });
   });
 });

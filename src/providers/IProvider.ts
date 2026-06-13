@@ -12,6 +12,10 @@ export interface IProviderExecuteInput {
   readOnly?: boolean;
   /** Optional model override forwarded to model-aware CLIs (currently codex exec via -m). Ignored by providers that pin their own model. */
   model?: string;
+  /** Optional Codex reasoning effort, forwarded as `-c model_reasoning_effort=<...>`. Ignored by non-codex providers. */
+  reasoningEffort?: "low" | "medium" | "high";
+  /** Optional Codex sandbox policy, forwarded as `-s <mode>` (unless a read-only run forces read-only). Ignored by non-codex providers. */
+  sandbox?: "read-only" | "workspace-write";
   signal?: AbortSignal;
 }
 

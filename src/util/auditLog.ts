@@ -66,6 +66,40 @@ export function readAuditFailures(root: string, opts?: { limit?: number }): Audi
   return failures.slice(-limit);
 }
 
+export interface AuditSummary {
+  total: number;
+  byKind: Record<string, number>;
+  byStatus: Record<string, number>;
+  byRoute: Record<string, number>;
+  reviewVerdicts: Record<string, number>;
+  tests: { passed: number; failed: number };
+  userCorrections: number;
+  recentFailures: AuditEvent[];
+}
+
+export function summarizeAudit(events: AuditEvent[]): AuditSummary {
+  const summary: AuditSummary = {
+    total: events.length,
+    byKind: {}, byStatus: {}, byRoute: {}, reviewVerdicts: {},
+    tests: { passed: 0, failed: 0 },
+    userCorrections: 0,
+    recentFailures: [],
+  };
+  for (const e of events) {
+    summary.byKind[e.kind] = (summary.byKind[e.kind] ?? 0) + 1;
+    if (e.status) summary.byStatus[e.status] = (summary.byStatus[e.status] ?? 0) + 1;
+    if (e.route) summary.byRoute[e.route] = (summary.byRoute[e.route] ?? 0) + 1;
+    if (e.reviewVerdict) summary.reviewVerdicts[e.reviewVerdict] = (summary.reviewVerdicts[e.reviewVerdict] ?? 0) + 1;
+    if (e.testsPassed === true) summary.tests.passed += 1;
+    if (e.testsPassed === false) summary.tests.failed += 1;
+    if (e.userCorrection === true) summary.userCorrections += 1;
+  }
+  summary.recentFailures = events
+    .filter((e) => e.status === "failed" || e.userCorrection === true)
+    .slice(-5);
+  return summary;
+}
+
 export function renderAuditMarkdown(events: AuditEvent[]): string {
   if (events.length === 0) return "# Composer Audit Trail\n\n_No audit events._\n";
 

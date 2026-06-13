@@ -254,7 +254,13 @@ export const OracleConfigSchema = z
   .strict();
 export type OracleConfig = z.infer<typeof OracleConfigSchema>;
 
-export const CodexProfileSchema = z.object({ model: z.string().min(1) }).strict();
+export const CodexProfileSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+    sandbox: z.enum(["read-only", "workspace-write"]).optional(),
+  })
+  .strict();
 export const CodexProfilesSchema = z.record(z.string().min(1), CodexProfileSchema);
 export type CodexProfiles = z.infer<typeof CodexProfilesSchema>;
 
