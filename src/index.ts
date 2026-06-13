@@ -14,6 +14,7 @@ import { runInit, runGlobalInit } from "./cli/init.js";
 import { runDoctor } from "./cli/doctor.js";
 import { resolveInitInvocation } from "./cli/initArgs.js";
 import { formatHelp } from "./cli/help.js";
+import { parseCleanupArgs, runCleanup } from "./cli/cleanup.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -51,6 +52,16 @@ async function main(): Promise<void> {
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     }
     process.exit(report.healthy ? 0 : 1);
+    return;
+  }
+  if (subcommand === "cleanup") {
+    const parsed = parseCleanupArgs(process.argv.slice(3));
+    if ("error" in parsed) {
+      process.stderr.write(`${parsed.error}\n`);
+      process.exit(2);
+      return;
+    }
+    runCleanup(parsed);
     return;
   }
 
