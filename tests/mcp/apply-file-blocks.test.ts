@@ -67,4 +67,32 @@ describe("applyFileBlocks", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("preserves the existing file's mode (e.g. +x bit) across atomic replace", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "afb-"));
+    try {
+      // Create an existing executable script under the project root
+      const scriptPath = path.join(root, "scripts", "hook.sh");
+      fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+      fs.writeFileSync(scriptPath, "#!/bin/sh\necho old\n", "utf8");
+      fs.chmodSync(scriptPath, 0o755);
+
+      const text = [
+        "FILE: scripts/hook.sh",
+        "```sh",
+        "#!/bin/sh",
+        "echo new",
+        "```",
+      ].join("\n");
+      const { files } = applyFileBlocks(text, root);
+
+      expect(files).toEqual([{ path: "scripts/hook.sh", status: "changed" }]);
+      // Content was updated
+      expect(fs.readFileSync(scriptPath, "utf8")).toBe("#!/bin/sh\necho new\n");
+      // Owner-exec bit was preserved
+      expect(fs.statSync(scriptPath).mode & 0o111).not.toBe(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

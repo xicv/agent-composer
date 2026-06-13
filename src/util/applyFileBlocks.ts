@@ -99,7 +99,18 @@ export function applyFileBlocks(
   const applied: Array<{ abs: string; original: string | null }> = [];
   try {
     for (const { abs, tmp } of pending) {
-      const original = fs.existsSync(abs) ? fs.readFileSync(abs, "utf8") : null;
+      const existed = fs.existsSync(abs);
+      const original = existed ? fs.readFileSync(abs, "utf8") : null;
+      if (existed) {
+        // Preserve the target's mode (e.g. the +x bit on scripts/hooks) — the
+        // staged temp was created with the process default, so copy it over
+        // before the atomic replace.
+        try {
+          fs.chmodSync(tmp, fs.statSync(abs).mode & 0o777);
+        } catch {
+          // best-effort mode preservation; never fail the apply over chmod
+        }
+      }
       fs.renameSync(tmp, abs);
       applied.push({ abs, original });
     }
