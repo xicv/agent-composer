@@ -1327,6 +1327,38 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("composer_config_set oracle behavior knobs (defaultMode/requireExplicitTag) without enabled", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(allMockConfig, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, allMockConfig, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          oracle: { defaultMode: "standard", requireExplicitTag: true },
+        },
+      });
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean; config: Record<string, unknown> };
+      expect(setParsed.changed).toBe(true);
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as {
+        oracle?: { defaultMode?: string; requireExplicitTag?: boolean };
+        roles?: Record<string, unknown>;
+      };
+      expect(written.oracle?.defaultMode).toBe("standard");
+      expect(written.oracle?.requireExplicitTag).toBe(true);
+      // enabled was NOT passed — oraclePlanner role must still be present (allMockConfig has it)
+      expect(written.roles?.["oraclePlanner"]).toBeDefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("worker tools can receive shared handoff context by path", async () => {
     const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
     try {
@@ -1359,7 +1391,7 @@ describe("composer MCP server", () => {
     }
   });
 
-  it("composer_route_decide routes [oracle:plan] prompt to composer-oracle-job-start", async () => {
+  it("composer_route_decide routes [oracle:plan] prompt to composer-oracle-plan (sync default)", async () => {
     const { client } = await bootClient();
     const result = await client.callTool({
       name: "composer_route_decide",
@@ -1368,7 +1400,7 @@ describe("composer MCP server", () => {
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     expect(block?.type).toBe("text");
     const parsed = JSON.parse(block?.text ?? "{}") as { route: { target: string } };
-    expect(parsed.route.target).toBe("composer-oracle-job-start");
+    expect(parsed.route.target).toBe("composer-oracle-plan");
   });
 
   it("composer_route_decide routes a simple implementation prompt to composer-code-cli", async () => {
