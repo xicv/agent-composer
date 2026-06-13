@@ -1,3 +1,5 @@
+import type { ActiveRunTracker } from "./activeRuns.js";
+
 export type ToolProgressExtra = {
   _meta?: { progressToken?: string | number };
   signal?: AbortSignal;
@@ -15,8 +17,10 @@ export async function withProgress<T>(
   extra: ToolProgressExtra,
   label: string,
   work: () => Promise<T>,
+  opts: { tracker?: ActiveRunTracker; providerRole?: string } = {},
 ): Promise<T> {
   const reporter = createProgressReporter(extra, label);
+  const runId = opts.tracker ? opts.tracker.start({ tool: label, providerRole: opts.providerRole }) : undefined;
   await reporter.report("started");
   try {
     const result = await work();
@@ -27,6 +31,7 @@ export async function withProgress<T>(
     throw error;
   } finally {
     reporter.stop();
+    if (opts.tracker && runId !== undefined) opts.tracker.finish(runId);
   }
 }
 

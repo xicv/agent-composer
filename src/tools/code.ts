@@ -40,6 +40,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           context: contextWithHandoff(root, context, handoffPath),
           signal: extra.signal,
         }),
+        { tracker: ctx.activeRuns },
       );
       return { content: [{ type: "text", text: result.text }] };
     },
@@ -83,6 +84,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           cwd: targetRoot,
           signal: extra.signal,
         }),
+        { tracker: ctx.activeRuns },
       );
 
       // Stage 2: server applies GLM's FILE: blocks deterministically (off-CC,
@@ -151,6 +153,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           sandbox: profileSandbox,
           signal: extra.signal,
         }),
+        { tracker: ctx.activeRuns },
       );
       return { content: [{ type: "text", text: result.text }] };
     },

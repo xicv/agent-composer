@@ -196,7 +196,7 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
         };
       }
 
-      const completed = await withProgress(extra, COMPOSER_CODEX_LIFECYCLE_RUN, runner);
+      const completed = await withProgress(extra, COMPOSER_CODEX_LIFECYCLE_RUN, runner, { tracker: ctx.activeRuns });
       return {
         content: [{ type: "text", text: JSON.stringify(completed, null, 2) }],
       };

@@ -33,6 +33,7 @@ export interface ComposerStatus {
   active: {
     oracleJob?: { jobId: string; status: string; mode: string; ageSeconds: number };
     codexJob?: { jobId: string; status: string; event: string; ageSeconds: number };
+    foreground?: Array<{ tool: string; providerRole?: string; ageSeconds: number }>;
   };
   latestJob: {
     oracleJob?: { jobId: string; status: string; mode: string; ageSeconds: number };
@@ -278,7 +279,12 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
   const disabledPart = s.integrations.composerDisabled ? " · DISABLED" : "";
   const next = s.recommendation.nextAction ?? "-";
   const profilePart = session?.profile ? ` · P:${session.profile}` : "";
-  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · last:${last} · next:${next}`;
+  const fg = s.active.foreground;
+  const activeSeg =
+    fg && fg.length > 0
+      ? `active:${fg[0]!.tool.replace(/^composer_/, "")} ${fg[0]!.ageSeconds < 60 ? fg[0]!.ageSeconds + "s" : Math.round(fg[0]!.ageSeconds / 60) + "m"}`
+      : "active:none";
+  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · ${activeSeg} · last:${last} · next:${next}`;
 }
 
 export function renderStatusHuman(s: ComposerStatus): string {
@@ -314,6 +320,12 @@ export function renderStatusHuman(s: ComposerStatus): string {
   if (s.active.codexJob) {
     const j = s.active.codexJob;
     lines.push(`  codex job:        ${j.jobId.slice(0, 8)}… status=${j.status} event=${j.event} age=${j.ageSeconds}s`);
+  }
+  const fgRuns = s.active.foreground;
+  if (fgRuns && fgRuns.length > 0) {
+    lines.push(`  active:           ${fgRuns.map((r) => `${r.tool} ${r.ageSeconds}s`).join(", ")}`);
+  } else {
+    lines.push("  active:           none");
   }
   if (s.latest.route || s.latest.tool || s.latest.reviewVerdict) {
     const parts = [

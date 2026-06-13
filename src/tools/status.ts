@@ -18,6 +18,12 @@ export function registerStatusTools(ctx: ServerToolContext): void {
     },
     async () => {
       const status = buildStatus(ctx.root);
+      const nowMs = Date.now();
+      status.active.foreground = ctx.activeRuns.list().map((r) => ({
+        tool: r.tool,
+        providerRole: r.providerRole,
+        ageSeconds: Math.max(0, Math.floor((nowMs - Date.parse(r.startedAt)) / 1000)),
+      }));
       const session = ctx.getSession();
       const sv = Object.keys(session).length > 0 ? session : undefined;
       const result = {
