@@ -9,6 +9,8 @@ import type { ProviderRegistry } from "./registry.js";
 import type { ComposerConfig } from "./config/schema.js";
 import type { ComposerServerOptions } from "./tools/context.js";
 import { registerResearchTools } from "./tools/research.js";
+import { registerCodeTools } from "./tools/code.js";
+import { registerReviewTools } from "./tools/review.js";
 import { registerOracleTools } from "./tools/oracle.js";
 import { registerHandoffTools } from "./tools/handoff.js";
 import { registerCodexLifecycleTools } from "./tools/codexLifecycle.js";
@@ -46,6 +48,8 @@ export function createComposerServer(
   };
 
   registerResearchTools(ctx);
+  registerCodeTools(ctx);
+  registerReviewTools(ctx);
   registerOracleTools(ctx);
   registerHandoffTools(ctx);
   registerCodexLifecycleTools(ctx);
