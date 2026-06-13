@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildStatus, renderStatusLine } from "../../src/cli/status.js";
+import { buildStatus, renderStatusLine, statusEnvelope } from "../../src/cli/status.js";
 import { newOracleJob, writeOracleJob } from "../../src/util/oracleJob.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
+import { appendAuditEvent } from "../../src/util/auditLog.js";
 
 const MINIMAL_CONFIG = JSON.stringify(
   {
@@ -22,6 +23,9 @@ describe("buildStatus", () => {
   let tmp: string;
   let previousComposerConfig: string | undefined;
   let previousComposerStateDir: string | undefined;
+  let previousComposerDisabled: string | undefined;
+  let previousXdgConfigHome: string | undefined;
+  let previousHome: string | undefined;
   let stateDir: string;
 
   beforeEach(() => {
@@ -29,7 +33,13 @@ describe("buildStatus", () => {
     stateDir = mkdtempSync(join(tmpdir(), "composer-status-state-"));
     previousComposerConfig = process.env["COMPOSER_CONFIG"];
     previousComposerStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+    previousComposerDisabled = process.env["COMPOSER_DISABLED"];
+    previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+    previousHome = process.env["HOME"];
     delete process.env["COMPOSER_CONFIG"];
+    delete process.env["COMPOSER_DISABLED"];
+    delete process.env["XDG_CONFIG_HOME"];
+    process.env["HOME"] = tmp;
     process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
   });
 
@@ -38,6 +48,12 @@ describe("buildStatus", () => {
     else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
     if (previousComposerStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
     else process.env[COMPOSER_STATE_DIR_ENV] = previousComposerStateDir;
+    if (previousComposerDisabled === undefined) delete process.env["COMPOSER_DISABLED"];
+    else process.env["COMPOSER_DISABLED"] = previousComposerDisabled;
+    if (previousXdgConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+    else process.env["XDG_CONFIG_HOME"] = previousXdgConfigHome;
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
     rmSync(tmp, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });
   });
@@ -198,6 +214,59 @@ describe("buildStatus", () => {
     expect(age).toBeLessThanOrEqual(92);
     expect(status.recommendation.nextAction).toBe("composer_oracle_job_result");
   });
+
+  it("GLOBAL CONFIG: finds composer.config.json in globalConfigDir when cwd has none", () => {
+    const xdg = mkdtempSync(join(tmpdir(), "composer-status-xdg-"));
+    const globalComposerDir = join(xdg, "composer");
+    mkdirSync(globalComposerDir, { recursive: true });
+    writeFileSync(join(globalComposerDir, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    process.env["XDG_CONFIG_HOME"] = xdg;
+    const emptyCwd = mkdtempSync(join(tmpdir(), "composer-status-empty-"));
+    try {
+      const status = buildStatus(emptyCwd);
+      expect(status.config.exists).toBe(true);
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+      rmSync(emptyCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("DISABLED: COMPOSER_DISABLED=on → integrations.composerDisabled true", () => {
+    process.env["COMPOSER_DISABLED"] = "on";
+    const status = buildStatus(tmp);
+    expect(status.integrations.composerDisabled).toBe(true);
+  });
+
+  it("LATEST-BY-KIND: finds route-decision even when a trailing note event exists after it", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    appendAuditEvent(tmp, { kind: "route-decision", route: "composer-code-cli", taskClass: "implementation" });
+    appendAuditEvent(tmp, { kind: "note", note: "a trailing note" });
+    const status = buildStatus(tmp);
+    expect(status.latest.route).toBe("composer-code-cli");
+    expect(status.latest.taskClass).toBe("implementation");
+  });
+
+  it("ACTIVE-VS-LATEST: succeeded oracle job → latestJob present, active absent", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    const job = newOracleJob(tmp, { mode: "research" });
+    const succeededJob = { ...job, status: "succeeded" as const, startedAt: new Date(Date.now() - 5000).toISOString() };
+    writeOracleJob(tmp, succeededJob);
+    const status = buildStatus(tmp);
+    expect(status.latestJob.oracleJob).toBeDefined();
+    expect(status.latestJob.oracleJob?.status).toBe("succeeded");
+    expect(status.active.oracleJob).toBeUndefined();
+  });
+
+  it("ACTIVE-VS-LATEST: running oracle job → both latestJob and active populated", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    const job = newOracleJob(tmp, { mode: "research" });
+    const runningJob = { ...job, status: "running" as const, startedAt: new Date(Date.now() - 3000).toISOString() };
+    writeOracleJob(tmp, runningJob);
+    const status = buildStatus(tmp);
+    expect(status.latestJob.oracleJob).toBeDefined();
+    expect(status.active.oracleJob).toBeDefined();
+    expect(status.active.oracleJob?.status).toBe("running");
+  });
 });
 
 describe("renderStatusLine", () => {
@@ -215,5 +284,22 @@ describe("renderStatusLine", () => {
     expect(line).not.toContain("objective");
     expect(line).not.toContain("prompt");
     expect(line).not.toContain("note");
+    expect(line).toContain("next:");
+  });
+});
+
+describe("statusEnvelope", () => {
+  it("wraps status with version:1 and a line field starting with CMP", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-envelope-"));
+    try {
+      const status = buildStatus(tmp2);
+      const envelope = statusEnvelope(status);
+      expect(envelope.version).toBe(1);
+      expect(typeof envelope.line).toBe("string");
+      expect(envelope.line).toMatch(/^CMP /);
+      expect(envelope.line).toContain("next:");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
   });
 });

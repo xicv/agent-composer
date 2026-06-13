@@ -1,11 +1,13 @@
 import { existsSync, statSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../config/loader.js";
 import type { ComposerConfig } from "../config/schema.js";
+import { globalConfigDir } from "../config/paths.js";
 import { readLatestOracleJob } from "../util/oracleJob.js";
 import { readLatestCodexLifecycleJob } from "../util/codexLifecycleJob.js";
 import { readAuditEvents } from "../util/auditLog.js";
+import { isComposerDisabled } from "../util/composerDisabled.js";
 
 export interface ComposerStatus {
   config: {
@@ -28,6 +30,10 @@ export interface ComposerStatus {
     composerDisabled: boolean;
   };
   active: {
+    oracleJob?: { jobId: string; status: string; mode: string; ageSeconds: number };
+    codexJob?: { jobId: string; status: string; event: string; ageSeconds: number };
+  };
+  latestJob: {
     oracleJob?: { jobId: string; status: string; mode: string; ageSeconds: number };
     codexJob?: { jobId: string; status: string; event: string; ageSeconds: number };
   };
@@ -104,24 +110,38 @@ function detectGitHook(root: string): boolean {
   }
 }
 
+function resolveStatusConfigPath(cwd: string): string | null {
+  const explicit = process.env["COMPOSER_CONFIG"];
+  if (explicit) {
+    const r = resolve(cwd, explicit);
+    if (existsSync(r)) return r;
+  }
+  const name = "composer.config.json";
+  const local = resolve(cwd, name);
+  if (existsSync(local)) return local;
+  const global = join(globalConfigDir(), name);
+  if (existsSync(global)) return global;
+  return null;
+}
+
 export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): ComposerStatus {
   const nowMs = opts.nowMs ?? Date.now();
-  const configRelPath = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
-  const configPath = resolve(cwd, configRelPath);
+  const resolvedPath = resolveStatusConfigPath(cwd);
+  let exists = resolvedPath !== null;
+  const configPath = resolvedPath ?? resolve(cwd, process.env["COMPOSER_CONFIG"] ?? "composer.config.json");
   const root = resolve(cwd);
 
-  let exists = existsSync(configPath);
   let config: ComposerConfig | undefined;
-  if (exists) {
+  if (resolvedPath) {
     try {
-      config = loadConfig(configPath);
+      config = loadConfig(resolvedPath);
     } catch {
       exists = false;
+      config = undefined;
     }
   }
 
-  const composerDisabled =
-    process.env["COMPOSER_DISABLED"] === "1" || process.env["COMPOSER_DISABLED"] === "true";
+  const composerDisabled = isComposerDisabled({ projectDir: root });
 
   const integrations: ComposerStatus["integrations"] = {
     codexReview: Boolean(config?.codexReview?.enabled),
@@ -134,15 +154,20 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
   const mode = deriveMode(config);
 
   const active: ComposerStatus["active"] = {};
+  const latestJob: ComposerStatus["latestJob"] = {};
   try {
     const oj = readLatestOracleJob(root);
     if (oj) {
-      active.oracleJob = {
+      const e = {
         jobId: oj.jobId,
         status: oj.status,
         mode: oj.mode,
         ageSeconds: ageSeconds(oj.startedAt ?? oj.createdAt, nowMs),
       };
+      latestJob.oracleJob = e;
+      if (oj.status === "running" || oj.status === "queued") {
+        active.oracleJob = e;
+      }
     }
   } catch {
     // ignore
@@ -150,12 +175,16 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
   try {
     const cj = readLatestCodexLifecycleJob(root);
     if (cj) {
-      active.codexJob = {
+      const e = {
         jobId: cj.jobId,
         status: cj.status,
         event: cj.event,
         ageSeconds: ageSeconds(cj.startedAt ?? cj.createdAt, nowMs),
       };
+      latestJob.codexJob = e;
+      if (cj.status === "running" || cj.status === "queued") {
+        active.codexJob = e;
+      }
     }
   } catch {
     // ignore
@@ -163,15 +192,20 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
 
   const latest: ComposerStatus["latest"] = {};
   try {
-    const ev = readAuditEvents(root, { limit: 1 })[0];
-    if (ev) {
-      latest.route = ev.route;
-      latest.taskClass = ev.taskClass;
-      latest.tool = ev.tool;
-      latest.reviewVerdict = ev.reviewVerdict;
-      latest.testsPassed = ev.testsPassed;
-      latest.auditStatus = ev.status;
-    }
+    const recent = readAuditEvents(root, { limit: 50 });
+    const findLast = (pred: (e: (typeof recent)[number]) => boolean) => {
+      for (let i = recent.length - 1; i >= 0; i--) {
+        if (pred(recent[i]!)) return recent[i]!;
+      }
+      return undefined;
+    };
+    const routeEv = findLast((e) => e.kind === "route-decision");
+    latest.route = routeEv?.route;
+    latest.taskClass = routeEv?.taskClass;
+    latest.tool = findLast((e) => e.kind === "tool-call")?.tool;
+    latest.reviewVerdict = findLast((e) => e.kind === "review")?.reviewVerdict;
+    latest.testsPassed = findLast((e) => e.kind === "test")?.testsPassed;
+    latest.auditStatus = findLast((e) => e.kind === "outcome")?.status;
   } catch {
     // ignore
   }
@@ -188,6 +222,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
     },
     integrations,
     active,
+    latestJob,
     latest,
     recommendation,
   };
@@ -223,8 +258,9 @@ export function renderStatusLine(s: ComposerStatus): string {
         ? `next=${s.recommendation.nextAction}`
         : "-";
 
-  const disabledPart = s.integrations.composerDisabled ? "DISABLED · " : "";
-  return `CMP ${mode} · R:${R} · L:${L} · O:${O} · H:${H} · ${disabledPart}last:${last}`;
+  const disabledPart = s.integrations.composerDisabled ? " · DISABLED" : "";
+  const next = s.recommendation.nextAction ?? "-";
+  return `CMP ${mode} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · last:${last} · next:${next}`;
 }
 
 export function renderStatusHuman(s: ComposerStatus): string {
@@ -272,19 +308,37 @@ export function renderStatusHuman(s: ComposerStatus): string {
   return lines.join("\n") + "\n";
 }
 
+export function statusEnvelope(
+  status: ComposerStatus,
+): { version: number; line: string } & ComposerStatus {
+  return { version: 1, ...status, line: renderStatusLine(status) };
+}
+
 export function runStatus(
   cwd: string,
-  opts: { json?: boolean; line?: boolean; watch?: boolean } = {},
+  opts: { json?: boolean; line?: boolean; watch?: boolean; replace?: boolean } = {},
 ): void {
   if (opts.watch) {
-    process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
-    setInterval(() => {
+    if (opts.replace) {
+      let prevLen = 0;
+      const tick = () => {
+        const line = renderStatusLine(buildStatus(cwd));
+        const padded = line.padEnd(prevLen);
+        prevLen = line.length;
+        process.stdout.write(`\r${padded}`);
+      };
+      tick();
+      setInterval(tick, 2000);
+    } else {
       process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
-    }, 2000);
+      setInterval(() => {
+        process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
+      }, 2000);
+    }
     return;
   }
   if (opts.json) {
-    process.stdout.write(JSON.stringify(buildStatus(cwd), null, 2) + "\n");
+    process.stdout.write(JSON.stringify(statusEnvelope(buildStatus(cwd)), null, 2) + "\n");
     return;
   }
   if (opts.line) {

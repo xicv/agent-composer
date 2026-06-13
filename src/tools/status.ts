@@ -1,5 +1,5 @@
 import type { ServerToolContext } from "./context.js";
-import { buildStatus } from "../cli/status.js";
+import { buildStatus, statusEnvelope } from "../cli/status.js";
 import { COMPOSER_STATUS, STATUS_DESCRIPTION } from "../server/toolDescriptions.js";
 
 export function registerStatusTools(ctx: ServerToolContext): void {
@@ -20,7 +20,7 @@ export function registerStatusTools(ctx: ServerToolContext): void {
       const status = buildStatus(ctx.root);
       const session = ctx.getSession();
       const result = {
-        ...status,
+        ...statusEnvelope(status),
         session: Object.keys(session).length > 0 ? session : undefined,
       };
       return {

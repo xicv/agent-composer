@@ -14,7 +14,7 @@ export function formatHelp(): string {
     "  agent-composer cleanup          Remove accumulated Composer artefacts (.composer/oracle, results, state jobs)",
     "  agent-composer cleanup --dry-run --older-than 14d   Preview what would be removed",
     "  agent-composer mode <fast|balanced|strict>   Apply a preset (lifecycle + review gates)",
-    "  agent-composer status [--json|--line|--watch]   Show project config + integration status (codexReview, lifecycle, oracle, git hook)",
+    "  agent-composer status [--json|--line|--watch|--watch --replace]   Show project config + integration status (codexReview, lifecycle, oracle, git hook)",
     "  agent-composer install-git-hook Install the Composer pre-commit gate into .git/hooks/pre-commit",
     "  agent-composer help             Show this help",
     "",

@@ -74,6 +74,7 @@ async function main(): Promise<void> {
       json: flags.includes("--json"),
       line: flags.includes("--line"),
       watch: flags.includes("--watch"),
+      replace: flags.includes("--replace"),
     });
     return;
   }

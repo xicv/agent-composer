@@ -1858,9 +1858,13 @@ describe("composer MCP server", () => {
       const root = mkdtempSync(join(tmpdir(), "composer-status-mcp-"));
       const previousStateDir = process.env[COMPOSER_STATE_DIR_ENV];
       const previousComposerConfig = process.env["COMPOSER_CONFIG"];
+      const previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+      const previousHome = process.env["HOME"];
       const stateDir = mkdtempSync(join(tmpdir(), "composer-status-mcp-state-"));
       process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
       delete process.env["COMPOSER_CONFIG"];
+      process.env["XDG_CONFIG_HOME"] = join(stateDir, "xdg");
+      process.env["HOME"] = stateDir;
       try {
         const { client } = await bootClient(root);
         const result = await client.callTool({
@@ -1870,6 +1874,8 @@ describe("composer MCP server", () => {
         expect(result.isError).not.toBe(true);
         const block = (result.content as Array<{ type: string; text: string }>)[0];
         const parsed = JSON.parse(block?.text ?? "{}") as {
+          version: number;
+          line: string;
           config: { exists: boolean };
           integrations: { codexReview: boolean; codexLifecycle: boolean };
           active: Record<string, unknown>;
@@ -1879,11 +1885,18 @@ describe("composer MCP server", () => {
         expect(parsed.integrations.codexReview).toBe(false);
         expect(typeof parsed.active).toBe("object");
         expect(parsed.recommendation.nextAction).toBe("agent-composer init");
+        expect(parsed.version).toBe(1);
+        expect(typeof parsed.line).toBe("string");
+        expect(parsed.line).toMatch(/^CMP /);
       } finally {
         if (previousStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
         else process.env[COMPOSER_STATE_DIR_ENV] = previousStateDir;
         if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
         else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+        if (previousXdgConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+        else process.env["XDG_CONFIG_HOME"] = previousXdgConfigHome;
+        if (previousHome === undefined) delete process.env["HOME"];
+        else process.env["HOME"] = previousHome;
         rmSync(root, { recursive: true, force: true });
         rmSync(stateDir, { recursive: true, force: true });
       }
@@ -1893,9 +1906,13 @@ describe("composer MCP server", () => {
       const root = mkdtempSync(join(tmpdir(), "composer-status-session-"));
       const previousStateDir = process.env[COMPOSER_STATE_DIR_ENV];
       const previousComposerConfig = process.env["COMPOSER_CONFIG"];
+      const previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+      const previousHome = process.env["HOME"];
       const stateDir = mkdtempSync(join(tmpdir(), "composer-status-session-state-"));
       process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
       delete process.env["COMPOSER_CONFIG"];
+      process.env["XDG_CONFIG_HOME"] = join(stateDir, "xdg");
+      process.env["HOME"] = stateDir;
       try {
         const { client } = await bootClient(root);
         await client.callTool({
@@ -1909,14 +1926,22 @@ describe("composer MCP server", () => {
         expect(result.isError).not.toBe(true);
         const block = (result.content as Array<{ type: string; text: string }>)[0];
         const parsed = JSON.parse(block?.text ?? "{}") as {
+          version: number;
+          line: string;
           session?: { mode?: string };
         };
+        expect(parsed.version).toBe(1);
+        expect(parsed.line).toMatch(/^CMP /);
         expect(parsed.session?.mode).toBe("fast");
       } finally {
         if (previousStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
         else process.env[COMPOSER_STATE_DIR_ENV] = previousStateDir;
         if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
         else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+        if (previousXdgConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+        else process.env["XDG_CONFIG_HOME"] = previousXdgConfigHome;
+        if (previousHome === undefined) delete process.env["HOME"];
+        else process.env["HOME"] = previousHome;
         rmSync(root, { recursive: true, force: true });
         rmSync(stateDir, { recursive: true, force: true });
       }
