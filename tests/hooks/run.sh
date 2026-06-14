@@ -170,6 +170,7 @@ else
   CONFIG_WARM_PRECOMMIT_DISABLED="$PRECOMMIT_TMP/warm-precommit-disabled.json"
   CONFIG_WARM_MODEL_A="$PRECOMMIT_TMP/warm-model-a.json"
   CONFIG_WARM_MODEL_B="$PRECOMMIT_TMP/warm-model-b.json"
+  CONFIG_GPT_PRO="$PRECOMMIT_TMP/gpt-pro.json"
   CONFIG_WARM_DISABLED="$PRECOMMIT_TMP/warm-disabled.json"
   CONFIG_BRANCH_WARM="$PRECOMMIT_TMP/branch-warm.json"
   PRECOMMIT_GIT_ROOT="$PRECOMMIT_TMP/repo"
@@ -244,6 +245,9 @@ JSON
 JSON
   cat >"$CONFIG_WARM_MODEL_B" <<'JSON'
 {"codexReview":{"enabled":true,"scope":"working-tree","base":"main","model":"model-b","warmCache":{"enabled":true,"maxAgeMinutes":30,"timeoutMs":300000},"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":false}}}
+JSON
+  cat >"$CONFIG_GPT_PRO" <<'JSON'
+{"codexReview":{"enabled":true,"scope":"working-tree","base":"main","model":"gpt-5.5-pro","preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":true}}}
 JSON
   cat >"$CONFIG_WARM_DISABLED" <<'JSON'
 {"codexReview":{"enabled":true,"warmCache":{"enabled":false},"preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":false}}}
@@ -380,6 +384,15 @@ JSON
   assert_precommit_pass_payload "precommit_low_below_threshold_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_LOW"
   assert_precommit_pass_payload "precommit_dry_run_allows" "$PAYLOAD_DRY_RUN" "$CONFIG_ENABLED" "$REVIEW_HIGH"
   assert_precommit_pass_payload "precommit_composer_disabled_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_HIGH" "1"
+  out="$(run_precommit_hook "$PAYLOAD_COMMIT" "$CONFIG_GPT_PRO" "$REVIEW_APPROVE")"
+  if is_deny <<<"$out" && grep -Fq "ChatGPT-Pro/Oracle browser lane" <<<"$out"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-40s DENY\n' "precommit_gpt_pro_model_denies"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_gpt_pro_model_denies: expected gpt-5.5-pro deny, got: ${out:-<empty>}")
+    printf '  FAIL  %-40s expected DENY\n' "precommit_gpt_pro_model_denies"
+  fi
   assert_precommit_pass_payload "precommit_reviewer_fail_open_allows" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_FAIL"
   assert_precommit_deny_payload "precommit_reviewer_fail_closed_denies" "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_FAIL"
   out="$(run_precommit_hook "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_EXIT_PARSE_ERROR")"
@@ -465,13 +478,13 @@ JSON
   fi
 
   out="$(run_precommit_hook "$PAYLOAD_COMMIT" "$CONFIG_WARM" "$REVIEW_HIGH")"
-  if is_deny <<<"$out"; then
+  if is_deny <<<"$out" && grep -Fq "X" <<<"$out" && jq -e '.summary == "cached ok"' "$CACHE_FILE" >/dev/null 2>&1; then
     PASS=$((PASS+1))
-    printf '  ok    %-40s DENY\n' "precommit_override_ignores_cache"
+    printf '  ok    %-40s BYPASS\n' "precommit_override_ignores_cache"
   else
     FAIL=$((FAIL+1))
-    FAILED+=("precommit_override_ignores_cache: expected override reviewer deny despite fresh approve cache; got: ${out:-<empty>}")
-    printf '  FAIL  %-40s expected DENY\n' "precommit_override_ignores_cache"
+    FAILED+=("precommit_override_ignores_cache: expected override reviewer to ignore fresh approve cache and leave cache unchanged; got: ${out:-<empty>}")
+    printf '  FAIL  %-40s expected BYPASS\n' "precommit_override_ignores_cache"
   fi
 
   chmod 666 "$CACHE_FILE"
