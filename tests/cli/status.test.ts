@@ -7,6 +7,7 @@ import { buildStatus, renderStatusLine, statusEnvelope } from "../../src/cli/sta
 import { newOracleJob, writeOracleJob } from "../../src/util/oracleJob.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import { appendAuditEvent } from "../../src/util/auditLog.js";
+import { startGoal, stepGoal } from "../../src/util/goal.js";
 
 const MINIMAL_CONFIG = JSON.stringify(
   {
@@ -249,6 +250,23 @@ describe("buildStatus", () => {
     expect(status.latest.taskClass).toBe("implementation");
   });
 
+  it("includes the active goal snapshot without running checks", () => {
+    const goal = startGoal(tmp, {
+      objective: "show goal status",
+      condition: "status line includes it",
+      checks: [{ name: "unit", command: "true" }],
+    });
+
+    const status = buildStatus(tmp);
+
+    expect(status.goal).toEqual({
+      goalId: goal.goalId,
+      state: "active",
+      turns: 0,
+      nextReason: undefined,
+    });
+  });
+
   it("ACTIVE-VS-LATEST: succeeded oracle job → latestJob present, active absent", () => {
     writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
     const job = newOracleJob(tmp, { mode: "research" });
@@ -364,6 +382,27 @@ describe("renderStatusLine", () => {
       const line = renderStatusLine(s, { mode: "strict", profile: "deep", oracle: { enabled: true } });
       expect(line).toMatch(/^CMP strict · P:deep /);
       expect(line).toContain("P:deep");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renders the active goal segment after H", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-goal-"));
+    try {
+      const goal = startGoal(tmp2, {
+        objective: "render goal",
+        condition: "check passes",
+        checks: [{ name: "unit", command: "false" }],
+      });
+      stepGoal(tmp2, {
+        goalId: goal.goalId,
+        signals: { checkResults: [{ name: "unit", passed: false }] },
+      });
+
+      const line = renderStatusLine(buildStatus(tmp2));
+
+      expect(line).toContain("H:off · goal:active 1t · next:checks failing - fix · active:none");
     } finally {
       rmSync(tmp2, { recursive: true, force: true });
     }

@@ -20,6 +20,7 @@ import { registerAuditTools } from "./tools/audit.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerStatusTools } from "./tools/status.js";
 import { registerSessionTools } from "./tools/session.js";
+import { registerGoalTools } from "./tools/goal.js";
 import { createActiveRunTracker } from "./server/activeRuns.js";
 
 export { applyFileBlocks } from "./util/applyFileBlocks.js";
@@ -76,6 +77,7 @@ export function createComposerServer(
   registerAuditTools(ctx);
   registerSessionTools(ctx);
   registerWorkflowTools(ctx);
+  registerGoalTools(ctx);
   registerStatusTools(ctx);
 
   return server;

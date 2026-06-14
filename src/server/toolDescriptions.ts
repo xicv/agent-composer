@@ -144,3 +144,16 @@ export const STATUS_DESCRIPTION =
   "Read a structured snapshot of Composer state: mode, integrations (review/lifecycle/oracle/git-hook/disabled), " +
   "active Oracle/Codex jobs, latest audit event, live session overrides, and a recommended next action. " +
   "Use to see what's happening without reading logs.";
+export const COMPOSER_GOAL_START = "composer_goal_start" as const;
+export const COMPOSER_GOAL_STATUS = "composer_goal_status" as const;
+export const COMPOSER_GOAL_STEP = "composer_goal_step" as const;
+export const COMPOSER_GOAL_CLEAR = "composer_goal_clear" as const;
+export const GOAL_START_DESCRIPTION =
+  "Use when beginning a bounded Composer goal. Creates one active project-local goal under .composer/goals, " +
+  "stores immutable objective/condition plus optional deterministic checks and budgets, and returns the initial route decision.";
+export const GOAL_STATUS_DESCRIPTION =
+  "Use when inspecting the active or named Composer goal. Read-only: returns state, turns, checks, and last action/verdict/reason without running checks or mutating goal state.";
+export const GOAL_STEP_DESCRIPTION =
+  "Use when advancing a Composer goal. Runs deterministic checks and returns the next recommended tool and args; advisory only — it does NOT execute the tool or mutate source files.";
+export const GOAL_CLEAR_DESCRIPTION =
+  "Use when cancelling the active or named Composer goal. Marks the goal cancelled and leaves the project-local goal record for auditability.";
