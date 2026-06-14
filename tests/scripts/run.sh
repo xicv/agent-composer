@@ -58,3 +58,141 @@ printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
 if (( FAIL > 0 )); then
   echo; echo "Failures:"; printf '  - %s\n' "${FAILED[@]}"; exit 1
 fi
+
+echo
+echo "=== precommit_codex_review.sh warm-cache helpers ==="
+
+GUARD="${PRECOMMIT_GUARD:-$REPO_ROOT/scripts/precommit_codex_review.sh}"
+if [[ ! -x "$GUARD" ]]; then
+  FAIL=$((FAIL+1))
+  FAILED+=("precommit_codex_review.sh missing or not executable at $GUARD")
+  printf '  FAIL  %-45s missing executable\n' "precommit_guard_exists"
+else
+  TMP="$(mktemp -d -t composer_precommit_helpers.XXXXXX)"
+  trap 'rm -rf "$TMP"' EXIT
+  REPO="$TMP/repo"
+  CACHE_FILE="$TMP/cache.json"
+
+  mkdir -p "$REPO"
+  git -C "$REPO" init -q
+  git -C "$REPO" config user.email composer@example.test
+  git -C "$REPO" config user.name Composer
+  printf 'base\n' > "$REPO/a.txt"
+  git -C "$REPO" add a.txt
+  git -C "$REPO" commit -q -m init
+  printf 'first\n' >> "$REPO/a.txt"
+  git -C "$REPO" add a.txt
+
+  LIB_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m smoke"}}'
+  if COMPOSER_PRECOMMIT_LIB_ONLY=1 source "$GUARD" <<<"$LIB_PAYLOAD"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s SOURCE\n' "precommit_guard_library_mode"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_guard_library_mode: expected source to return successfully")
+    printf '  FAIL  %-45s expected SOURCE\n' "precommit_guard_library_mode"
+  fi
+
+  REPO_REAL="$(cd "$REPO" && pwd -P)"
+  HASH_A="$(compute_diff_hash "$REPO_REAL" "review" "working-tree" "main" "gpt-5.4-mini")"
+  HASH_B="$(compute_diff_hash "$REPO_REAL" "review" "working-tree" "main" "gpt-5.4-mini")"
+  printf 'second\n' >> "$REPO/a.txt"
+  git -C "$REPO" add a.txt
+  HASH_C="$(compute_diff_hash "$REPO_REAL" "review" "working-tree" "main" "gpt-5.4-mini")"
+
+  if [[ -n "$HASH_A" && "$HASH_A" == "$HASH_B" && "$HASH_A" != "$HASH_C" ]]; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s HASH\n' "precommit_diff_hash_deterministic_changes"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_diff_hash_deterministic_changes: expected same hash for same diff and different hash after staged diff changed; first=${HASH_A:-<empty>} second=${HASH_B:-<empty>} third=${HASH_C:-<empty>}")
+    printf '  FAIL  %-45s expected HASH\n' "precommit_diff_hash_deterministic_changes"
+  fi
+
+  cat >"$CACHE_FILE" <<JSON
+{"hash":"$HASH_C","verdict":"approve","summary":"ok","findings":[],"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","durationMs":10}
+JSON
+  if cache_is_fresh_match "$CACHE_FILE" "$HASH_C" 30; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s FRESH\n' "precommit_cache_fresh_hash_match"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_cache_fresh_hash_match: expected fresh matching cache to pass")
+    printf '  FAIL  %-45s expected FRESH\n' "precommit_cache_fresh_hash_match"
+  fi
+
+  cat >"$CACHE_FILE" <<JSON
+{"hash":"$HASH_C","verdict":"approve","summary":"old","findings":[],"ts":"2000-01-01T00:00:00Z","durationMs":10}
+JSON
+  if ! cache_is_fresh_match "$CACHE_FILE" "$HASH_C" 30; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s STALE\n' "precommit_cache_stale_rejected"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_cache_stale_rejected: expected stale cache to fail freshness check")
+    printf '  FAIL  %-45s expected STALE\n' "precommit_cache_stale_rejected"
+  fi
+
+  cat >"$CACHE_FILE" <<JSON
+{"hash":"not-$HASH_C","verdict":"approve","summary":"wrong","findings":[],"ts":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","durationMs":10}
+JSON
+  if ! cache_is_fresh_match "$CACHE_FILE" "$HASH_C" 30; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s MISS\n' "precommit_cache_hash_mismatch_rejected"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_cache_hash_mismatch_rejected: expected mismatched hash to fail freshness check")
+    printf '  FAIL  %-45s expected MISS\n' "precommit_cache_hash_mismatch_rejected"
+  fi
+
+  rm -f "$CACHE_FILE"
+  write_cache "$CACHE_FILE" "$HASH_C" '{"verdict":"approve","summary":"ok","findings":[]}' 10
+  if [[ -f "$CACHE_FILE" ]] && jq -e '.verdict == "approve" and .hash == "'"$HASH_C"'"' "$CACHE_FILE" >/dev/null 2>&1; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s WRITE\n' "precommit_write_cache_approve"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_write_cache_approve: expected approve verdict to be written")
+    printf '  FAIL  %-45s expected WRITE\n' "precommit_write_cache_approve"
+  fi
+
+  rm -f "$CACHE_FILE"
+  write_cache "$CACHE_FILE" "$HASH_C" '{"verdict":"needs-attention","summary":"review","findings":[]}' 10
+  if [[ -f "$CACHE_FILE" ]] && jq -e '.verdict == "needs-attention" and .hash == "'"$HASH_C"'"' "$CACHE_FILE" >/dev/null 2>&1; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s WRITE\n' "precommit_write_cache_needs_attention"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_write_cache_needs_attention: expected needs-attention verdict to be written")
+    printf '  FAIL  %-45s expected WRITE\n' "precommit_write_cache_needs_attention"
+  fi
+
+  rm -f "$CACHE_FILE"
+  write_cache "$CACHE_FILE" "$HASH_C" '{"verdict":"blocked","summary":"no","findings":[]}' 10
+  if [[ ! -f "$CACHE_FILE" ]]; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s SKIP\n' "precommit_write_cache_blocked_skipped"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_write_cache_blocked_skipped: expected blocked verdict not to write cache")
+    printf '  FAIL  %-45s expected SKIP\n' "precommit_write_cache_blocked_skipped"
+  fi
+
+  rm -f "$CACHE_FILE"
+  write_cache "$CACHE_FILE" "$HASH_C" '{"verdict":"garbage","summary":"no","findings":[]}' 10
+  if [[ ! -f "$CACHE_FILE" ]]; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s SKIP\n' "precommit_write_cache_other_skipped"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_write_cache_other_skipped: expected unknown verdict not to write cache")
+    printf '  FAIL  %-45s expected SKIP\n' "precommit_write_cache_other_skipped"
+  fi
+fi
+
+echo
+echo "------------------------------------------"
+printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
+if (( FAIL > 0 )); then
+  echo; echo "Failures:"; printf '  - %s\n' "${FAILED[@]}"; exit 1
+fi

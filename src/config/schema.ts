@@ -74,6 +74,15 @@ export const CodexReviewModeSchema = z.enum(["ask", "auto"]);
 export const CodexReviewExecutionSchema = z.enum(["foreground", "background"]);
 export const CodexReviewScopeSchema = z.enum(["auto", "working-tree", "branch"]);
 export const CodexSeveritySchema = z.enum(["critical", "high", "medium", "low"]);
+const NON_CODEX_MODELS: readonly string[] = ["gpt-5.5-pro"];
+const CODEX_MODEL_ERROR =
+  "gpt-5.5-pro is not a Codex CLI model (it is the ChatGPT-Pro/Oracle browser lane); use gpt-5.5, gpt-5.4, or gpt-5.4-mini";
+export const CodexModelSchema = z
+  .string()
+  .min(1)
+  .refine((model) => !NON_CODEX_MODELS.includes(model.toLowerCase()), {
+    message: CODEX_MODEL_ERROR,
+  });
 
 export const CodexPreCommitHookSchema = z
   .object({
@@ -119,7 +128,7 @@ export const CodexReviewSchema = z
     execution: CodexReviewExecutionSchema.optional(),
     scope: CodexReviewScopeSchema.optional(),
     base: z.string().min(1).optional(),
-    model: z.string().min(1).optional(),
+    model: CodexModelSchema.optional(),
     // Mechanical PreToolUse pre-commit gate; off by default.
     preCommitHook: CodexPreCommitHookSchema.optional(),
     warmCache: CodexWarmCacheSchema.optional(),
@@ -132,7 +141,7 @@ export const CodexRescueSchema = z
   .object({
     enabled: z.boolean().default(true),
     mode: z.enum(["ask", "auto"]).default("ask"),
-    model: z.string().min(1).default("gpt-5.4-mini"),
+    model: CodexModelSchema.default("gpt-5.4-mini"),
   })
   .strict();
 export type CodexRescue = z.infer<typeof CodexRescueSchema>;
@@ -228,7 +237,7 @@ export const CodexLifecycleSchema = z
     enabled: z.boolean().default(false),
     mode: CodexLifecycleModeSchema.default("ask"),
     execution: CodexLifecycleExecutionSchema.default("background"),
-    model: z.string().min(1).default("gpt-5.4-mini"),
+    model: CodexModelSchema.default("gpt-5.4-mini"),
     triggers: CodexLifecycleTriggersSchema.default(() => ({
       ...DEFAULT_CODEX_LIFECYCLE_TRIGGERS,
     })),
@@ -256,7 +265,7 @@ export type OracleConfig = z.infer<typeof OracleConfigSchema>;
 
 export const CodexProfileSchema = z
   .object({
-    model: z.string().min(1).optional(),
+    model: CodexModelSchema.optional(),
     reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
     sandbox: z.enum(["read-only", "workspace-write"]).optional(),
   })

@@ -639,6 +639,11 @@ else
   fi
 fi
 
+# Library mode: allow tests to source helpers without running the gate.
+if [[ "${COMPOSER_PRECOMMIT_LIB_ONLY:-0}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 CONFIG_PATH="${COMPOSER_CONFIG:-${CLAUDE_PROJECT_DIR:-.}/composer.config.json}"
 if [[ ! -f "$CONFIG_PATH" ]]; then
   exit 0
@@ -677,6 +682,9 @@ esac
 case "$TIMEOUT_MS" in
   ''|*[!0-9]*) fail_review "$FAIL_CLOSED" "invalid timeoutMs: $TIMEOUT_MS" ;;
 esac
+if [[ "$(printf '%s' "$CODEX_MODEL" | tr '[:upper:]' '[:lower:]')" == "gpt-5.5-pro" ]]; then
+  fail_review "$FAIL_CLOSED" "gpt-5.5-pro is the ChatGPT-Pro/Oracle browser lane, not a Codex CLI model"
+fi
 case "$WARM_CACHE_MAX_AGE_MINUTES" in
   ''|*[!0-9]*) WARM_CACHE_MAX_AGE_MINUTES=30 ;;
 esac

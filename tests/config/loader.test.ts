@@ -554,6 +554,39 @@ describe("parseConfig - codexLifecycle", () => {
   });
 });
 
+describe("parseConfig - Codex model guard", () => {
+  it("rejects gpt-5.5-pro on Codex CLI lanes", () => {
+    const invalidCodexLaneConfigs = [
+      { codexReview: { enabled: true, model: "gpt-5.5-pro" } },
+      { codexRescue: { model: "gpt-5.5-pro" } },
+      { codexLifecycle: { model: "gpt-5.5-pro" } },
+      { codexProfiles: { review: { model: "gpt-5.5-pro" } } },
+    ];
+
+    for (const config of invalidCodexLaneConfigs) {
+      expect(() => parseConfig({ ...VALID, ...config })).toThrow(
+        /gpt-5\.5-pro is not a Codex CLI model/,
+      );
+    }
+  });
+
+  it("accepts valid Codex CLI surface models", () => {
+    expect(() =>
+      parseConfig({ ...VALID, codexReview: { enabled: true, model: "gpt-5.5" } }),
+    ).not.toThrow();
+    expect(() =>
+      parseConfig({ ...VALID, codexRescue: { model: "gpt-5.4-mini" } }),
+    ).not.toThrow();
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        codexLifecycle: { model: "gpt-5.5" },
+        codexProfiles: { rescue: { model: "gpt-5.4-mini" } },
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("loadConfig (disk)", () => {
   it("loads + validates JSON file from disk", () => {
     const tmp = path.join(os.tmpdir(), `composer-cfg-${Date.now()}.json`);
