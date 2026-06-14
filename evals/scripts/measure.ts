@@ -235,7 +235,6 @@ async function runTask(
   mcpConfigPath: string,
 ): Promise<RunOutcome> {
   const worktreePath = `/tmp/composer-measure-${process.pid}-${task.id}`;
-  const start = Date.now();
   const glmBefore = glmLogLineCount();
   try {
     await new Promise<void>((resolve, reject) => {
@@ -247,6 +246,7 @@ async function runTask(
       fs.rmSync(path.join(worktreePath, rel), { force: true });
     }
 
+    const start = Date.now();
     const stdout = await new Promise<string>((resolve, reject) => {
       const child = execFile(
         "claude",
@@ -267,9 +267,9 @@ async function runTask(
       );
       child.stdin?.end();
     });
+    const durationMs = Date.now() - start;
 
     const { blocks, final, composerInitStatus } = parseStream(stdout);
-    const durationMs = Date.now() - start;
     const { ccTotal, ccOutput, perModel } = ccFromModelUsage(final?.modelUsage);
     const glmOffloaded = glmOffloadedSince(glmBefore);
     const actualSequence = extractToolUseDispatchSequence(blocks) as SubagentRole[];
@@ -311,9 +311,11 @@ async function runWithWarmup(
   const dispatchRequired = task.expect.dispatchRequired ?? true;
   let best: { outcome: RunOutcome; ts: TaskScore } | undefined;
   let attempts = 0;
+  let totalDurationMs = 0;
   for (let attempt = 0; attempt <= args.warmupRetries; attempt++) {
     attempts = attempt + 1;
     const outcome = await runTask(task, args.model, args.budgetUsd, mcpConfigPath);
+    totalDurationMs += outcome.durationMs;
     const ts = scoreTask(outcome, { baselineMainTokens });
     if (!best || ts.score > best.ts.score) best = { outcome, ts };
     const raceSuspected =
@@ -323,6 +325,7 @@ async function runWithWarmup(
       console.log(`  [${task.id}] retry ${attempt + 1}/${args.warmupRetries} — composer "${outcome.composerInitStatus}", no dispatch`);
     }
   }
+  best!.outcome.durationMs = totalDurationMs;
   return { outcome: best!.outcome, ts: best!.ts, attempts };
 }
 
@@ -355,6 +358,7 @@ async function main(): Promise<void> {
     if (!baseline) { console.error(`skip ${task.id}: no baseline`); continue; }
     try {
       const ccs: number[] = [];
+      const durations: number[] = [];
       const scoreVals: number[] = [];
       let last: Awaited<ReturnType<typeof runWithWarmup>> | undefined;
       let successes = 0;
@@ -363,6 +367,7 @@ async function main(): Promise<void> {
         const r = await runWithWarmup(task, args, baseline.mainSessionTokens, mcpConfigPath);
         last = r;
         ccs.push(r.outcome.ccTotal);
+        durations.push(r.outcome.durationMs);
         scoreVals.push(r.ts.score);
         if (r.outcome.success) successes++;
         if (r.outcome.dispatchedCorrectly) dispatchOks++;
@@ -370,6 +375,8 @@ async function main(): Promise<void> {
       }
       const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
       const meanCc = Math.round(mean(ccs));
+      const durationMs = Math.round(mean(durations));
+      const wallSeconds = Math.round(durationMs / 1000);
       const meanScore = mean(scoreVals);
       scores.push({ taskId: task.id, score: meanScore, components: last!.ts.components });
       const savingsPct = ((1 - meanCc / baseline.mainSessionTokens) * 100).toFixed(1);
@@ -377,6 +384,7 @@ async function main(): Promise<void> {
         taskId: task.id, brainModel: args.model, runs: args.runs,
         baselineCC: baseline.mainSessionTokens, ccTotalMean: meanCc,
         ccMin: Math.min(...ccs), ccMax: Math.max(...ccs),
+        durationMs, wallSeconds,
         ccSavedPct: savingsPct, successRate: `${successes}/${args.runs}`,
         dispatchRate: `${dispatchOks}/${args.runs}`, scoreMean: meanScore.toFixed(4),
       };
@@ -385,7 +393,7 @@ async function main(): Promise<void> {
     } catch (err) {
       console.error(`task ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`);
       scores.push({ taskId: task.id, score: 0, components: { success: 0, token: 0, dispatch: 0 } });
-      rows.push({ taskId: task.id, brainModel: args.model, runs: args.runs, baselineCC: baseline.mainSessionTokens, ccTotalMean: "ERR", ccMin: "-", ccMax: "-", ccSavedPct: "-", successRate: "-", dispatchRate: "-", scoreMean: "0.0000" });
+      rows.push({ taskId: task.id, brainModel: args.model, runs: args.runs, baselineCC: baseline.mainSessionTokens, ccTotalMean: "ERR", ccMin: "-", ccMax: "-", durationMs: "ERR", wallSeconds: "-", ccSavedPct: "-", successRate: "-", dispatchRate: "-", scoreMean: "0.0000" });
     }
   }
 

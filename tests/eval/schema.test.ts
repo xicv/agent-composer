@@ -88,10 +88,39 @@ describe("EvalResultSchema", () => {
         mainSessionTokens: 100,
         dispatchedCorrectly: true,
         durationMs: 250,
+        wallSeconds: 0,
         workerCalls: 1,
         workerTextSample: "ok",
       }),
     ).not.toThrow();
+  });
+
+  it("keeps wallSeconds optional and rejects latency savings claims", () => {
+    expect(() =>
+      EvalResultSchema.parse({
+        taskId: "t1",
+        success: true,
+        mainSessionTokens: 100,
+        dispatchedCorrectly: true,
+        durationMs: 250,
+        workerCalls: 1,
+        workerTextSample: "ok",
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      EvalResultSchema.parse({
+        taskId: "t1",
+        success: true,
+        mainSessionTokens: 100,
+        dispatchedCorrectly: true,
+        durationMs: 250,
+        wallSeconds: 0,
+        latencySavedPct: 10,
+        workerCalls: 1,
+        workerTextSample: "ok",
+      }),
+    ).toThrow();
   });
 
   it("rejects negative token count", () => {

@@ -45,11 +45,12 @@ function ccTotal(stdout: string): number {
   return total;
 }
 
-async function runStock(task: EvalTask, model: string, budgetUsd: number, mcpCfg: string): Promise<number> {
+async function runStock(task: EvalTask, model: string, budgetUsd: number, mcpCfg: string): Promise<{ cc: number; wallSeconds: number }> {
   const wt = `/tmp/composer-baseline-${process.pid}-${task.id}`;
   try {
     await new Promise<void>((res, rej) => execFile("git", ["worktree", "add", wt, "HEAD", "--detach"], {}, (e) => e ? rej(e) : res()));
     for (const rel of CLEAN_BEFORE[task.id] ?? []) fs.rmSync(path.join(wt, rel), { force: true });
+    const start = Date.now();
     const stdout = await new Promise<string>((res, rej) => {
       const child = execFile("claude",
         ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
@@ -58,7 +59,8 @@ async function runStock(task: EvalTask, model: string, budgetUsd: number, mcpCfg
         (err, so) => err ? rej(new Error(err.message)) : res(so));
       child.stdin?.end();
     });
-    return ccTotal(stdout);
+    const wallSeconds = Math.round((Date.now() - start) / 1000);
+    return { cc: ccTotal(stdout), wallSeconds };
   } finally {
     await new Promise<void>((res) => execFile("git", ["worktree", "remove", "--force", wt], {}, () => res()));
   }
@@ -89,9 +91,12 @@ async function main(): Promise<void> {
     const task = sel[i]!;
     try {
       const ccs: number[] = [];
+      const wallSeconds: number[] = [];
       for (let r = 0; r < args.runs; r++) {
         try {
-          ccs.push(await runStock(task, args.model, args.budgetUsd, mcpCfg));
+          const result = await runStock(task, args.model, args.budgetUsd, mcpCfg);
+          ccs.push(result.cc);
+          wallSeconds.push(result.wallSeconds);
         } catch (e) {
           const msg = e instanceof Error ? e.message.slice(0, 120) : String(e);
           console.error(`  ${task.id} run ${r + 1}/${args.runs} failed (skipped): ${msg}`);
@@ -99,8 +104,9 @@ async function main(): Promise<void> {
       }
       if (ccs.length === 0) throw new Error('all runs failed');
       const cc = median(ccs);
-      baselines[task.id] = { mainSessionTokens: cc, method: `stock total-CC (no composer MCP), ${args.model}, median of ${args.runs}` };
-      console.log(`[${i + 1}/${sel.length}] ${task.id}: median=${cc} runs=[${ccs.join(",")}]`);
+      const wall = median(wallSeconds);
+      baselines[task.id] = { mainSessionTokens: cc, wallSeconds: wall, method: `stock total-CC (no composer MCP), ${args.model}, median of ${args.runs}` };
+      console.log(`[${i + 1}/${sel.length}] ${task.id}: median=${cc} wallSeconds=${wall} runs=[${ccs.join(",")}]`);
     } catch (err) {
       console.error(`[${i + 1}/${sel.length}] ${task.id} FAILED: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -56,6 +56,7 @@ export const EvalResultSchema = z
     mainSessionTokens: z.number().int().nonnegative(),
     dispatchedCorrectly: z.boolean(),
     durationMs: z.number().nonnegative(),
+    wallSeconds: z.number().optional(),
     workerCalls: z.number().int().nonnegative(),
     workerTextSample: z.string(),
   })
