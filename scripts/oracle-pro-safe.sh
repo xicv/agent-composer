@@ -41,6 +41,7 @@ Environment overrides:
   ORACLE_PRO_REATTACH_DELAY      default: 30s
   ORACLE_PRO_REATTACH_INTERVAL   default: 2m
   ORACLE_PRO_REATTACH_TIMEOUT    default: 2m
+  ORACLE_PRO_ATTACHMENTS         default: never (inline files; set to auto/bundle for large files)
 
 Secret file protection:
   --file paths matching known secret patterns (.env, *.pem, *.key, id_rsa, .aws/credentials,
@@ -135,6 +136,7 @@ STANDARD_THINKING="${ORACLE_PRO_STANDARD_THINKING:-standard}"
 DEEP_THINKING="${ORACLE_PRO_DEEP_THINKING:-extended}"
 RESEARCH_MODE="off"
 DEFAULT_STRATEGY="select"
+ATTACHMENTS_MODE="${ORACLE_PRO_ATTACHMENTS:-never}"
 
 case "$MODE" in
   quick) MODEL="$QUICK_MODEL"; THINKING="$QUICK_THINKING"; DEFAULT_STRATEGY="current" ;;
@@ -273,6 +275,7 @@ fi
 
 add_supported_flag ARGS --browser-timeout "${ORACLE_PRO_TIMEOUT:-20m}"
 add_supported_flag ARGS --browser-input-timeout "${ORACLE_PRO_INPUT_TIMEOUT:-60s}"
+add_supported_flag ARGS --browser-attachments "$ATTACHMENTS_MODE"
 add_supported_flag ARGS --browser-auto-reattach-delay "${ORACLE_PRO_REATTACH_DELAY:-30s}"
 add_supported_flag ARGS --browser-auto-reattach-interval "${ORACLE_PRO_REATTACH_INTERVAL:-2m}"
 add_supported_flag ARGS --browser-auto-reattach-timeout "${ORACLE_PRO_REATTACH_TIMEOUT:-2m}"

@@ -4,7 +4,7 @@
 
 ## North star (the only thing that matters)
 
-1. **Claude is the brain.** The most capable model (Opus 4.7) holds memory,
+1. **Claude is the brain.** The most capable model (Opus 4.8) holds memory,
    plans, and orchestrates. It does NOT execute.
 2. **Other agents are executors.** GLM (via Anthropic-compatible endpoint)
    does code work. `agy` CLI (Gemini 3.1) does routine review; Claude
@@ -38,7 +38,7 @@
 
 | Layer | What it does |
 |---|---|
-| Main Claude session (Opus 4.7) | Orchestration, memory, plans. **No `Edit`/`Write`/`Bash`** — denied in `.claude/settings.json` AND blocked by `scripts/boundary_guard.sh` |
+| Main Claude session (Opus 4.8) | Orchestration, memory, plans. **No `Edit`/`Write`/`Bash`** — denied in `.claude/settings.json` AND blocked by `scripts/boundary_guard.sh` |
 | Native subagents (`.claude/agents/*.md`) | Wrapping layer for context isolation. Each lists exactly one composer MCP tool + `Read`/`Glob`. Model: `haiku` |
 | MCP server (`src/index.ts`) | Wires `composer_research` / `composer_code` / `composer_review` / `composer_review_claude` to provider adapters; ships C0.3 tool annotations + `Use when…` descriptions |
 | Providers (`src/providers/*`) | `MockProvider` (free), `AnthropicCompatibleProvider` (GLM via z.ai), `CLIProvider` (`Codex`, `agy`, or bounded `claude -p`, spawn-based with stdin closed) |

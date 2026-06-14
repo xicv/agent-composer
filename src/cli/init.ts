@@ -49,7 +49,18 @@ const DEFAULT_COMPOSER_CONFIG = {
   roles: {
     researcher: {
       provider: "cli",
-      cli: ["codex", "--search", "--ask-for-approval", "never", "exec", "--ephemeral", "--sandbox", "read-only"],
+      cli: [
+        "codex",
+        "--search",
+        "--ask-for-approval",
+        "never",
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "-c",
+        "model=\"gpt-5.4-mini\"",
+      ],
       timeoutMs: 180000,
       retries: 0,
     },
@@ -78,12 +89,12 @@ const DEFAULT_COMPOSER_CONFIG = {
     },
     reviewerClaude: {
       provider: "cli",
-      model: "claude-opus-review",
+      model: "claude-opus-4-8",
       cli: [
         "claude",
         "-p",
         "--model",
-        "opus",
+        "claude-opus-4-8",
         "--permission-mode",
         "bypassPermissions",
         "--setting-sources",
@@ -118,7 +129,7 @@ const DEFAULT_COMPOSER_CONFIG = {
     execution: "background",
     scope: "auto",
     base: "main",
-    model: "gpt-5.4-mini",
+    model: "gpt-5.5",
     preCommitHook: {
       enabled: false,
       blockOnSeverity: "high",

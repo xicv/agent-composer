@@ -48,6 +48,8 @@ describe("composer init", () => {
       "--ephemeral",
       "--sandbox",
       "read-only",
+      "-c",
+      "model=\"gpt-5.4-mini\"",
     ]);
     expect(cfg.roles.researcher.timeoutMs).toBe(180000);
     expect(cfg.roles.researcher.retries).toBe(0);
@@ -79,7 +81,7 @@ describe("composer init", () => {
     expect(cfg.spendAuthorization.mode).toBe("interactive");
     expect(cfg.spendAuthorization.maxUsdPerCall).toBe(0.5);
     expect(cfg.codexReview.preCommitCommand).toBe("adversarial-review");
-    expect(cfg.codexReview.model).toBe("gpt-5.4-mini");
+    expect(cfg.codexReview.model).toBe("gpt-5.5");
     expect(cfg.codexLifecycle.enabled).toBe(false);
     expect(cfg.codexLifecycle.mode).toBe("ask");
     expect(cfg.codexLifecycle.triggers.postCodeApply).toBe(true);
