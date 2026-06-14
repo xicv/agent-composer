@@ -64,7 +64,13 @@ const DEFAULT_COMPOSER_CONFIG = {
       timeoutMs: 180000,
       retries: 0,
     },
-    coder: { provider: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", apiKeyEnv: "ANTHROPIC_AUTH_TOKEN" },
+    coder: {
+      provider: "anthropic",
+      baseUrl: "https://api.z.ai/api/anthropic",
+      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+      // glm-5.2 requires a z.ai GLM Coding Plan token (standalone metered API ships later). Library fallback stays glm-5.1.
+      model: "glm-5.2",
+    },
     coderCli: {
       provider: "cli",
       cli: [

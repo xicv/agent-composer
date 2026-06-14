@@ -38,6 +38,7 @@ describe("composer init", () => {
     runInit({ cwd, verbose: false });
     const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
     expect(cfg.roles.coder.provider).toBe("anthropic");
+    expect(cfg.roles.coder.model).toBe("glm-5.2");
     expect(cfg.roles.researcher.provider).toBe("cli");
     expect(cfg.roles.researcher.cli).toEqual([
       "codex",

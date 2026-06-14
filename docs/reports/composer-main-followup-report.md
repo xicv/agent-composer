@@ -2,7 +2,7 @@
 
 ## Summary
 
-Research-first follow-up on latest main. Kept the library GLM fallback stable at `glm-5.1`, pinned this project's coder role to verified `glm-5.2`, and moved the Codex review gate to `gpt-5.5`. Two errors in a prior Oracle handoff were corrected.
+Research-first follow-up on latest main. Kept the library GLM fallback stable at `glm-5.1`, pinned this project's coder role and new `agent-composer init` scaffolds to verified `glm-5.2` (requires a z.ai Coding Plan token), and moved the Codex review gate to `gpt-5.5`. Two errors in a prior Oracle handoff were corrected.
 
 ## Research findings (web-verified 2026-06-14)
 
@@ -20,12 +20,13 @@ Research-first follow-up on latest main. Kept the library GLM fallback stable at
 | `src/config/env.ts` | doc comment | Documents fallback as `glm-5.1` |
 | `scripts/run-evolve.ts` | fallback | Kept fallback at `glm-5.1` |
 | `composer.config.json` | `roles.coder.model` | Explicit project pin to verified `glm-5.2` |
+| `src/cli/init.ts` | `DEFAULT_COMPOSER_CONFIG.roles.coder.model` | New `agent-composer init` projects scaffold `glm-5.2`; `DEFAULT_ANTHROPIC_MODEL` remains `glm-5.1` for consumers without Coding-Plan access |
 | `composer.config.json` | `roles.researcher.cli` | Added explicit `gpt-5.4-mini` Codex model pin |
 | `composer.config.json` | `roles.coderCli.cli` | Left profile-driven; no static model pin |
 | `composer.config.json` | `codexReview.model` | `gpt-5.4-mini` -> `gpt-5.5` |
 | `composer.config.schema.json` | description | `glm-5.1` -> `glm-5.2` |
 | `tests/registry.test.ts` | default test title + assertion | Expected library fallback remains `glm-5.1` |
-| `src/cli/init.ts` | `researcher`, `coderCli`, `codexReview` defaults | Researcher pinned to `gpt-5.4-mini`; coderCli remains profile-driven; codexReview updated to `gpt-5.5` |
+| `src/cli/init.ts` | `researcher`, `coder`, `coderCli`, `codexReview` defaults | Researcher pinned to `gpt-5.4-mini`; coder scaffold pins `glm-5.2`; coderCli remains profile-driven; codexReview updated to `gpt-5.5` |
 | `tests/cli/init.test.ts` | assertions | Updated researcher pin, coderCli profile-driven args, and codexReview model |
 | `tests/config/loader.test.ts` | researcher CLI assertion | Updated expected Codex model pin |
 | `README.md` | `codexReview` example | Updated to `gpt-5.5` |
@@ -40,6 +41,7 @@ Research-first follow-up on latest main. Kept the library GLM fallback stable at
 - ajv schema validate `composer.config.json` valid.
 - zero active `glm-5.2[1m]` model references remain outside this correction report.
 - `DEFAULT_ANTHROPIC_MODEL` remains `glm-5.1`.
+- New `agent-composer init` projects scaffold `roles.coder.model=glm-5.2`, which requires a z.ai Coding Plan token; the library fallback remains `glm-5.1` for consumers without Coding-Plan access.
 - Live provider probe confirmed the explicit `roles.coder.model=glm-5.2` project pin resolves on the z.ai Coding Plan endpoint.
 - Researcher is pinned to `gpt-5.4-mini`; coderCli has no static model pin and uses profile-driven model selection; codexReview is `gpt-5.5`.
 
