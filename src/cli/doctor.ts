@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../config/loader.js";
 import type { CodexRescue, CodexReview, ComposerConfig } from "../config/schema.js";
+import { DEFAULT_ANTHROPIC_MODEL } from "../registry.js";
 import { resolveCodexLifecycle } from "../util/codexLifecycle.js";
 
 export interface CodexPluginRoot {
@@ -114,6 +115,10 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
   const resolved = resolveCodexReview(codexReview);
   const rescue = resolveCodexRescue(config.codexRescue);
   const lifecycle = resolveCodexLifecycle(config.codexLifecycle);
+  const coderModel = config.roles.coder.model ?? DEFAULT_ANTHROPIC_MODEL;
+  const coderModelNote = coderModel.startsWith("glm-5.2")
+    ? " (requires a z.ai GLM Coding Plan token; standalone API pending)"
+    : "";
   const enabledCheck = codexReview
     ? reviewEnabledCheck(resolved)
     : {
@@ -150,6 +155,11 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
       name: "config: codexRescue",
       status: "pass",
       detail: `enabled=${rescue.enabled}, mode=${rescue.mode}, model=${rescue.model}`,
+    },
+    {
+      name: "config: coder model",
+      status: "pass",
+      detail: `model=${coderModel}${coderModelNote}`,
     },
     {
       name: "config: codexLifecycle",

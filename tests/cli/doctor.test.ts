@@ -82,6 +82,10 @@ describe("doctor config checks", () => {
       .toContain("desktop=off");
     expect(checks.find((check) => check.name === "config: codexRescue")?.detail)
       .toContain("enabled=true");
+    expect(checks.find((check) => check.name === "config: coder model")).toMatchObject({
+      status: "pass",
+      detail: "model=glm-4.6",
+    });
     expect(checks.find((check) => check.name === "config: codexLifecycle")).toMatchObject({
       status: "warn",
       detail: expect.stringContaining("enabled=false"),
@@ -89,6 +93,25 @@ describe("doctor config checks", () => {
     expect(checks.find((check) => check.name === "config: codexLifecycle fallback")).toMatchObject({
       status: "warn",
       detail: expect.stringContaining("enabled=false"),
+    });
+  });
+
+  it("reports the default GLM coder model with Coding Plan note", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      roles: {
+        ...BASE_CONFIG.roles,
+        coder: {
+          provider: "anthropic",
+          baseUrl: "https://api.z.ai/api/anthropic",
+          apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+        },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: coder model")).toMatchObject({
+      status: "pass",
+      detail: "model=glm-5.2 (requires a z.ai GLM Coding Plan token; standalone API pending)",
     });
   });
 

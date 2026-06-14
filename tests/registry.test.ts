@@ -143,9 +143,9 @@ describe("ProviderRegistry — anthropic model precedence (Step 4)", () => {
     expect(p.modelLabel).toBe("glm-4.6");
   });
 
-  it("defaults to glm-5.1 when neither env nor config provide a model", () => {
+  it("defaults to glm-5.2 when neither env nor config provide a model", () => {
     const p = anthropic(undefined).getProviderForRole("coder");
-    expect(p.modelLabel).toBe("glm-5.1");
+    expect(p.modelLabel).toBe("glm-5.2");
   });
 
   it("treats empty env var as unset", () => {
