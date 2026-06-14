@@ -335,15 +335,16 @@ describe("goal", () => {
 
     expect(result.record.state).toBe("active");
     expect(result.record.checks.map((check) => check.status)).toEqual(["pending", "pending"]);
-    expect(result.nextAction.tool).toBe("composer_goal_status");
-    expect(result.nextAction.reason).toContain("2 check(s) pending: unit, typecheck");
-    expect(result.nextAction.reason).toContain("report results via signals.checkResults");
-    expect(result.nextAction).not.toHaveProperty("args");
+    expect(result.nextAction).toEqual({
+      tool: "composer_goal_step",
+      manualChecks: ["unit", "typecheck"],
+      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
+    });
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_UNIT_COMMAND");
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_TYPECHECK_COMMAND");
   });
 
-  it("stepGoal marks achieved when all reported checks pass regardless of conditionMet", () => {
+  it("stepGoal keeps a goal active when conditionMet false vetoes passing checks", () => {
     const record = startGoal(root, {
       objective: "achieve",
       condition: "true passes",
@@ -360,13 +361,52 @@ describe("goal", () => {
       },
     });
 
-    expect(result.record.state).toBe("achieved");
+    expect(result.record.state).toBe("active");
     expect(result.record.turns).toBe(1);
     expect(result.nextAction).toEqual({
+      tool: "composer_code_cli",
+      reason: "condition not yet met - keep working",
+    });
+    expect(result.record.conditionMet).toBe(false);
+    expect(result.record.history?.[0]?.action).toBe("composer_code_cli");
+  });
+
+  it("stepGoal keeps a persisted conditionMet false veto until explicitly cleared", () => {
+    const record = startGoal(root, {
+      objective: "sticky veto",
+      condition: "checks pass and caller agrees",
+      checks: [{ name: "unit", command: "true" }],
+      maxTurns: 10,
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "sticky-veto",
+    });
+
+    const vetoed = stepGoal(root, {
+      goalId: record.goalId,
+      signals: {
+        conditionMet: false,
+        checkResults: [{ name: "unit", passed: true }],
+      },
+    });
+    const stillVetoed = stepGoal(root, { goalId: record.goalId });
+    const achieved = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { conditionMet: true },
+    });
+
+    expect(vetoed.record.state).toBe("active");
+    expect(stillVetoed.record.state).toBe("active");
+    expect(stillVetoed.record.conditionMet).toBe(false);
+    expect(stillVetoed.nextAction).toEqual({
+      tool: "composer_code_cli",
+      reason: "condition not yet met - keep working",
+    });
+    expect(achieved.record.state).toBe("achieved");
+    expect(achieved.record.conditionMet).toBe(true);
+    expect(achieved.nextAction).toEqual({
       tool: "none",
       reason: "condition met",
     });
-    expect(result.record.history?.[0]?.action).toBe("none");
   });
 
   it("stepGoal rejects unknown checkResult names without mutating the goal", () => {
@@ -406,6 +446,27 @@ describe("goal", () => {
     expect(result.record.state).toBe("achieved");
     expect(result.record.checks[0]?.status).toBe("pass");
     expect(result.nextAction.tool).toBe("none");
+  });
+
+  it("stepGoal marks achieved when all checks pass and conditionMet is omitted", () => {
+    const record = startGoal(root, {
+      objective: "accept checks",
+      condition: "declared check passes",
+      checks: [{ name: "unit", command: "true" }],
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "checks-achieve",
+    });
+
+    const result = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    expect(result.record.state).toBe("achieved");
+    expect(result.nextAction).toEqual({
+      tool: "none",
+      reason: "condition met",
+    });
   });
 
   it("stepGoal rejects duplicate checkResult names", () => {
@@ -596,6 +657,29 @@ describe("goal", () => {
       tool: "none",
       reason: "condition met",
     });
+    expect(result.record.conditionMet).toBe(true);
+  });
+
+  it("stepGoal keeps a check-less conditionMet false veto across signal-less steps", () => {
+    const record = startGoal(root, {
+      objective: "judge transcript conservatively",
+      condition: "caller eventually agrees",
+      maxTurns: 10,
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "condition-not-met",
+    });
+
+    const vetoed = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { conditionMet: false },
+    });
+    const stillVetoed = stepGoal(root, { goalId: record.goalId });
+
+    expect(vetoed.record.state).toBe("active");
+    expect(vetoed.record.conditionMet).toBe(false);
+    expect(stillVetoed.record.state).toBe("active");
+    expect(stillVetoed.record.conditionMet).toBe(false);
+    expect(stillVetoed.nextAction.tool).toBe("composer_code_cli");
   });
 
   it("stepGoal does not run checks when the turn cap is already exceeded with a prior failing check", () => {
@@ -747,5 +831,26 @@ describe("goal", () => {
     expect(result.nextAction.reason).toBe("checks failing - fix");
     expect(raw.history).toHaveLength(1);
     expect(raw.history[0].action).toBe("composer_code_cli");
+  });
+
+  it("stepGoal caps history at 100 entries", () => {
+    const record = startGoal(root, {
+      objective: "keep history bounded",
+      condition: "eventually done",
+      maxTurns: 200,
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "bounded-history",
+    });
+
+    let result = stepGoal(root, { goalId: record.goalId });
+    for (let i = 1; i < 125; i += 1) {
+      result = stepGoal(root, { goalId: record.goalId });
+    }
+
+    const raw = JSON.parse(readFileSync(join(root, GOAL_DIR, `${record.goalId}.json`), "utf8"));
+    expect(result.record.history).toHaveLength(100);
+    expect(raw.history).toHaveLength(100);
+    expect(raw.history[0].turn).toBe(26);
+    expect(raw.history[99].turn).toBe(125);
   });
 });

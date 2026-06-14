@@ -150,6 +150,18 @@ The first real Oracle run may open a browser for login. Complete the ChatGPT log
 | `composer_codex_lifecycle_decide` | Cheap policy decision: skip, ask, or run Codex.                           |
 | `composer_codex_lifecycle_run`    | Run an advisory Codex lifecycle checkpoint.                               |
 | `composer_codex_lifecycle_result` | Read a lifecycle checkpoint result.                                       |
+| `composer_route_decide`           | Choose the next Composer lane for a task.                                 |
+| `composer_workflow_plan`          | Produce an ordered workflow plan for multi-step work.                     |
+| `composer_audit_record`           | Append a structured audit event.                                          |
+| `composer_audit_read`             | Read recent audit events for project context.                             |
+| `composer_audit_summary`          | Summarize recent routing, review, test, and outcome audit events.         |
+| `composer_session_get`            | Inspect the current Composer session settings.                            |
+| `composer_session_set`            | Update session-local mode, oracle, or profile settings.                   |
+| `composer_status`                 | Read config, integration, activity, and recommendation status.            |
+| `composer_goal_start`             | Start one project goal with objective, condition, checks, and budget.     |
+| `composer_goal_status`            | Inspect active or named goal state and next advisory action.              |
+| `composer_goal_step`              | Advance the advisory goal loop from deterministic check results.          |
+| `composer_goal_clear`             | Cancel or clear a project goal record.                                    |
 | `composer_config_get`             | Inspect active/project/global Composer config.                            |
 | `composer_config_set`             | Safely patch lifecycle and review-gate settings.                          |
 

@@ -2,6 +2,10 @@ import { clearGoal, isTerminal, readActiveGoal, readGoal, startGoal, stepGoal } 
 import type { GoalCheck, GoalRecord, NextAction } from "../util/goal.js";
 
 export type GoalAction = "start" | "status" | "step" | "clear";
+type GoalBootstrapAction = {
+  tool: "composer_route_decide";
+  reason: string;
+};
 
 export interface GoalSummary {
   goalId?: string;
@@ -9,7 +13,7 @@ export interface GoalSummary {
   turns?: number;
   maxTurns?: number;
   checks?: GoalCheck[];
-  nextAction?: NextAction;
+  nextAction?: NextAction | GoalBootstrapAction;
   lastAction?: string;
   lastVerdict?: string;
   lastReason?: string;
@@ -93,12 +97,17 @@ function parseSignals(flags: string[]) {
   const failedAttempts = parseOptionalNonNegativeNumber(flags, "--failed-attempts");
   const maxTurns = parseOptionalNonNegativeNumber(flags, "--raise-max-turns");
   const maxCost = parseOptionalNonNegativeNumber(flags, "--raise-max-cost");
+  const conditionMet = flags.includes("--condition-met");
+  const conditionNotMet = flags.includes("--condition-not-met");
+  if (conditionMet && conditionNotMet) {
+    throw new Error("--condition-met and --condition-not-met are mutually exclusive");
+  }
   const budgetExtension = maxTurns !== undefined || maxCost !== undefined
     ? { maxTurns, maxCost }
     : undefined;
   return {
     checkResults: getRepeatedFlagValues(flags, "--check-result").map(parseCheckResult),
-    conditionMet: flags.includes("--condition-met") ? true : undefined,
+    conditionMet: conditionMet ? true : conditionNotMet ? false : undefined,
     spentUsd: parseOptionalNonNegativeNumber(flags, "--spent"),
     failedAttempts,
     stuck: flags.includes("--stuck") ? true : undefined,

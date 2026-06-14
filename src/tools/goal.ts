@@ -6,6 +6,7 @@ import {
   COMPOSER_GOAL_STEP,
   GOAL_CLEAR_DESCRIPTION,
   GOAL_START_DESCRIPTION,
+  GOAL_STEP_DESCRIPTION,
   GOAL_STATUS_DESCRIPTION,
 } from "../server/toolDescriptions.js";
 import { clearGoal, isTerminal, readActiveGoal, readGoal, startGoal, stepGoal } from "../util/goal.js";
@@ -85,7 +86,7 @@ export function registerGoalTools(ctx: ServerToolContext): void {
   server.registerTool(
     COMPOSER_GOAL_STEP,
     {
-      description: "Use when advancing a Composer goal from orchestrator-reported check results and returning the next recommended action; it does NOT execute anything (advisory).",
+      description: GOAL_STEP_DESCRIPTION,
       inputSchema: {
         goalId: z.string().optional(),
         signals: z.object({

@@ -154,6 +154,6 @@ export const GOAL_START_DESCRIPTION =
 export const GOAL_STATUS_DESCRIPTION =
   "Use when inspecting the active or named Composer goal. Read-only: returns state, turns, checks, and last action/verdict/reason without running checks or mutating goal state.";
 export const GOAL_STEP_DESCRIPTION =
-  "Use when advancing a Composer goal. Runs deterministic checks and returns the next recommended tool and args; advisory only — it does NOT execute the tool or mutate source files.";
+  "Use when advancing a Composer goal. Consumes orchestrator-reported deterministic check results and returns the next recommended tool (advisory; executes nothing).";
 export const GOAL_CLEAR_DESCRIPTION =
   "Use when cancelling the active or named Composer goal. Marks the goal cancelled and leaves the project-local goal record for auditability.";

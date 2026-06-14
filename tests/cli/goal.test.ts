@@ -39,9 +39,11 @@ describe("runGoal", () => {
     const pending = runGoal(root, { action: "step", flags: [] });
     expect(pending.state).toBe("active");
     expect(pending.turns).toBe(1);
-    expect(pending.nextAction?.tool).toBe("composer_goal_status");
-    expect(pending.nextAction?.reason).toContain("1 check(s) pending: unit");
-    expect(pending.nextAction).not.toHaveProperty("args");
+    expect(pending.nextAction).toMatchObject({
+      tool: "composer_goal_step",
+      manualChecks: ["unit"],
+      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
+    });
     expect(JSON.stringify(pending.nextAction)).not.toContain("true");
 
     const stepped = runGoal(root, { action: "step", flags: ["--check-result", "unit=pass"] });
@@ -79,6 +81,36 @@ describe("runGoal", () => {
 
     expect(stepped.state).toBe("achieved");
     expect(stepped.nextAction?.tool).toBe("none");
+  });
+
+  it("keeps an all-passing checked goal active with goal step --condition-not-met", () => {
+    runGoal(root, {
+      action: "start",
+      flags: ["veto completion", "--condition", "external condition is satisfied", "--check", "unit=true"],
+    });
+
+    const stepped = runGoal(root, {
+      action: "step",
+      flags: ["--check-result", "unit=pass", "--condition-not-met"],
+    });
+
+    expect(stepped.state).toBe("active");
+    expect(stepped.nextAction).toMatchObject({
+      tool: "composer_code_cli",
+      reason: "condition not yet met - keep working",
+    });
+  });
+
+  it("rejects mutually exclusive condition flags on goal step", () => {
+    runGoal(root, {
+      action: "start",
+      flags: ["contradict condition", "--condition", "condition signal is parsed"],
+    });
+
+    expect(() => runGoal(root, {
+      action: "step",
+      flags: ["--condition-met", "--condition-not-met"],
+    })).toThrow("--condition-met and --condition-not-met are mutually exclusive");
   });
 
   it("blocks a goal with goal step --spent when maxCost is reached", () => {

@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isTerminal, readGoal } from "../util/goal.js";
 
 export interface CleanupOptions {
   oracle?: boolean;      // limit to oracle-kind roots
@@ -11,12 +12,13 @@ export interface CleanupOptions {
 
 interface CleanupEnv { projectRoot: string; stateDir: string; nowMs: number; }
 
-interface CleanupRoot { dir: string; isOracle: boolean; isState: boolean; }
+interface CleanupRoot { dir: string; isOracle: boolean; isState: boolean; kind?: "goals"; }
 
 function cleanupRoots(env: CleanupEnv): CleanupRoot[] {
   return [
     { dir: path.join(env.projectRoot, ".composer", "oracle"), isOracle: true, isState: false },
     { dir: path.join(env.projectRoot, ".composer", "results"), isOracle: false, isState: false },
+    { dir: path.join(env.projectRoot, ".composer", "goals"), isOracle: false, isState: false, kind: "goals" },
     { dir: path.join(env.stateDir, "oracle-jobs"), isOracle: true, isState: true },
     { dir: path.join(env.stateDir, "oracle-locks"), isOracle: true, isState: true },
     { dir: path.join(env.stateDir, "codex-lifecycle"), isOracle: false, isState: true },
@@ -43,6 +45,25 @@ export function planCleanup(opts: CleanupOptions, env: CleanupEnv): string[] {
     if (st.isSymbolicLink() || !st.isDirectory()) continue; // safety: never follow symlinks
     let entries: string[];
     try { entries = readdirSync(root.dir); } catch { continue; }
+    if (root.kind === "goals") {
+      for (const name of entries) {
+        if (!name.endsWith(".json")) continue;
+        const full = path.join(root.dir, name);
+        if (opts.olderThanMs !== undefined) {
+          let mtime = 0;
+          try { mtime = statSync(full).mtimeMs; } catch { continue; }
+          if (env.nowMs - mtime < opts.olderThanMs) continue;
+        }
+        const goalId = name.slice(0, -".json".length);
+        try {
+          const record = readGoal(env.projectRoot, goalId);
+          if (record && isTerminal(record.state)) out.push(full);
+        } catch {
+          continue;
+        }
+      }
+      continue;
+    }
     for (const name of entries) {
       const full = path.join(root.dir, name);
       if (opts.olderThanMs !== undefined) {

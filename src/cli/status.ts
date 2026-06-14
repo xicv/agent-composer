@@ -80,8 +80,9 @@ function recommend(params: {
   exists: boolean;
   integrations: ComposerStatus["integrations"];
   active: ComposerStatus["active"];
+  goal?: ComposerStatus["goal"];
 }): ComposerStatus["recommendation"] {
-  const { exists, active } = params;
+  const { exists, active, goal } = params;
   if (!exists) {
     return { nextAction: "agent-composer init", reason: "no composer.config.json found" };
   }
@@ -90,6 +91,15 @@ function recommend(params: {
     (active.oracleJob.status === "queued" || active.oracleJob.status === "running")
   ) {
     return { nextAction: "composer_oracle_job_result", reason: "an Oracle job is in progress" };
+  }
+  if (goal?.state === "blocked") {
+    return {
+      nextAction: "composer_goal_step",
+      reason: "goal is blocked; extend budget, report check results, or clear",
+    };
+  }
+  if (goal?.state === "active") {
+    return { nextAction: "composer_goal_step", reason: "active goal; advance the goal loop" };
   }
   return {
     nextAction: "composer_route_decide",
@@ -240,7 +250,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
     // ignore
   }
 
-  const recommendation = recommend({ exists, integrations, active });
+  const recommendation = recommend({ exists, integrations, active, goal });
 
   return {
     config: {

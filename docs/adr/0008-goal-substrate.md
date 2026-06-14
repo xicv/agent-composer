@@ -25,7 +25,7 @@ Add a project-local goal store under `.composer/goals/<goalId>.json` and expose 
    - `active` and `blocked` are open states; `achieved`, `failed`, and `cancelled` are terminal states. `blocked` is resumable, while `composer_goal_step` refuses terminal goals.
 
 3. **`composer_goal_step` is advisory only.**
-   - It consumes orchestrator-reported check results and returns the next recommended action. If checks are pending, it returns a `bash` next action with the command strings to run. It never starts workers, never mutates source files, and never executes shell.
+   - It consumes orchestrator-reported check results and returns the next recommended action. If checks are pending, step returns a `manual_check` next action naming the pending check names (no command strings); the orchestrator reads the commands from `composer_goal_status`, runs them deliberately, and reports results via `composer_goal_step`. It never starts workers, never mutates source files, and never executes shell.
    - Rationale: this preserves operator control, prevents runaway loops, follows SGH structured-graph immutability by keeping objective and condition fixed within a goal version, and matches the north star: the orchestrator/brain executes while the substrate tracks state and budget.
 
 4. **Dual-loop escalation follows CVE2PoC.**

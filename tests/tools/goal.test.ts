@@ -90,10 +90,10 @@ describe("composer goal MCP tools", () => {
     expect(pending.state).toBe("active");
     expect(pending.turns).toBe(1);
     expect(pending.nextAction).toMatchObject({
-      tool: "composer_goal_status",
-      reason: "1 check(s) pending: unit - run the declared check command(s) yourself and report results via signals.checkResults",
+      tool: "composer_goal_step",
+      manualChecks: ["unit"],
+      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
     });
-    expect(pending.nextAction).not.toHaveProperty("args");
     expect(JSON.stringify(pending.nextAction)).not.toContain("true");
 
     const stepped = JSON.parse(textResult(await client.callTool({
@@ -213,6 +213,36 @@ describe("composer goal MCP tools", () => {
     });
   });
 
+  it("does not achieve a passing checked goal when conditionMet is false", async () => {
+    const { client } = await bootClient(root);
+
+    const started = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_start",
+      arguments: {
+        objective: "respect caller veto",
+        condition: "condition is still false",
+        checks: [{ name: "unit", command: "true" }],
+      },
+    })));
+
+    const stepped = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_step",
+      arguments: {
+        goalId: started.goalId,
+        signals: {
+          conditionMet: false,
+          checkResults: [{ name: "unit", passed: true }],
+        },
+      },
+    })));
+
+    expect(stepped.state).toBe("active");
+    expect(stepped.nextAction).toMatchObject({
+      tool: "composer_code_cli",
+      reason: "condition not yet met - keep working",
+    });
+  });
+
   it("declares composer_goal_step as advisory and closed-world", async () => {
     const { client } = await bootClient(root);
 
@@ -225,7 +255,7 @@ describe("composer goal MCP tools", () => {
       idempotentHint: false,
       openWorldHint: false,
     });
-    expect(step?.description).toContain("does NOT execute anything");
-    expect(step?.description).toContain("returning the next recommended action");
+    expect(step?.description).toContain("Consumes orchestrator-reported deterministic check results");
+    expect(step?.description).toContain("executes nothing");
   });
 });

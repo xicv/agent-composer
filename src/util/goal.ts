@@ -32,9 +32,20 @@ export const GoalCheckSchema = z.object({
   lastRunAt: z.string().datetime().optional(),
 }).strict();
 
+export const NextActionToolSchema = z.enum([
+  "none",
+  "composer_code_cli",
+  "composer_codex_lifecycle_run",
+  "composer_oracle_plan",
+  "composer_goal_status",
+  "composer_goal_step",
+  "composer_route_decide",
+]);
+
 export const NextActionSchema = z.object({
-  tool: z.string().min(1),
+  tool: NextActionToolSchema,
   args: z.record(z.string(), z.unknown()).optional(),
+  manualChecks: z.array(z.string().min(1)).optional(),
   reason: z.string().min(1),
 }).strict();
 
@@ -57,6 +68,7 @@ export const GoalSchema = z.object({
   maxTurns: z.number().int().positive(),
   maxCost: z.number().nonnegative().optional(),
   spentUsd: z.number().nonnegative().optional(),
+  conditionMet: z.boolean().optional(),
   workflow: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
   risk: z.string().min(1).optional(),
@@ -237,13 +249,14 @@ export function stepGoal(
       checks,
       turns,
       spentUsd,
+      conditionMet: signals.conditionMet !== undefined ? signals.conditionMet : base.conditionMet,
       updatedAt: new Date().toISOString(),
     });
 
     const overBudget = turns > record.maxTurns || isProjectedOverBudget(record);
     if (overBudget) {
       const verdict = record.checks.some((check) => check.status === "fail") ? "failed" : "blocked";
-      const nextAction = {
+      const nextAction: NextAction = {
         tool: "composer_goal_status",
         reason: verdict === "failed"
           ? "condition not met within budget - goal failed"
@@ -306,7 +319,7 @@ function recordWithAction(record: GoalRecord, state: GoalState, nextAction: Next
         verdict: state,
         reason: nextAction.reason,
       },
-    ],
+    ].slice(-100),
   });
 }
 
@@ -315,9 +328,13 @@ function decideNextAction(
   beforeChecks: GoalCheck[],
   signals: StepGoalSignals,
 ): NextAction {
+  const persisted = record.conditionMet;
+  const callerVetoes = persisted === false;
   const allPass = record.checks.length > 0
     && record.checks.every((check) => check.status === "pass");
-  const achieved = allPass || (record.checks.length === 0 && signals.conditionMet === true);
+  const achieved = !callerVetoes && (
+    allPass || (record.checks.length === 0 && persisted === true)
+  );
 
   if (achieved) {
     return {
@@ -326,12 +343,20 @@ function decideNextAction(
     };
   }
 
+  if (callerVetoes && allPass) {
+    return {
+      tool: "composer_code_cli",
+      reason: "condition not yet met - keep working",
+    };
+  }
+
   const pendingChecks = record.checks.filter((check) => check.status === "pending");
   if (pendingChecks.length > 0) {
     const pendingNames = pendingChecks.map((check) => check.name);
     return {
-      tool: "composer_goal_status",
-      reason: `${pendingChecks.length} check(s) pending: ${pendingNames.join(", ")} - run the declared check command(s) yourself and report results via signals.checkResults`,
+      tool: "composer_goal_step",
+      manualChecks: pendingNames,
+      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
     };
   }
 
