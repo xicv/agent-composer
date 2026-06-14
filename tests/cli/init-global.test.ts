@@ -38,6 +38,8 @@ describe("composer init --global", () => {
       "--ephemeral",
       "--sandbox",
       "read-only",
+      "-c",
+      "model=\"gpt-5.4-mini\"",
     ]);
     expect(cfg.roles.researcher.timeoutMs).toBe(180000);
     expect(cfg.roles.researcher.retries).toBe(0);
