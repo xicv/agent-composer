@@ -10,7 +10,9 @@
         "exec",
         "--ephemeral",
         "--sandbox",
-        "read-only"
+        "read-only",
+        "-c",
+        "model=\"gpt-5.4-mini\""
       ],
       "timeoutMs": 180000,
       "retries": 0
@@ -18,7 +20,8 @@
     "coder": {
       "provider": "anthropic",
       "baseUrl": "https://api.z.ai/api/anthropic",
-      "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN"
+      "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN",
+      "model": "glm-5.2"
     },
     "reviewer": {
       "provider": "cli",
@@ -34,12 +37,12 @@
     },
     "reviewerClaude": {
       "provider": "cli",
-      "model": "claude-opus-review",
+      "model": "claude-opus-4-8",
       "cli": [
         "claude",
         "-p",
         "--model",
-        "opus",
+        "claude-opus-4-8",
         "--permission-mode",
         "bypassPermissions",
         "--setting-sources",
@@ -97,7 +100,7 @@
     "execution": "background",
     "scope": "auto",
     "base": "main",
-    "model": "gpt-5.4-mini",
+    "model": "gpt-5.5",
     "preCommitHook": {
       "enabled": true,
       "blockOnSeverity": "high",

@@ -131,12 +131,12 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
         ...VALID.roles,
         reviewerClaude: {
           provider: "cli",
-          model: "claude-opus-review",
+          model: "claude-opus-4-8",
           cli: [
             "claude",
             "-p",
             "--model",
-            "opus",
+            "claude-opus-4-8",
             "--permission-mode",
             "bypassPermissions",
           ],
@@ -144,7 +144,7 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
       },
     });
     expect(cfg.roles.reviewerClaude?.cli?.[0]).toBe("claude");
-    expect(cfg.roles.reviewerClaude?.model).toBe("claude-opus-review");
+    expect(cfg.roles.reviewerClaude?.model).toBe("claude-opus-4-8");
   });
 
   it("accepts optional CLI execution controls on role config", () => {
@@ -200,7 +200,17 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
         ...VALID.roles,
         researcher: {
           provider: "cli",
-          cli: ["codex", "--search", "--ask-for-approval", "never", "exec", "--sandbox", "read-only"],
+          cli: [
+            "codex",
+            "--search",
+            "--ask-for-approval",
+            "never",
+            "exec",
+            "--sandbox",
+            "read-only",
+            "-c",
+            "model=\"gpt-5.4-mini\"",
+          ],
         },
       },
     });
@@ -212,6 +222,8 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
       "exec",
       "--sandbox",
       "read-only",
+      "-c",
+      "model=\"gpt-5.4-mini\"",
     ]);
   });
 

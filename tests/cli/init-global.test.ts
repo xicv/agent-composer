@@ -28,6 +28,7 @@ describe("composer init --global", () => {
     runGlobalInit({ globalDir, claudeHome, verbose: false });
     const cfg = JSON.parse(readFileSync(join(globalDir, "composer.config.json"), "utf8"));
     expect(cfg.roles.coder.provider).toBe("anthropic");
+    expect(cfg.roles.coder.model).toBe("glm-5.2");
     expect(cfg.roles.researcher.provider).toBe("cli");
     expect(cfg.roles.researcher.cli).toEqual([
       "codex",
@@ -38,6 +39,8 @@ describe("composer init --global", () => {
       "--ephemeral",
       "--sandbox",
       "read-only",
+      "-c",
+      "model=\"gpt-5.4-mini\"",
     ]);
     expect(cfg.roles.researcher.timeoutMs).toBe(180000);
     expect(cfg.roles.researcher.retries).toBe(0);

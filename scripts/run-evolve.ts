@@ -555,7 +555,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const codeModel = env.ANTHROPIC_MODEL ?? config.roles.coder.model ?? "glm-5.1";
+  const codeModel = env.ANTHROPIC_MODEL ?? config.roles.coder.model ?? "glm-5.2";
   const reflectionProvider = new AnthropicCompatibleProvider({
     baseUrl: env.ANTHROPIC_BASE_URL,
     apiKey: env.ANTHROPIC_AUTH_TOKEN,

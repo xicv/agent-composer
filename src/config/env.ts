@@ -16,7 +16,7 @@ export interface ComposerEnv {
   /**
    * Wave 3 Step 4 — model identifier override for the AnthropicCompatible
    * provider. Precedence (resolved in src/registry.ts):
-   *   process.env.ANTHROPIC_MODEL > composer.config.json role.model > "glm-5.1"
+   *   process.env.ANTHROPIC_MODEL > composer.config.json role.model > "glm-5.2"
    */
   ANTHROPIC_MODEL?: string;
 }

@@ -20,7 +20,7 @@ import type {
  * nor composer.config.json role.model are provided. Tracks the current
  * GLM family release (z.ai Anthropic-compat endpoint).
  */
-export const DEFAULT_ANTHROPIC_MODEL = "glm-5.1";
+export const DEFAULT_ANTHROPIC_MODEL = "glm-5.2";
 
 export class ProviderNotImplementedError extends Error {
   constructor(providerId: string) {

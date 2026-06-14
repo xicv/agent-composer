@@ -366,7 +366,7 @@ Lifecycle runs are advisory. They should not silently mutate files; apply sugges
     "enabled": true,
     "preCommitCommand": "adversarial-review",
     "scope": "auto",
-    "model": "gpt-5.4-mini",
+    "model": "gpt-5.5",
     "preCommitHook": {
       "enabled": true,
       "blockOnSeverity": "high",
