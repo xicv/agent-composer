@@ -116,9 +116,15 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
   const rescue = resolveCodexRescue(config.codexRescue);
   const lifecycle = resolveCodexLifecycle(config.codexLifecycle);
   const coderModel = config.roles.coder.model ?? DEFAULT_ANTHROPIC_MODEL;
-  const coderModelNote = coderModel.startsWith("glm-5.2")
-    ? " (requires a z.ai GLM Coding Plan token; standalone API pending)"
-    : "";
+  const coderBaseUrl = config.roles.coder.baseUrl ?? "";
+  const coderIsZai = coderBaseUrl.includes("api.z.ai");
+  const coderIsGlm52 = coderModel.startsWith("glm-5.2");
+  const coderModelStatus = coderIsGlm52 && !coderIsZai ? "warn" as const : "pass" as const;
+  const coderModelDetail = coderIsGlm52
+    ? coderIsZai
+      ? `model=${coderModel} (requires a z.ai GLM Coding Plan token; standalone API pending)`
+      : `model=${coderModel} but roles.coder.baseUrl is not a z.ai endpoint (${coderBaseUrl || "unset"}); glm-5.2 may require a z.ai GLM Coding Plan — verify your provider supports it`
+    : `model=${coderModel}`;
   const enabledCheck = codexReview
     ? reviewEnabledCheck(resolved)
     : {
@@ -158,8 +164,8 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
     },
     {
       name: "config: coder model",
-      status: "pass",
-      detail: `model=${coderModel}${coderModelNote}`,
+      status: coderModelStatus,
+      detail: coderModelDetail,
     },
     {
       name: "config: codexLifecycle",
