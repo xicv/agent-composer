@@ -416,6 +416,11 @@
         "failClosed": {
           "type": "boolean",
           "description": "If true, reviewer unavailability blocks commit. Omitted = false."
+        },
+        "maxConsecutiveBlocks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Opt-in anti-oscillation cap. After this many consecutive needs-attention blocks for the same branch/base, allow once with a loud audit entry and reset. Omitted or 0 = disabled."
         }
       }
     },

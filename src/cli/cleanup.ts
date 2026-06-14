@@ -6,6 +6,7 @@ import { isTerminal, readGoal } from "../util/goal.js";
 export interface CleanupOptions {
   oracle?: boolean;      // limit to oracle-kind roots
   state?: boolean;       // limit to ~/.local/state/composer roots
+  goals?: boolean;       // include terminal .composer/goals records
   olderThanMs?: number;  // only entries with mtime older than this age
   dryRun?: boolean;
 }
@@ -35,7 +36,7 @@ export function defaultStateDir(): string {
 /** Pure: returns the absolute entry paths that cleanup would remove. */
 export function planCleanup(opts: CleanupOptions, env: CleanupEnv): string[] {
   const roots = cleanupRoots(env).filter(
-    (r) => (!opts.oracle || r.isOracle) && (!opts.state || r.isState),
+    (r) => (!opts.oracle || r.isOracle) && (!opts.state || r.isState) && (opts.goals || r.kind !== "goals"),
   );
   const out: string[] = [];
   for (const root of roots) {
@@ -84,6 +85,7 @@ export function parseCleanupArgs(flags: readonly string[]): CleanupOptions | { e
     const f = flags[i];
     if (f === "--oracle") opts.oracle = true;
     else if (f === "--state") opts.state = true;
+    else if (f === "--goals") opts.goals = true;
     else if (f === "--dry-run") opts.dryRun = true;
     else if (f === "--older-than" || f?.startsWith("--older-than=")) {
       const raw = f.includes("=") ? f.slice(f.indexOf("=") + 1) : flags[++i];

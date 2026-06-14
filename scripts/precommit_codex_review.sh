@@ -8,7 +8,7 @@
 # allow the commit unless codexReview.preCommitHook.failClosed is true.
 # Config keys:
 #   codexReview.preCommitCommand, scope, base, model
-#   codexReview.preCommitHook.enabled, blockOnSeverity, timeoutMs, failClosed
+#   codexReview.preCommitHook.enabled, blockOnSeverity, timeoutMs, failClosed, maxConsecutiveBlocks
 #   codexReview.warmCache.enabled, maxAgeMinutes
 #   codexReview.notify.desktop
 
@@ -321,6 +321,68 @@ write_cache() {
     > "$tmp" 2>/dev/null && chmod 600 "$tmp" 2>/dev/null && mv "$tmp" "$cache_file" 2>/dev/null || rm -f "$tmp"
 }
 
+compute_work_hash() {
+  local root="$1"
+  local base="$2"
+  local branch
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'unknown')"
+  printf 'branch=%s\nbase=%s\n' "$branch" "$base" | hash_stdin_16
+}
+
+read_block_counter() {
+  local counter_file="$1"
+  if ! cache_file_is_trusted "$counter_file"; then
+    printf '0'
+    return 0
+  fi
+  jq -r 'if (.count | type) == "number" and (.count >= 0) then (.count | floor) else 0 end' \
+    "$counter_file" 2>/dev/null || printf '0'
+}
+
+write_block_counter() {
+  local counter_file="$1"
+  local count="$2"
+  local tmp="${counter_file}.$$"
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson count "$count" \
+    '{count:$count,ts:$ts}' \
+    > "$tmp" 2>/dev/null && chmod 600 "$tmp" 2>/dev/null && mv "$tmp" "$counter_file" 2>/dev/null || rm -f "$tmp"
+}
+
+reset_block_counter() {
+  local counter_file="${BLOCK_COUNTER_FILE:-}"
+  [[ -n "$counter_file" ]] || return 0
+  rm -f "$counter_file" 2>/dev/null || true
+}
+
+maybe_allow_after_block_cap() {
+  local source="$1"
+  local duration_ms="$2"
+  local findings="$3"
+  local duration_s="$4"
+
+  [[ "${MAX_CONSECUTIVE_BLOCKS:-0}" =~ ^[0-9]+$ ]] || return 1
+  [[ "$MAX_CONSECUTIVE_BLOCKS" -gt 0 ]] || return 1
+  [[ -n "${BLOCK_COUNTER_FILE:-}" ]] || return 1
+
+  local current_count next_count
+  current_count="$(read_block_counter "$BLOCK_COUNTER_FILE")"
+  [[ "$current_count" =~ ^[0-9]+$ ]] || current_count=0
+
+  if [[ "$current_count" -ge "$MAX_CONSECUTIVE_BLOCKS" ]]; then
+    reset_block_counter
+    notify_desktop "Codex pre-commit review allowed after oscillation cap"
+    append_run_log "needs-attention" "allow-cap" "$source" "$duration_ms" "$findings" "$SCOPE" "${DIFF_HASH:-}"
+    emit_json "⚠️ Codex gate: allowed after ${current_count} consecutive blocks (oscillation cap reached) — review the diff manually / see the PR (${duration_s}s)"
+    exit 0
+  fi
+
+  next_count=$((current_count + 1))
+  write_block_counter "$BLOCK_COUNTER_FILE" "$next_count"
+  return 1
+}
+
 review_from_cache() {
   local cache_file="$1"
   jq -c '{verdict:(.verdict // "error"), summary:(.summary // ""), findings:(if (.findings | type) == "array" then .findings else [] end), next_steps:[]}' "$cache_file" 2>/dev/null
@@ -516,6 +578,7 @@ evaluate_review_output() {
   case "$verdict" in
     approve)
       printf 'codex pre-commit review: approve\n' >&2
+      reset_block_counter
       append_run_log "approve" "allow" "$source" "$duration_ms" 0 "$SCOPE" "${DIFF_HASH:-}"
       if [[ "$source" == "cache" ]]; then
         emit_json "✅ Codex pre-commit review: approve (cached, ${cache_age}m old)"
@@ -562,12 +625,14 @@ evaluate_review_output() {
       | join(" | ")
     ' <<<"$review_output" 2>/dev/null || true)"
     finding_summary="$(compact_text "$finding_summary")"
+    maybe_allow_after_block_cap "$source" "$duration_ms" "$finding_count" "$duration_s"
     notify_desktop "Codex pre-commit review blocked: ${max_severity}"
     append_run_log "needs-attention" "deny" "$source" "$duration_ms" "$finding_count" "$SCOPE" "${DIFF_HASH:-}"
     emit_deny "Codex pre-commit review: needs-attention (>= $BLOCK_ON_SEVERITY). $summary | $finding_summary" "⛔ Codex pre-commit review: blocked (${max_severity}, ${duration_s}s)"
   fi
 
   printf 'codex pre-commit review: needs-attention but all findings below %s; allowing\n' "$BLOCK_ON_SEVERITY" >&2
+  reset_block_counter
   append_run_log "needs-attention" "allow" "$source" "$duration_ms" "$finding_count" "$SCOPE" "${DIFF_HASH:-}"
   emit_json "🟡 Codex pre-commit review: needs-attention below ${BLOCK_ON_SEVERITY} threshold — allowing (${duration_s}s)"
   exit 0
@@ -667,6 +732,7 @@ CODEX_MODEL="$(jq -r '.codexReview.model // empty' <<<"$CONFIG_JSON" 2>/dev/null
 BLOCK_ON_SEVERITY="$(jq -r '.codexReview.preCommitHook.blockOnSeverity // "high"' <<<"$CONFIG_JSON" 2>/dev/null || printf 'high')"
 TIMEOUT_MS="$(jq -r '.codexReview.preCommitHook.timeoutMs // 900000' <<<"$CONFIG_JSON" 2>/dev/null || printf '900000')"
 FAIL_CLOSED="$(jq -r '.codexReview.preCommitHook.failClosed // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
+MAX_CONSECUTIVE_BLOCKS="$(jq -r '(.codexReview.preCommitHook.maxConsecutiveBlocks // 0) | if type == "number" and . >= 0 and . == floor then . else 0 end' <<<"$CONFIG_JSON" 2>/dev/null || printf '0')"
 WARM_CACHE_ENABLED="$(jq -r '.codexReview.warmCache.enabled // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
 WARM_CACHE_MAX_AGE_MINUTES="$(jq -r '.codexReview.warmCache.maxAgeMinutes // 30' <<<"$CONFIG_JSON" 2>/dev/null || printf '30')"
 NOTIFY_DESKTOP="$(jq -r '.codexReview.notify.desktop // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
@@ -682,6 +748,9 @@ esac
 case "$TIMEOUT_MS" in
   ''|*[!0-9]*) fail_review "$FAIL_CLOSED" "invalid timeoutMs: $TIMEOUT_MS" ;;
 esac
+case "$MAX_CONSECUTIVE_BLOCKS" in
+  ''|*[!0-9]*) MAX_CONSECUTIVE_BLOCKS=0 ;;
+esac
 if [[ "$(printf '%s' "$CODEX_MODEL" | tr '[:upper:]' '[:lower:]')" == "gpt-5.5-pro" ]]; then
   fail_review "$FAIL_CLOSED" "gpt-5.5-pro is the ChatGPT-Pro/Oracle browser lane, not a Codex CLI model"
 fi
@@ -696,10 +765,19 @@ fi
 
 DIFF_HASH=""
 CACHE_FILE=""
+BLOCK_COUNTER_FILE=""
+GIT_ROOT="$(find_git_root || true)"
+if [[ -n "$GIT_ROOT" && "$MAX_CONSECUTIVE_BLOCKS" -gt 0 ]]; then
+  REPO_HASH="$(compute_repo_hash "$GIT_ROOT" 2>/dev/null || true)"
+  WORK_HASH="$(compute_work_hash "$GIT_ROOT" "$BASE" 2>/dev/null || true)"
+  STATE_DIR="$(ensure_state_dir 2>/dev/null || true)"
+  if [[ -n "$REPO_HASH" && -n "$WORK_HASH" && -n "$STATE_DIR" ]]; then
+    BLOCK_COUNTER_FILE="$STATE_DIR/codex-review-blocks-${REPO_HASH}-${WORK_HASH}.json"
+  fi
+fi
 if [[ -n "${COMPOSER_CODEX_REVIEW_CMD:-}" ]]; then
   : # Test seam commands are not equivalent reviewer policy, so they never read or write warm-cache verdicts.
 elif [[ "$WARM_CACHE_ENABLED" == "true" ]]; then
-  GIT_ROOT="$(find_git_root || true)"
   if [[ -n "$GIT_ROOT" ]]; then
     REPO_HASH="$(compute_repo_hash "$GIT_ROOT" 2>/dev/null || true)"
     DIFF_HASH="$(compute_diff_hash "$GIT_ROOT" "$REVIEW_COMMAND" "$SCOPE" "$BASE" "$CODEX_MODEL" 2>/dev/null || true)"

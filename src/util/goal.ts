@@ -354,9 +354,9 @@ function decideNextAction(
   if (pendingChecks.length > 0) {
     const pendingNames = pendingChecks.map((check) => check.name);
     return {
-      tool: "composer_goal_step",
+      tool: "composer_goal_status",
       manualChecks: pendingNames,
-      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     };
   }
 

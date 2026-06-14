@@ -46,6 +46,7 @@ interface ResolvedCodexReview {
     blockOnSeverity: "critical" | "high" | "medium" | "low";
     timeoutMs: number;
     failClosed: boolean;
+    maxConsecutiveBlocks: number;
   };
   warmCache: {
     enabled: boolean;
@@ -80,6 +81,7 @@ const DEFAULT_CODEX_REVIEW: ResolvedCodexReview = {
     blockOnSeverity: "high",
     timeoutMs: 900000,
     failClosed: false,
+    maxConsecutiveBlocks: 0,
   },
   warmCache: {
     enabled: false,
@@ -416,6 +418,9 @@ function resolveCodexReview(codexReview: CodexReview | undefined): ResolvedCodex
         codexReview?.preCommitHook?.blockOnSeverity ?? DEFAULT_CODEX_REVIEW.preCommitHook.blockOnSeverity,
       timeoutMs: codexReview?.preCommitHook?.timeoutMs ?? DEFAULT_CODEX_REVIEW.preCommitHook.timeoutMs,
       failClosed: codexReview?.preCommitHook?.failClosed ?? DEFAULT_CODEX_REVIEW.preCommitHook.failClosed,
+      maxConsecutiveBlocks:
+        codexReview?.preCommitHook?.maxConsecutiveBlocks ??
+        DEFAULT_CODEX_REVIEW.preCommitHook.maxConsecutiveBlocks,
     },
     warmCache: {
       enabled: codexReview?.warmCache?.enabled ?? DEFAULT_CODEX_REVIEW.warmCache.enabled,
@@ -458,7 +463,8 @@ function preCommitHookCheck(resolved: ResolvedCodexReview): DoctorCheck {
         status: "pass",
         detail:
           `mechanical gate enabled=${hook.enabled}, ` +
-          `blockOnSeverity=${hook.blockOnSeverity}, failClosed=${hook.failClosed}`,
+          `blockOnSeverity=${hook.blockOnSeverity}, failClosed=${hook.failClosed}, ` +
+          `maxConsecutiveBlocks=${hook.maxConsecutiveBlocks > 0 ? hook.maxConsecutiveBlocks : "off"}`,
       }
     : {
         name: "config: codexReview preCommitHook",

@@ -173,6 +173,19 @@ describe("doctor config checks", () => {
     });
   });
 
+  it("reports the pre-commit oscillation cap setting", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true, maxConsecutiveBlocks: 2 },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexReview preCommitHook")?.detail)
+      .toContain("maxConsecutiveBlocks=2");
+  });
+
   it("reports configured codexReview.model in defaults", () => {
     const checks = buildConfigChecks({
       ...BASE_CONFIG,

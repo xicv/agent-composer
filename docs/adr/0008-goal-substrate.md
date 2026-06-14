@@ -25,8 +25,14 @@ Add a project-local goal store under `.composer/goals/<goalId>.json` and expose 
    - `active` and `blocked` are open states; `achieved`, `failed`, and `cancelled` are terminal states. `blocked` is resumable, while `composer_goal_step` refuses terminal goals.
 
 3. **`composer_goal_step` is advisory only.**
-   - It consumes orchestrator-reported check results and returns the next recommended action. If checks are pending, step returns a `manual_check` next action naming the pending check names (no command strings); the orchestrator reads the commands from `composer_goal_status`, runs them deliberately, and reports results via `composer_goal_step`. It never starts workers, never mutates source files, and never executes shell.
+   - It consumes orchestrator-reported check results and returns the next recommended action. If checks are pending, step returns `composer_goal_status` with `manualChecks` naming the pending checks (no command strings). The orchestrator reads the commands from `composer_goal_status`, runs them deliberately, and reports results via `composer_goal_step`. It never starts workers, never mutates source files, and never executes shell.
    - Rationale: this preserves operator control, prevents runaway loops, follows SGH structured-graph immutability by keeping objective and condition fixed within a goal version, and matches the north star: the orchestrator/brain executes while the substrate tracks state and budget.
+
+### Pending-check next action
+
+Pending checks create a three-way constraint conflict. The next action must be a real callable tool, non-mutating, and not a blind status loop. No separate tool satisfies all three: a hypothetical manual-check tool would not be callable, `composer_goal_step` mutates goal state, and a bare status action could look like a loop.
+
+The chosen resolution is `composer_goal_status` plus `manualChecks`. `composer_goal_status` is real and read-only, and it is the tool that surfaces the declared check commands. The orchestrator reads those commands, runs them out-of-band, then reports results through `composer_goal_step` with `--check-result name=pass|fail`. This is not a blind status loop because real check work happens between the status read and the next step call.
 
 4. **Dual-loop escalation follows CVE2PoC.**
    - Tactical loop: failing check results normally route to `composer_code_cli`; two or more failed attempts route to `composer_codex_lifecycle_run` for rescue.

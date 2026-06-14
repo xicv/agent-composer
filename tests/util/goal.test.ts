@@ -336,9 +336,9 @@ describe("goal", () => {
     expect(result.record.state).toBe("active");
     expect(result.record.checks.map((check) => check.status)).toEqual(["pending", "pending"]);
     expect(result.nextAction).toEqual({
-      tool: "composer_goal_step",
+      tool: "composer_goal_status",
       manualChecks: ["unit", "typecheck"],
-      reason: "run the listed checks yourself (commands are in composer_goal_status), then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     });
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_UNIT_COMMAND");
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_TYPECHECK_COMMAND");
