@@ -2,7 +2,7 @@
 
 ## Summary
 
-Research-first follow-up on latest main. Kept the library GLM fallback stable at `glm-5.1`, pinned this project's coder role and new `agent-composer init` scaffolds to verified `glm-5.2` (requires a z.ai Coding Plan token), and moved the Codex review gate to `gpt-5.5`. Two errors in a prior Oracle handoff were corrected.
+Research-first follow-up on latest main. Migrated the full Composer product default to verified `glm-5.2`: the library/runtime fallback, dogfood repo coder role, new `agent-composer init` coder scaffold, and `/evolve` reflection fallback now all route to `glm-5.2` (requires a z.ai GLM Coding Plan token at migration time). The Codex review gate moved to `gpt-5.5`. Two errors in a prior Oracle handoff were corrected.
 
 ## Research findings (web-verified 2026-06-14)
 
@@ -16,16 +16,16 @@ Research-first follow-up on latest main. Kept the library GLM fallback stable at
 
 | File | Edit site | Change |
 |---|---|---|
-| `src/registry.ts` | `DEFAULT_ANTHROPIC_MODEL` | Kept library fallback at `glm-5.1` |
-| `src/config/env.ts` | doc comment | Documents fallback as `glm-5.1` |
-| `scripts/run-evolve.ts` | fallback | Kept fallback at `glm-5.1` |
+| `src/registry.ts` | `DEFAULT_ANTHROPIC_MODEL` | Migrated library/runtime fallback to `glm-5.2` |
+| `src/config/env.ts` | precedence doc comment | Documents fallback as `glm-5.2` |
+| `scripts/run-evolve.ts` | reflection fallback | Migrated `/evolve` fallback to `glm-5.2` |
 | `composer.config.json` | `roles.coder.model` | Explicit project pin to verified `glm-5.2` |
-| `src/cli/init.ts` | `DEFAULT_COMPOSER_CONFIG.roles.coder.model` | New `agent-composer init` projects scaffold `glm-5.2`; `DEFAULT_ANTHROPIC_MODEL` remains `glm-5.1` for consumers without Coding-Plan access |
+| `src/cli/init.ts` | `DEFAULT_COMPOSER_CONFIG.roles.coder.model` | New `agent-composer init` projects scaffold `glm-5.2` |
 | `composer.config.json` | `roles.researcher.cli` | Added explicit `gpt-5.4-mini` Codex model pin |
 | `composer.config.json` | `roles.coderCli.cli` | Left profile-driven; no static model pin |
 | `composer.config.json` | `codexReview.model` | `gpt-5.4-mini` -> `gpt-5.5` |
 | `composer.config.schema.json` | description | `glm-5.1` -> `glm-5.2` |
-| `tests/registry.test.ts` | default test title + assertion | Expected library fallback remains `glm-5.1` |
+| `tests/registry.test.ts` | default test title + assertion | Expected library fallback is `glm-5.2` |
 | `src/cli/init.ts` | `researcher`, `coder`, `coderCli`, `codexReview` defaults | Researcher pinned to `gpt-5.4-mini`; coder scaffold pins `glm-5.2`; coderCli remains profile-driven; codexReview updated to `gpt-5.5` |
 | `tests/cli/init.test.ts` | assertions | Updated researcher pin, coderCli profile-driven args, and codexReview model |
 | `tests/config/loader.test.ts` | researcher CLI assertion | Updated expected Codex model pin |
@@ -40,10 +40,26 @@ Research-first follow-up on latest main. Kept the library GLM fallback stable at
 - vitest `tests/registry.test.ts` + `tests/cli/init.test.ts` 35/35 pass.
 - ajv schema validate `composer.config.json` valid.
 - zero active `glm-5.2[1m]` model references remain outside this correction report.
-- `DEFAULT_ANTHROPIC_MODEL` remains `glm-5.1`.
-- New `agent-composer init` projects scaffold `roles.coder.model=glm-5.2`, which requires a z.ai Coding Plan token; the library fallback remains `glm-5.1` for consumers without Coding-Plan access.
-- Live provider probe confirmed the explicit `roles.coder.model=glm-5.2` project pin resolves on the z.ai Coding Plan endpoint.
+- `DEFAULT_ANTHROPIC_MODEL` is `glm-5.2`.
+- New `agent-composer init` projects scaffold `roles.coder.model=glm-5.2`.
+- Live `glm-5.2` provider smoke PASSED against `https://api.z.ai/api/anthropic`: exact-response probe succeeded in ~2s.
+- `claude-opus-4-8` `reviewerClaude` model string accepted locally.
+- vitest full suite: 760/760 pass.
 - Researcher is pinned to `gpt-5.4-mini`; coderCli has no static model pin and uses profile-driven model selection; codexReview is `gpt-5.5`.
+
+## Model-routing matrix
+
+| Surface | Model |
+|---|---|
+| Runtime Anthropic fallback (`DEFAULT_ANTHROPIC_MODEL`) | `glm-5.2` |
+| `agent-composer init` coder scaffold | `glm-5.2` |
+| Dogfood `roles.coder.model` | `glm-5.2` |
+| `/evolve` reflection fallback | `glm-5.2` |
+| Researcher Codex lane | `gpt-5.4-mini` |
+| Codex review gate | `gpt-5.5` |
+| Codex lifecycle/rescue | `gpt-5.4-mini` |
+| Oracle browser Pro lane | `gpt-5.5-pro` (ChatGPT/Oracle) |
+| `reviewerClaude` premium lane | `claude-opus-4-8` |
 
 ## Open items
 
