@@ -4,6 +4,8 @@ export const COMPOSER_RESEARCH = "composer_research" as const;
 export const COMPOSER_CODE = "composer_code" as const;
 export const COMPOSER_REVIEW = "composer_review" as const;
 export const COMPOSER_REVIEW_CLAUDE = "composer_review_claude" as const;
+export const COMPOSER_REVIEW_JOB_START = "composer_review_job_start" as const;
+export const COMPOSER_REVIEW_JOB_RESULT = "composer_review_job_result" as const;
 export const COMPOSER_CODE_CLI = "composer_code_cli" as const;
 export const COMPOSER_CODE_CHAIN = "composer_code_chain" as const;
 export const COMPOSER_HANDOFF_CREATE = "composer_handoff_create" as const;
@@ -53,6 +55,20 @@ export const REVIEW_CLAUDE_DESCRIPTION =
   "Premium Claude review lane for high-risk diffs, security-sensitive changes, " +
   "or when the user explicitly asks for Claude review. Keep composer_review " +
   "as the default gate; call this directly as a second-opinion escalation.";
+
+export const REVIEW_JOB_START_DESCRIPTION =
+  "Start a NON-BLOCKING Composer review job and return a jobId immediately. " +
+  "Use when routine review should not block the development loop. Accepts the " +
+  "same diff/reviewScope/base/reviewFiles prompt inputs as composer_review, " +
+  "persists durable job state under .composer/review-jobs, and runs the " +
+  "reviewer provider concurrently within the Composer server process. Poll " +
+  "composer_review_job_result with the jobId to retrieve the verdict.";
+
+export const REVIEW_JOB_RESULT_DESCRIPTION =
+  "Read a durable Composer review job by jobId (or the latest when omitted). " +
+  "Returns status (queued|running|succeeded|failed) and, when succeeded, " +
+  "the review verdict, summary, and full text. Optional waitMs briefly blocks " +
+  "until the job reaches a terminal state or the wait elapses.";
 
 export const HANDOFF_CREATE_DESCRIPTION =
   "Create a shared, provider-neutral handoff packet under .composer/handoffs. " +

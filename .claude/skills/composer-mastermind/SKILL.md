@@ -244,6 +244,32 @@ These tools make routing explicit and cheap. Prefer them over re-deriving policy
 - **`composer_session_get` / `composer_session_set`** — EPHEMERAL per-session overrides (mode, oracle, code_cli `profile`) that do NOT write `composer.config.json`. Use for "this session only" toggles; `clear:true` resets. For durable changes use `composer_config_set`.
 - **`composer_audit_record` / `composer_audit_read` / `composer_audit_summary`** — durable route/outcome trail. After a dispatch, record what happened (route, provider, `reviewVerdict`, `testsPassed`, `userCorrection`, `status`) so `/evolve` learns from real failures, not transcripts. Recording is EXPLICIT — these tools are never auto-called; keep `note`/`objective` short (capped on write). Read/summary to inspect route accuracy.
 
+# Subagent speed contract
+
+Fast path for quick inspection and minimal wait:
+
+1. Call `composer_route_decide` with `format:"compact"` — local, no model.
+   Do NOT request `format:"full"` unless debugging the classifier.
+2. Honor returned `contextBudget` (`inline` / `handoff` / `scoped-diff` /
+   `full-brief` / `oracle-brief`). Send only matching context, NEVER a raw
+   transcript.
+3. Prefer `composer_code_cli` for implementation; the executor applies off-CC.
+4. Use `reviewScope` (`staged` / `working-tree` / `branch`). NEVER paste broad
+   diffs.
+5. Background, don't block: use `composer_review_job_start` +
+   `composer_review_job_result` for routine/advisory review while continuing
+   work. Reserve synchronous `composer_review` for the pre-commit / merge gate
+   or explicit "review now". Likewise prefer background lifecycle
+   (`execution:"background"`).
+6. NEVER call Oracle unless explicitly tagged `[oracle:<mode>]` or the route
+   says premium escalation.
+7. For quick state checks use `agent-composer status --fast` (skips audit /
+   job / goal scans). Do NOT pull full status/audit unless debugging
+   orchestration.
+8. Reserve the synchronous fail-closed review gate for commits. If a greenfield
+   subsystem oscillates the gate, set
+   `codexReview.preCommitHook.maxConsecutiveBlocks` instead of grinding.
+
 ## contextBudget (how much context to send)
 
 `composer_route_decide` returns a `contextBudget`. Honor it — send ONLY the matching context, NEVER a raw transcript:
