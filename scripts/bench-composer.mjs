@@ -11,6 +11,7 @@ const { classifyDispatch } = await import(srcUrl("src/util/dispatchHint.ts"));
 const { appendAuditEvent } = await import(srcUrl("src/util/auditLog.ts"));
 const { startGoal, readActiveGoal, stepGoal } = await import(srcUrl("src/util/goal.ts"));
 const { planWorkflow } = await import(srcUrl("src/util/workflowPlan.ts"));
+const { summarizeLatency } = await import(srcUrl("src/util/percentile.ts"));
 
 const previousStateDir = process.env.COMPOSER_STATE_DIR;
 const tmp = mkdtempSync(join(tmpdir(), "composer-speed-bench-"));
@@ -100,8 +101,8 @@ try {
   budgets[6][3] = () => renderStatusLine(buildStatus(fastProject, { fast: true }));
 
   const rows = budgets.map(([name, budgetMs, iterations, fn]) => {
-    const p50 = measureP50(fn, iterations);
-    return { name, p50, budgetMs, pass: p50 < budgetMs };
+    const { p50, p95, p99 } = measureLatency(fn, iterations);
+    return { name, p50, p95, p99, budgetMs, pass: p95 < budgetMs };
   });
 
   printRows(rows);
@@ -146,7 +147,7 @@ function auditEventFor(i) {
   }
 }
 
-function measureP50(fn, iterations) {
+function measureLatency(fn, iterations) {
   for (let i = 0; i < Math.min(10, iterations); i += 1) fn();
   const samples = [];
   for (let i = 0; i < iterations; i += 1) {
@@ -155,15 +156,15 @@ function measureP50(fn, iterations) {
     const ended = process.hrtime.bigint();
     samples.push(Number(ended - started) / 1_000_000);
   }
-  samples.sort((a, b) => a - b);
-  return samples[Math.floor(samples.length / 2)];
+  return summarizeLatency(samples);
 }
 
 function printRows(rows) {
-  const headers = ["op", "p50 ms", "budget", "result"];
+  const headers = ["op", "p50 ms", "p95 ms", "budget (p95)", "result"];
   const rendered = rows.map((row) => [
     row.name,
     row.p50.toFixed(2),
+    row.p95.toFixed(2),
     `< ${row.budgetMs} ms`,
     row.pass ? "PASS" : "FAIL",
   ]);

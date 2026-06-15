@@ -19,6 +19,7 @@ export function registerAuditTools(ctx: ServerToolContext): void {
         tool: z.string().optional(),
         provider: z.string().optional(),
         expectedOutputTokens: z.number().int().nonnegative().optional(),
+        durationMs: z.number().nonnegative().optional(),
         changedFiles: z.number().int().nonnegative().optional(),
         diffLines: z.number().int().nonnegative().optional(),
         reviewVerdict: z.string().optional(),

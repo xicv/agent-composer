@@ -41,6 +41,12 @@
 | Real GLM tape | `tests/fixtures/tapes/anthropic-glm.json` (~$0.00005 spend) |
 | Real agy tape | `tests/fixtures/tapes/cli-agy.json` (free) |
 
+## CI & speed gates
+
+- `ci.yml` runs `npm run ci` plus the p95 `bench:speed` gate on every PR and push.
+- CodSpeed is scaffolded but inert: `@codspeed/vitest-plugin` is intentionally not a committed devDependency, which keeps the main lockfile and `npm ci` clean.
+- `bench.yml` installs it on demand with `--no-save`; activation still requires installing the CodSpeed GitHub App and adding the `CODSPEED_TOKEN` repo secret.
+
 ## What ships
 
 Current loop-engineering control plane:
@@ -215,6 +221,7 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-06-15 | Build 9 (PR #25 — composer_goal_report: read-only json/markdown goal report + CLI + status hint) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 12 files | n/a | Merged into main. Raw check commands redacted by default; audit OFF by default + opt-in (project-wide, not goal-scoped); no-id reports fall back to latest goal. 844 vitest green |
 | 2026-06-15 | Build 10 (PR #26 — status hot-path perf: readRecentAuditEvents tail reader, .latest job pointers, .composer/goals/.active index, status --fast, scripts/bench-composer.mjs + bench:speed budgets) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 15 files | n/a | Merged 8366dc4. Every pointer/index is a fast-path hint with authoritative-scan fallback (one-open-goal invariant stays on the scan). Bench: status --line @10k audit events ~4ms (budget 150ms). 861 vitest green |
 | 2026-06-15 | Build 11 (PR #27 — background review jobs composer_review_job_start/result + subagent speed contract in both byte-identical SKILL.md copies) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | ~9 files | n/a | Merged ccce999. Async in-process detached runner mirroring Oracle jobs; sync composer_review reserved for the pre-commit/merge gate. 873 vitest green |
+| 2026-06-15 | perf/telemetry-and-speed-gates — durationMs audit telemetry, bench p95/p99 gates, perf-report aggregator, 10k large-state fixture, first CI workflow + CodSpeed scaffold | codex exec | n/a | n/a | n/a | n/a | n/a | n/a | n/a | lint clean; 882 vitest green; CodSpeed scaffold outside tsc scope |
 
 ### Build 1 (Step 5 v1) — findings
 

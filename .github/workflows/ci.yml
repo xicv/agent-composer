@@ -53,6 +53,9 @@ jobs:
       - name: Schema lint
         run: npm run schema:lint
 
+      - name: Speed budgets (p95)
+        run: node --import tsx scripts/bench-composer.mjs
+
   bash-compat:
     name: bash-compat (macOS / Bash 3.2)
     runs-on: macos-latest

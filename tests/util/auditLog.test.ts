@@ -190,6 +190,24 @@ describe("auditLog", () => {
     expect(result.success).toBe(false);
   });
 
+  it("AuditEventSchema accepts positive durationMs and rejects negative durationMs", () => {
+    const positive = AuditEventSchema.safeParse({
+      ts: new Date().toISOString(),
+      kind: "tool-call",
+      tool: "composer_status",
+      durationMs: 12.5,
+    });
+    const negative = AuditEventSchema.safeParse({
+      ts: new Date().toISOString(),
+      kind: "tool-call",
+      tool: "composer_status",
+      durationMs: -1,
+    });
+
+    expect(positive.success).toBe(true);
+    expect(negative.success).toBe(false);
+  });
+
   it("readAuditFailures returns only failed or userCorrection events", () => {
     appendAuditEvent(projectRoot!, { kind: "outcome", status: "succeeded" });
     appendAuditEvent(projectRoot!, { kind: "outcome", status: "failed" });
@@ -275,6 +293,29 @@ describe("auditLog", () => {
       expect(summary.reviewVerdicts["needs-attention"]).toBe(1);
     });
 
+    it("summarizes latency by tool from events with tool and durationMs", () => {
+      const events = [
+        appendAuditEvent(projectRoot!, { kind: "tool-call", tool: "composer_status", durationMs: 1 }),
+        appendAuditEvent(projectRoot!, { kind: "tool-call", tool: "composer_status", durationMs: 3 }),
+        appendAuditEvent(projectRoot!, { kind: "tool-call", tool: "composer_status", durationMs: 5 }),
+        appendAuditEvent(projectRoot!, { kind: "tool-call", tool: "composer_route_decide", durationMs: 10 }),
+        appendAuditEvent(projectRoot!, { kind: "tool-call", tool: "composer_status" }),
+        appendAuditEvent(projectRoot!, { kind: "tool-call", durationMs: 100 }),
+      ];
+
+      const summary = summarizeAudit(events);
+
+      expect(summary.latencyByTool["composer_status"]).toEqual({
+        count: 3,
+        p50: 3,
+        p95: 5,
+        p99: 5,
+        max: 5,
+      });
+      expect(summary.latencyByTool["composer_route_decide"]?.p95).toBe(10);
+      expect(summary.latencyByTool).not.toHaveProperty("undefined");
+    });
+
     it("returns zeroed summary for empty events array", () => {
       const summary = summarizeAudit([]);
       expect(summary.total).toBe(0);
@@ -285,6 +326,7 @@ describe("auditLog", () => {
       expect(summary.tests).toEqual({ passed: 0, failed: 0 });
       expect(summary.userCorrections).toBe(0);
       expect(summary.recentFailures).toEqual([]);
+      expect(summary.latencyByTool).toEqual({});
     });
   });
 });

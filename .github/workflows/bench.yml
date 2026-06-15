@@ -1,0 +1,36 @@
+# Inert until maintainer installs the CodSpeed GitHub App and adds the CODSPEED_TOKEN repo secret. See docs/STATUS.md.
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  codspeed:
+    if: ${{ secrets.CODSPEED_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install CodSpeed vitest plugin (on-demand, not in lockfile)
+        run: npm install --no-save @codspeed/vitest-plugin
+
+      - name: Run CodSpeed benchmarks
+        uses: CodSpeedHQ/action@v3
+        with:
+          run: npm run bench:codspeed
+          token: ${{ secrets.CODSPEED_TOKEN }}

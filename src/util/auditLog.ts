@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { COMPOSER_STATE_DIR_ENV } from "./codexLifecycleJob.js";
+import { summarizeLatency } from "./percentile.js";
 
 export const AuditEventSchema = z.object({
   ts: z.string(),
@@ -26,6 +27,7 @@ export const AuditEventSchema = z.object({
   tool: z.string().max(120).optional(),
   provider: z.string().max(120).optional(),
   expectedOutputTokens: z.number().int().nonnegative().optional(),
+  durationMs: z.number().nonnegative().optional(),
   changedFiles: z.number().int().nonnegative().optional(),
   diffLines: z.number().int().nonnegative().optional(),
   reviewVerdict: z.string().max(120).optional(),
@@ -140,6 +142,7 @@ export interface AuditSummary {
   tests: { passed: number; failed: number };
   userCorrections: number;
   recentFailures: AuditEvent[];
+  latencyByTool: Record<string, { count: number; p50: number; p95: number; p99: number; max: number }>;
 }
 
 export function summarizeAudit(events: AuditEvent[]): AuditSummary {
@@ -149,7 +152,9 @@ export function summarizeAudit(events: AuditEvent[]): AuditSummary {
     tests: { passed: 0, failed: 0 },
     userCorrections: 0,
     recentFailures: [],
+    latencyByTool: {},
   };
+  const latencySamples = new Map<string, number[]>();
   for (const e of events) {
     summary.byKind[e.kind] = (summary.byKind[e.kind] ?? 0) + 1;
     if (e.status) summary.byStatus[e.status] = (summary.byStatus[e.status] ?? 0) + 1;
@@ -158,7 +163,15 @@ export function summarizeAudit(events: AuditEvent[]): AuditSummary {
     if (e.testsPassed === true) summary.tests.passed += 1;
     if (e.testsPassed === false) summary.tests.failed += 1;
     if (e.userCorrection === true) summary.userCorrections += 1;
+    if (e.tool !== undefined && e.durationMs !== undefined) {
+      const bucket = latencySamples.get(e.tool);
+      if (bucket) bucket.push(e.durationMs);
+      else latencySamples.set(e.tool, [e.durationMs]);
+    }
   }
+  summary.latencyByTool = Object.fromEntries(
+    [...latencySamples.entries()].map(([tool, samples]) => [tool, summarizeLatency(samples)]),
+  );
   summary.recentFailures = events
     .filter((e) => e.status === "failed" || e.userCorrection === true)
     .slice(-5);
@@ -186,6 +199,7 @@ export function renderAuditMarkdown(events: AuditEvent[]): string {
         ["tool", event.tool],
         ["provider", event.provider],
         ["expectedOutputTokens", event.expectedOutputTokens],
+        ["durationMs", event.durationMs],
         ["changedFiles", event.changedFiles],
         ["diffLines", event.diffLines],
         ["reviewVerdict", event.reviewVerdict],
