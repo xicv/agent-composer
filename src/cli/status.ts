@@ -60,6 +60,8 @@ export interface ComposerStatus {
     nextReason?: string;
     reportHint?: boolean;
   };
+  speed?: { lastOpTool: string; lastOpMs: number };
+  warnings?: string[];
 }
 
 function ageSeconds(iso: string | undefined, nowMs: number): number {
@@ -179,6 +181,30 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
   };
 
   const mode = deriveMode(config);
+  const oracleRequireExplicitTag = config?.oracle?.requireExplicitTag;
+  const warnings = [
+    integrations.oraclePlanner && oracleRequireExplicitTag !== true
+      ? "oracle auto-runs without an explicit tag — unplanned premium cost risk; set oracle.requireExplicitTag=true"
+      : null,
+    mode === "strict"
+      ? "strict mode runs reviews synchronously and can block development — consider background review jobs"
+      : null,
+  ].filter((warning): warning is string => warning !== null);
+
+  let recentAuditEvents: ReturnType<typeof readRecentAuditEvents> = [];
+  let speed: ComposerStatus["speed"];
+  try {
+    recentAuditEvents = readRecentAuditEvents(root, 50);
+    for (let i = recentAuditEvents.length - 1; i >= 0; i -= 1) {
+      const ev = recentAuditEvents[i]!;
+      if (ev.tool !== undefined && ev.durationMs !== undefined && Number.isFinite(ev.durationMs)) {
+        speed = { lastOpTool: ev.tool, lastOpMs: ev.durationMs };
+        break;
+      }
+    }
+  } catch {
+    // ignore
+  }
 
   if (opts.fast) {
     return {
@@ -188,13 +214,15 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
         exists,
         mode,
         oracleDefaultMode: config?.oracle?.defaultMode,
-        oracleRequireExplicitTag: config?.oracle?.requireExplicitTag,
+        oracleRequireExplicitTag,
       },
       integrations,
       active: {},
       latestJob: {},
       latest: {},
       recommendation: {},
+      speed,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
 
@@ -237,10 +265,9 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
 
   const latest: ComposerStatus["latest"] = {};
   try {
-    const recent = readRecentAuditEvents(root, 50);
-    const findLast = (pred: (e: (typeof recent)[number]) => boolean) => {
-      for (let i = recent.length - 1; i >= 0; i--) {
-        if (pred(recent[i]!)) return recent[i]!;
+    const findLast = (pred: (e: (typeof recentAuditEvents)[number]) => boolean) => {
+      for (let i = recentAuditEvents.length - 1; i >= 0; i--) {
+        if (pred(recentAuditEvents[i]!)) return recentAuditEvents[i]!;
       }
       return undefined;
     };
@@ -288,7 +315,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
       exists,
       mode,
       oracleDefaultMode: config?.oracle?.defaultMode,
-      oracleRequireExplicitTag: config?.oracle?.requireExplicitTag,
+      oracleRequireExplicitTag,
     },
     integrations,
     active,
@@ -296,6 +323,8 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
     latest,
     recommendation,
     goal,
+    speed,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
@@ -323,6 +352,10 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
     O = "off";
   }
   const H = s.integrations.gitHook;
+  const speedPart = s.speed
+    ? ` · op:${s.speed.lastOpTool.replace(/^composer_/, "")} ${Math.round(s.speed.lastOpMs)}ms`
+    : "";
+  const warningPart = s.warnings && s.warnings.length > 0 ? ` · warn:${s.warnings.length}` : "";
 
   const lastParts = [
     s.latest.tool ? `tool=${s.latest.tool}` : null,
@@ -358,7 +391,7 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
         next ? `next:${next}` : null,
       ].filter(Boolean);
   const scanSuffix = scanParts.length > 0 ? ` · ${scanParts.join(" · ")}` : "";
-  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart}${scanSuffix}`;
+  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${speedPart}${warningPart}${disabledPart}${scanSuffix}`;
 }
 
 function shortStatusText(value: string): string {
@@ -405,6 +438,9 @@ export function renderStatusHuman(s: ComposerStatus): string {
   } else {
     lines.push("  active:           none");
   }
+  if (s.speed) {
+    lines.push(`  last op:          ${s.speed.lastOpTool.replace(/^composer_/, "")} ${Math.round(s.speed.lastOpMs)}ms`);
+  }
   if (s.latest.route || s.latest.tool || s.latest.reviewVerdict) {
     const parts = [
       s.latest.route && `route=${s.latest.route}`,
@@ -418,6 +454,9 @@ export function renderStatusHuman(s: ComposerStatus): string {
   }
   if (s.recommendation.nextAction) {
     lines.push(`  next:             ${s.recommendation.nextAction} — ${s.recommendation.reason ?? ""}`);
+  }
+  for (const warning of s.warnings ?? []) {
+    lines.push(`  slow-path warning: ${warning}`);
   }
   return lines.join("\n") + "\n";
 }

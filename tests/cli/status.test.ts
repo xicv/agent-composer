@@ -21,6 +21,11 @@ const MINIMAL_CONFIG = JSON.stringify(
   2,
 );
 
+const ORACLE_AUTO_WARNING =
+  "oracle auto-runs without an explicit tag — unplanned premium cost risk; set oracle.requireExplicitTag=true";
+const STRICT_MODE_WARNING =
+  "strict mode runs reviews synchronously and can block development — consider background review jobs";
+
 describe("buildStatus", () => {
   let tmp: string;
   let previousComposerConfig: string | undefined;
@@ -248,6 +253,101 @@ describe("buildStatus", () => {
     const status = buildStatus(tmp);
     expect(status.latest.route).toBe("composer-code-cli");
     expect(status.latest.taskClass).toBe("implementation");
+  });
+
+  it("reports the most recent tool latency from the bounded audit tail", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    appendAuditEvent(tmp, { kind: "tool-call", tool: "composer_research", durationMs: 211.4 });
+    appendAuditEvent(tmp, { kind: "tool-call", tool: "composer_code_cli" });
+    appendAuditEvent(tmp, { kind: "tool-call", tool: "composer_code", durationMs: 1234.6 });
+
+    const status = buildStatus(tmp, { fast: true });
+    const line = renderStatusLine(status);
+
+    expect(status.speed).toEqual({ lastOpTool: "composer_code", lastOpMs: 1234.6 });
+    expect(line).toContain("op:code 1235ms");
+  });
+
+  it("warns when oracle planner can auto-run without an explicit tag", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+        oraclePlanner: { provider: "mock", model: "oracle" },
+      },
+      oracle: { requireExplicitTag: false },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+    appendAuditEvent(tmp, { kind: "tool-call", tool: "composer_audit", durationMs: 987.6 });
+
+    const status = buildStatus(tmp);
+    const line = renderStatusLine(status);
+
+    expect(status.warnings).toContain(ORACLE_AUTO_WARNING);
+    expect(line).toContain("op:audit 988ms");
+    expect(line).toContain("warn:1");
+  });
+
+  it("warns when oracle planner leaves requireExplicitTag unset", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+        oraclePlanner: { provider: "mock", model: "oracle" },
+      },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+
+    const status = buildStatus(tmp);
+
+    expect(status.config.oracleRequireExplicitTag).toBeUndefined();
+    expect(status.warnings).toContain(ORACLE_AUTO_WARNING);
+    expect(renderStatusLine(status)).toContain("warn:1");
+  });
+
+  it("warns when resolved mode is strict", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+      },
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true, failClosed: true },
+      },
+      codexLifecycle: { enabled: true, mode: "auto" },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+
+    const status = buildStatus(tmp);
+
+    expect(status.config.mode).toBe("strict");
+    expect(status.warnings).toContain(STRICT_MODE_WARNING);
+    expect(renderStatusLine(status)).toContain("warn:1");
+  });
+
+  it("omits warnings for clean fast/balanced config when oracle requires an explicit tag", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+        oraclePlanner: { provider: "mock", model: "oracle" },
+      },
+      codexReview: { enabled: true },
+      codexLifecycle: { enabled: true },
+      oracle: { requireExplicitTag: true },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+
+    const status = buildStatus(tmp);
+
+    expect(status.config.mode).toBe("balanced");
+    expect(status.warnings).toBeUndefined();
+    expect(renderStatusLine(status)).not.toContain("warn:");
   });
 
   it("status --fast keeps cheap gates and omits audit/job/goal scan fields", () => {
@@ -579,7 +679,9 @@ describe("renderStatusLine", () => {
 
       const line = renderStatusLine(buildStatus(tmp2));
 
-      expect(line).toContain("H:off · goal:active 1t · next:checks failing - fix · active:none");
+      expect(line).toContain("H:off");
+      expect(line).toContain("goal:active 1t · next:checks failing - fix");
+      expect(line).toContain("active:none");
     } finally {
       rmSync(tmp2, { recursive: true, force: true });
     }
