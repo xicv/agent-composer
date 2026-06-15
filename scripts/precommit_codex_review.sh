@@ -235,6 +235,19 @@ find_codex_plugin_root() {
   fi
 }
 
+# Recursively signal a process and ALL its descendants. The reviewer is a
+# `node codex-companion.mjs` process that spawns `codex`/`agy` as a grandchild;
+# killing only the direct child leaves the grandchild reparented and alive,
+# still holding the stdout pipe that the calling $(...) waits on — which hangs
+# the commit far past the timeout. Walk the tree so the pipe actually closes.
+kill_tree() {
+  local sig="$1" root="$2" child
+  for child in $(pgrep -P "$root" 2>/dev/null); do
+    kill_tree "$sig" "$child"
+  done
+  kill -"$sig" "$root" 2>/dev/null || true
+}
+
 run_reviewer() {
   local timeout_seconds="$1"
   shift
@@ -258,9 +271,9 @@ run_reviewer() {
     sleeper=$!
     wait "$sleeper" 2>/dev/null || exit 0
     printf '1' >"$marker" 2>/dev/null || true
-    kill -TERM "$pid" 2>/dev/null || true
+    kill_tree TERM "$pid"
     sleep 5
-    kill -KILL "$pid" 2>/dev/null || true
+    kill_tree KILL "$pid"
   ) &
   watchdog=$!
   wait "$pid"
