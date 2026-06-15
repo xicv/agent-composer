@@ -8,6 +8,7 @@ import { readLatestOracleJob } from "../util/oracleJob.js";
 import { readLatestCodexLifecycleJob } from "../util/codexLifecycleJob.js";
 import { readAuditEvents } from "../util/auditLog.js";
 import { isComposerDisabled } from "../util/composerDisabled.js";
+import { readActiveGoal } from "../util/goal.js";
 
 export interface ComposerStatus {
   config: {
@@ -51,6 +52,12 @@ export interface ComposerStatus {
     nextAction?: string;
     reason?: string;
   };
+  goal?: {
+    goalId: string;
+    state: string;
+    turns: number;
+    nextReason?: string;
+  };
 }
 
 function ageSeconds(iso: string | undefined, nowMs: number): number {
@@ -73,8 +80,9 @@ function recommend(params: {
   exists: boolean;
   integrations: ComposerStatus["integrations"];
   active: ComposerStatus["active"];
+  goal?: ComposerStatus["goal"];
 }): ComposerStatus["recommendation"] {
-  const { exists, active } = params;
+  const { exists, active, goal } = params;
   if (!exists) {
     return { nextAction: "agent-composer init", reason: "no composer.config.json found" };
   }
@@ -83,6 +91,15 @@ function recommend(params: {
     (active.oracleJob.status === "queued" || active.oracleJob.status === "running")
   ) {
     return { nextAction: "composer_oracle_job_result", reason: "an Oracle job is in progress" };
+  }
+  if (goal?.state === "blocked") {
+    return {
+      nextAction: "composer_goal_step",
+      reason: "goal is blocked; extend budget, report check results, or clear",
+    };
+  }
+  if (goal?.state === "active") {
+    return { nextAction: "composer_goal_step", reason: "active goal; advance the goal loop" };
   }
   return {
     nextAction: "composer_route_decide",
@@ -218,7 +235,22 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
     // ignore
   }
 
-  const recommendation = recommend({ exists, integrations, active });
+  let goal: ComposerStatus["goal"];
+  try {
+    const activeGoal = readActiveGoal(root);
+    if (activeGoal) {
+      goal = {
+        goalId: activeGoal.goalId,
+        state: activeGoal.state,
+        turns: activeGoal.turns,
+        nextReason: activeGoal.lastReason,
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  const recommendation = recommend({ exists, integrations, active, goal });
 
   return {
     config: {
@@ -233,6 +265,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
     latestJob,
     latest,
     recommendation,
+    goal,
   };
 }
 
@@ -279,12 +312,19 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
   const disabledPart = s.integrations.composerDisabled ? " · DISABLED" : "";
   const next = s.recommendation.nextAction ?? "-";
   const profilePart = session?.profile ? ` · P:${session.profile}` : "";
+  const goalPart = s.goal
+    ? ` · goal:${s.goal.state} ${s.goal.turns}t${s.goal.nextReason ? ` · next:${shortStatusText(s.goal.nextReason)}` : ""}`
+    : "";
   const fg = s.active.foreground;
   const activeSeg =
     fg && fg.length > 0
       ? `active:${fg[0]!.tool.replace(/^composer_/, "")} ${fg[0]!.ageSeconds < 60 ? fg[0]!.ageSeconds + "s" : Math.round(fg[0]!.ageSeconds / 60) + "m"}`
       : "active:none";
-  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart} · ${activeSeg} · last:${last} · next:${next}`;
+  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart}${goalPart} · ${activeSeg} · last:${last} · next:${next}`;
+}
+
+function shortStatusText(value: string): string {
+  return value.length > 32 ? `${value.slice(0, 29)}...` : value;
 }
 
 export function renderStatusHuman(s: ComposerStatus): string {

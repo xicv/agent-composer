@@ -46,6 +46,7 @@ interface ResolvedCodexReview {
     blockOnSeverity: "critical" | "high" | "medium" | "low";
     timeoutMs: number;
     failClosed: boolean;
+    maxConsecutiveBlocks: number;
   };
   warmCache: {
     enabled: boolean;
@@ -80,6 +81,7 @@ const DEFAULT_CODEX_REVIEW: ResolvedCodexReview = {
     blockOnSeverity: "high",
     timeoutMs: 900000,
     failClosed: false,
+    maxConsecutiveBlocks: 0,
   },
   warmCache: {
     enabled: false,
@@ -116,9 +118,15 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
   const rescue = resolveCodexRescue(config.codexRescue);
   const lifecycle = resolveCodexLifecycle(config.codexLifecycle);
   const coderModel = config.roles.coder.model ?? DEFAULT_ANTHROPIC_MODEL;
-  const coderModelNote = coderModel.startsWith("glm-5.2")
-    ? " (requires a z.ai GLM Coding Plan token; standalone API pending)"
-    : "";
+  const coderBaseUrl = config.roles.coder.baseUrl ?? "";
+  const coderIsZai = coderBaseUrl.includes("api.z.ai");
+  const coderIsGlm52 = coderModel.startsWith("glm-5.2");
+  const coderModelStatus = coderIsGlm52 && !coderIsZai ? "warn" as const : "pass" as const;
+  const coderModelDetail = coderIsGlm52
+    ? coderIsZai
+      ? `model=${coderModel} (requires a z.ai GLM Coding Plan token; standalone API pending)`
+      : `model=${coderModel} but roles.coder.baseUrl is not a z.ai endpoint (${coderBaseUrl || "unset"}); glm-5.2 may require a z.ai GLM Coding Plan — verify your provider supports it`
+    : `model=${coderModel}`;
   const enabledCheck = codexReview
     ? reviewEnabledCheck(resolved)
     : {
@@ -158,8 +166,8 @@ export function buildConfigChecks(config: ComposerConfig): DoctorCheck[] {
     },
     {
       name: "config: coder model",
-      status: "pass",
-      detail: `model=${coderModel}${coderModelNote}`,
+      status: coderModelStatus,
+      detail: coderModelDetail,
     },
     {
       name: "config: codexLifecycle",
@@ -410,6 +418,9 @@ function resolveCodexReview(codexReview: CodexReview | undefined): ResolvedCodex
         codexReview?.preCommitHook?.blockOnSeverity ?? DEFAULT_CODEX_REVIEW.preCommitHook.blockOnSeverity,
       timeoutMs: codexReview?.preCommitHook?.timeoutMs ?? DEFAULT_CODEX_REVIEW.preCommitHook.timeoutMs,
       failClosed: codexReview?.preCommitHook?.failClosed ?? DEFAULT_CODEX_REVIEW.preCommitHook.failClosed,
+      maxConsecutiveBlocks:
+        codexReview?.preCommitHook?.maxConsecutiveBlocks ??
+        DEFAULT_CODEX_REVIEW.preCommitHook.maxConsecutiveBlocks,
     },
     warmCache: {
       enabled: codexReview?.warmCache?.enabled ?? DEFAULT_CODEX_REVIEW.warmCache.enabled,
@@ -452,7 +463,8 @@ function preCommitHookCheck(resolved: ResolvedCodexReview): DoctorCheck {
         status: "pass",
         detail:
           `mechanical gate enabled=${hook.enabled}, ` +
-          `blockOnSeverity=${hook.blockOnSeverity}, failClosed=${hook.failClosed}`,
+          `blockOnSeverity=${hook.blockOnSeverity}, failClosed=${hook.failClosed}, ` +
+          `maxConsecutiveBlocks=${hook.maxConsecutiveBlocks > 0 ? hook.maxConsecutiveBlocks : "off"}`,
       }
     : {
         name: "config: codexReview preCommitHook",

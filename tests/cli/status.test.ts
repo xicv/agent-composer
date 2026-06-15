@@ -7,6 +7,7 @@ import { buildStatus, renderStatusLine, statusEnvelope } from "../../src/cli/sta
 import { newOracleJob, writeOracleJob } from "../../src/util/oracleJob.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import { appendAuditEvent } from "../../src/util/auditLog.js";
+import { startGoal, stepGoal } from "../../src/util/goal.js";
 
 const MINIMAL_CONFIG = JSON.stringify(
   {
@@ -249,6 +250,106 @@ describe("buildStatus", () => {
     expect(status.latest.taskClass).toBe("implementation");
   });
 
+  it("includes the active goal snapshot without running checks", () => {
+    const goal = startGoal(tmp, {
+      objective: "show goal status",
+      condition: "status line includes it",
+      checks: [{ name: "unit", command: "true" }],
+    });
+
+    const status = buildStatus(tmp);
+
+    expect(status.goal).toEqual({
+      goalId: goal.goalId,
+      state: "active",
+      turns: 0,
+      nextReason: undefined,
+    });
+  });
+
+  it("recommends composer_goal_step when a goal is active", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    startGoal(tmp, {
+      objective: "advance active goal",
+      condition: "checks pass",
+      checks: [{ name: "unit", command: "true" }],
+    });
+
+    const status = buildStatus(tmp);
+
+    expect(status.recommendation).toEqual({
+      nextAction: "composer_goal_step",
+      reason: "active goal; advance the goal loop",
+    });
+  });
+
+  it("recommends config setup when config is missing even if a goal is active", () => {
+    startGoal(tmp, {
+      objective: "do not hide missing config",
+      condition: "config is set up",
+      checks: [{ name: "unit", command: "true" }],
+    });
+
+    const status = buildStatus(tmp);
+
+    expect(status.config.exists).toBe(false);
+    expect(status.goal?.state).toBe("active");
+    expect(status.recommendation).toEqual({
+      nextAction: "agent-composer init",
+      reason: "no composer.config.json found",
+    });
+  });
+
+  it("recommends active oracle job before an active goal when config exists", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    startGoal(tmp, {
+      objective: "oracle should finish first",
+      condition: "oracle job completed",
+      checks: [{ name: "unit", command: "true" }],
+    });
+    const job = newOracleJob(tmp, { mode: "research" });
+    writeOracleJob(tmp, { ...job, status: "running", startedAt: new Date().toISOString() });
+
+    const status = buildStatus(tmp);
+
+    expect(status.goal?.state).toBe("active");
+    expect(status.active.oracleJob?.status).toBe("running");
+    expect(status.recommendation).toEqual({
+      nextAction: "composer_oracle_job_result",
+      reason: "an Oracle job is in progress",
+    });
+  });
+
+  it("recommends composer_goal_step when a goal is blocked", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    const goal = startGoal(tmp, {
+      objective: "advance blocked goal",
+      condition: "budget is enough",
+      maxCost: 1,
+    });
+    stepGoal(tmp, {
+      goalId: goal.goalId,
+      signals: { spentUsd: 2 },
+    });
+
+    const status = buildStatus(tmp);
+
+    expect(status.goal?.state).toBe("blocked");
+    expect(status.recommendation).toEqual({
+      nextAction: "composer_goal_step",
+      reason: "goal is blocked; extend budget, report check results, or clear",
+    });
+  });
+
+  it("keeps the route recommendation when there is no active goal", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+
+    const status = buildStatus(tmp);
+
+    expect(status.goal).toBeUndefined();
+    expect(status.recommendation.nextAction).toBe("composer_route_decide");
+  });
+
   it("ACTIVE-VS-LATEST: succeeded oracle job → latestJob present, active absent", () => {
     writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
     const job = newOracleJob(tmp, { mode: "research" });
@@ -364,6 +465,27 @@ describe("renderStatusLine", () => {
       const line = renderStatusLine(s, { mode: "strict", profile: "deep", oracle: { enabled: true } });
       expect(line).toMatch(/^CMP strict · P:deep /);
       expect(line).toContain("P:deep");
+    } finally {
+      rmSync(tmp2, { recursive: true, force: true });
+    }
+  });
+
+  it("renders the active goal segment after H", () => {
+    const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-goal-"));
+    try {
+      const goal = startGoal(tmp2, {
+        objective: "render goal",
+        condition: "check passes",
+        checks: [{ name: "unit", command: "false" }],
+      });
+      stepGoal(tmp2, {
+        goalId: goal.goalId,
+        signals: { checkResults: [{ name: "unit", passed: false }] },
+      });
+
+      const line = renderStatusLine(buildStatus(tmp2));
+
+      expect(line).toContain("H:off · goal:active 1t · next:checks failing - fix · active:none");
     } finally {
       rmSync(tmp2, { recursive: true, force: true });
     }

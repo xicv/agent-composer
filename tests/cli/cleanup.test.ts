@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCleanupArgs, planCleanup, runCleanup } from "../../src/cli/cleanup.js";
+import { clearGoal, startGoal, stepGoal } from "../../src/util/goal.js";
 
 // ---------------------------------------------------------------------------
 // parseCleanupArgs
@@ -18,6 +19,10 @@ describe("parseCleanupArgs", () => {
 
   it("['--state','--dry-run'] → {state:true,dryRun:true}", () => {
     expect(parseCleanupArgs(["--state", "--dry-run"])).toEqual({ state: true, dryRun: true });
+  });
+
+  it("['--goals'] → {goals:true}", () => {
+    expect(parseCleanupArgs(["--goals"])).toEqual({ goals: true });
   });
 
   it("['--older-than','14d'] → olderThanMs = 14 * 86400000", () => {
@@ -47,6 +52,10 @@ describe("parseCleanupArgs", () => {
 describe("planCleanup", () => {
   let projectRoot: string;
   let stateDir: string;
+  let terminalGoalPath: string;
+  let activeGoalPath: string;
+  let blockedGoalPath: string;
+  let lockPath: string;
 
   beforeEach(() => {
     projectRoot = mkdtempSync(join(tmpdir(), "composer-cleanup-proj-"));
@@ -59,6 +68,42 @@ describe("planCleanup", () => {
     // .composer/results/<b>
     mkdirSync(join(projectRoot, ".composer", "results"), { recursive: true });
     writeFileSync(join(projectRoot, ".composer", "results", "b"), "");
+
+    const terminal = startGoal(projectRoot, {
+      objective: "done goal",
+      condition: "can be cleaned",
+      idHint: "terminal",
+    });
+    clearGoal(projectRoot, terminal.goalId);
+    const blocked = startGoal(projectRoot, {
+      objective: "blocked goal",
+      condition: "must persist",
+      maxCost: 1,
+      idHint: "blocked",
+    });
+    stepGoal(projectRoot, {
+      goalId: blocked.goalId,
+      signals: { spentUsd: 1 },
+    });
+    const activeGoalId = "active-manual";
+    writeFileSync(join(projectRoot, ".composer", "goals", `${activeGoalId}.json`), `${JSON.stringify({
+      goalId: activeGoalId,
+      objective: "open goal",
+      condition: "must persist",
+      checks: [],
+      state: "active",
+      turns: 0,
+      maxTurns: 12,
+      spentUsd: 0,
+      createdAt: "2026-06-14T00:00:00.000Z",
+      updatedAt: "2026-06-14T00:00:00.000Z",
+      history: [],
+    }, null, 2)}\n`, "utf8");
+    terminalGoalPath = join(projectRoot, ".composer", "goals", `${terminal.goalId}.json`);
+    activeGoalPath = join(projectRoot, ".composer", "goals", `${activeGoalId}.json`);
+    blockedGoalPath = join(projectRoot, ".composer", "goals", `${blocked.goalId}.json`);
+    lockPath = join(projectRoot, ".composer", "goals", ".lock");
+    writeFileSync(lockPath, "{}");
 
     // <stateDir>/oracle-jobs/<c>
     mkdirSync(join(stateDir, "oracle-jobs"), { recursive: true });
@@ -78,12 +123,24 @@ describe("planCleanup", () => {
     return { projectRoot, stateDir, nowMs: nowMs ?? Date.now() };
   }
 
-  it("planCleanup({}) includes all four entry paths", () => {
+  it("planCleanup({}) includes project and state entry paths but no goal records", () => {
     const result = planCleanup({}, makeEnv());
     expect(result).toContain(join(projectRoot, ".composer", "oracle", "a"));
     expect(result).toContain(join(projectRoot, ".composer", "results", "b"));
+    expect(result).not.toContain(terminalGoalPath);
+    expect(result).not.toContain(activeGoalPath);
+    expect(result).not.toContain(blockedGoalPath);
+    expect(result).not.toContain(lockPath);
     expect(result).toContain(join(stateDir, "oracle-jobs", "c"));
     expect(result).toContain(join(stateDir, "codex-lifecycle", "d"));
+  });
+
+  it("planCleanup({goals:true}) includes terminal goal records only", () => {
+    const result = planCleanup({ goals: true }, makeEnv());
+    expect(result).toContain(terminalGoalPath);
+    expect(result).not.toContain(activeGoalPath);
+    expect(result).not.toContain(blockedGoalPath);
+    expect(result).not.toContain(lockPath);
   });
 
   it("planCleanup({oracle:true}) includes oracle entries, excludes results + codex-lifecycle", () => {
@@ -91,6 +148,8 @@ describe("planCleanup", () => {
     expect(result).toContain(join(projectRoot, ".composer", "oracle", "a"));
     expect(result).toContain(join(stateDir, "oracle-jobs", "c"));
     expect(result).not.toContain(join(projectRoot, ".composer", "results", "b"));
+    expect(result).not.toContain(terminalGoalPath);
+    expect(result).not.toContain(activeGoalPath);
     expect(result).not.toContain(join(stateDir, "codex-lifecycle", "d"));
   });
 
@@ -100,6 +159,8 @@ describe("planCleanup", () => {
     expect(result).toContain(join(stateDir, "codex-lifecycle", "d"));
     expect(result).not.toContain(join(projectRoot, ".composer", "oracle", "a"));
     expect(result).not.toContain(join(projectRoot, ".composer", "results", "b"));
+    expect(result).not.toContain(terminalGoalPath);
+    expect(result).not.toContain(activeGoalPath);
   });
 
   it("olderThanMs huge + nowMs far in future → no entries pass the age filter", () => {
@@ -113,6 +174,10 @@ describe("planCleanup", () => {
     const result = planCleanup({ olderThanMs: 0 }, makeEnv(Date.now() + 1000));
     expect(result).toContain(join(projectRoot, ".composer", "oracle", "a"));
     expect(result).toContain(join(projectRoot, ".composer", "results", "b"));
+    expect(result).not.toContain(terminalGoalPath);
+    expect(result).not.toContain(activeGoalPath);
+    expect(result).not.toContain(blockedGoalPath);
+    expect(result).not.toContain(lockPath);
     expect(result).toContain(join(stateDir, "oracle-jobs", "c"));
     expect(result).toContain(join(stateDir, "codex-lifecycle", "d"));
   });
@@ -124,6 +189,10 @@ describe("planCleanup", () => {
 describe("runCleanup dryRun", () => {
   let projectRoot: string;
   let stateDir: string;
+  let terminalGoalPath: string;
+  let activeGoalPath: string;
+  let blockedGoalPath: string;
+  let lockPath: string;
 
   beforeEach(() => {
     projectRoot = mkdtempSync(join(tmpdir(), "composer-cleanup-dry-"));
@@ -131,6 +200,41 @@ describe("runCleanup dryRun", () => {
 
     mkdirSync(join(projectRoot, ".composer", "oracle"), { recursive: true });
     writeFileSync(join(projectRoot, ".composer", "oracle", "x"), "");
+    const terminal = startGoal(projectRoot, {
+      objective: "done dry-run goal",
+      condition: "can be cleaned",
+      idHint: "terminal-dry",
+    });
+    clearGoal(projectRoot, terminal.goalId);
+    const blocked = startGoal(projectRoot, {
+      objective: "blocked dry-run goal",
+      condition: "must persist",
+      maxCost: 1,
+      idHint: "blocked-dry",
+    });
+    stepGoal(projectRoot, {
+      goalId: blocked.goalId,
+      signals: { spentUsd: 1 },
+    });
+    const activeGoalId = "active-dry-manual";
+    writeFileSync(join(projectRoot, ".composer", "goals", `${activeGoalId}.json`), `${JSON.stringify({
+      goalId: activeGoalId,
+      objective: "open dry-run goal",
+      condition: "must persist",
+      checks: [],
+      state: "active",
+      turns: 0,
+      maxTurns: 12,
+      spentUsd: 0,
+      createdAt: "2026-06-14T00:00:00.000Z",
+      updatedAt: "2026-06-14T00:00:00.000Z",
+      history: [],
+    }, null, 2)}\n`, "utf8");
+    terminalGoalPath = join(projectRoot, ".composer", "goals", `${terminal.goalId}.json`);
+    activeGoalPath = join(projectRoot, ".composer", "goals", `${activeGoalId}.json`);
+    blockedGoalPath = join(projectRoot, ".composer", "goals", `${blocked.goalId}.json`);
+    lockPath = join(projectRoot, ".composer", "goals", ".lock");
+    writeFileSync(lockPath, "{}");
   });
 
   afterEach(() => {
@@ -143,7 +247,39 @@ describe("runCleanup dryRun", () => {
     const result = runCleanup({ dryRun: true }, { projectRoot, stateDir, nowMs: Date.now() });
     expect(result.dryRun).toBe(true);
     expect(result.removed).toContain(target);
+    expect(result.removed).not.toContain(terminalGoalPath);
+    expect(result.removed).not.toContain(activeGoalPath);
+    expect(result.removed).not.toContain(blockedGoalPath);
+    expect(result.removed).not.toContain(lockPath);
     // File must still exist — dry run must not delete
     expect(existsSync(target)).toBe(true);
+    expect(existsSync(terminalGoalPath)).toBe(true);
+    expect(existsSync(activeGoalPath)).toBe(true);
+    expect(existsSync(blockedGoalPath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("default cleanup leaves all goal records and the lock file untouched", () => {
+    const result = runCleanup({}, { projectRoot, stateDir, nowMs: Date.now() });
+    expect(result.removed).not.toContain(terminalGoalPath);
+    expect(result.removed).not.toContain(activeGoalPath);
+    expect(result.removed).not.toContain(blockedGoalPath);
+    expect(result.removed).not.toContain(lockPath);
+    expect(existsSync(terminalGoalPath)).toBe(true);
+    expect(existsSync(activeGoalPath)).toBe(true);
+    expect(existsSync(blockedGoalPath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("cleanup --goals removes terminal goal records and preserves open goals plus the lock file", () => {
+    const result = runCleanup({ goals: true }, { projectRoot, stateDir, nowMs: Date.now() });
+    expect(result.removed).toContain(terminalGoalPath);
+    expect(result.removed).not.toContain(activeGoalPath);
+    expect(result.removed).not.toContain(blockedGoalPath);
+    expect(result.removed).not.toContain(lockPath);
+    expect(existsSync(terminalGoalPath)).toBe(false);
+    expect(existsSync(activeGoalPath)).toBe(true);
+    expect(existsSync(blockedGoalPath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(true);
   });
 });

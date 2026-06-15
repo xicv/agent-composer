@@ -41,4 +41,11 @@ describe("formatHelp", () => {
   it("includes agent-composer cleanup", () => {
     expect(formatHelp()).toContain("agent-composer cleanup");
   });
+
+  it("includes agent-composer goal commands", () => {
+    expect(formatHelp()).toContain("agent-composer goal start <objective>");
+    expect(formatHelp()).toContain("agent-composer goal status [goalId]");
+    expect(formatHelp()).toContain("agent-composer goal step [goalId]");
+    expect(formatHelp()).toContain("agent-composer goal clear [goalId]");
+  });
 });

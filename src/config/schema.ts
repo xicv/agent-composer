@@ -90,6 +90,7 @@ export const CodexPreCommitHookSchema = z
     blockOnSeverity: CodexSeveritySchema.optional(),
     timeoutMs: z.number().int().min(1).optional(),
     failClosed: z.boolean().optional(),
+    maxConsecutiveBlocks: z.number().int().min(0).optional(),
   })
   .strict();
 export type CodexPreCommitHook = z.infer<typeof CodexPreCommitHookSchema>;

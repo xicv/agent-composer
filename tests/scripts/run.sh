@@ -188,6 +188,82 @@ JSON
     FAILED+=("precommit_write_cache_other_skipped: expected unknown verdict not to write cache")
     printf '  FAIL  %-45s expected SKIP\n' "precommit_write_cache_other_skipped"
   fi
+
+  echo
+  echo "=== precommit_codex_review.sh oscillation cap ==="
+
+  CAP_REPO="$TMP/cap-repo"
+  CAP_STATE="$TMP/cap-state"
+  CAP_MODE="$TMP/reviewer-mode.txt"
+  CAP_STUB="$TMP/reviewer-stub.sh"
+  CAP_OUT="$TMP/cap.out"
+  mkdir -p "$CAP_REPO" "$CAP_STATE"
+  git -C "$CAP_REPO" init -q
+  git -C "$CAP_REPO" config user.email composer@example.test
+  git -C "$CAP_REPO" config user.name Composer
+  cat >"$CAP_REPO/composer.config.json" <<'JSON'
+{"codexReview":{"enabled":true,"preCommitCommand":"adversarial-review","scope":"working-tree","base":"main","preCommitHook":{"enabled":true,"blockOnSeverity":"high","failClosed":true,"maxConsecutiveBlocks":2}}}
+JSON
+  cat >"$CAP_STUB" <<'SH'
+#!/usr/bin/env bash
+set -u
+mode="$(cat "$1")"
+if [[ "$mode" == "approve" ]]; then
+  printf '%s\n' '{"verdict":"approve","summary":"ok","findings":[]}'
+else
+  printf '%s\n' '{"verdict":"needs-attention","summary":"high issue","findings":[{"severity":"high","file":"a.ts","line_start":1,"title":"High issue"}]}'
+fi
+SH
+  chmod +x "$CAP_STUB"
+
+  run_cap_guard() {
+    COMPOSER_CONFIG="$CAP_REPO/composer.config.json" \
+      CLAUDE_PROJECT_DIR="$CAP_REPO" \
+      COMPOSER_STATE_DIR="$CAP_STATE" \
+      COMPOSER_CODEX_REVIEW_CMD="$CAP_STUB $CAP_MODE" \
+      RUN_LOG="$TMP/cap-run-log.jsonl" \
+      "$GUARD" --git-hook >"$CAP_OUT" 2>&1
+  }
+
+  printf 'needs\n' > "$CAP_MODE"
+  run_cap_guard
+  CAP_STATUS_1=$?
+  run_cap_guard
+  CAP_STATUS_2=$?
+  run_cap_guard
+  CAP_STATUS_3=$?
+  CAP_MESSAGE="$(cat "$CAP_OUT")"
+  if [[ "$CAP_STATUS_1" == "1" && "$CAP_STATUS_2" == "1" && "$CAP_STATUS_3" == "0" ]] \
+    && grep -q 'allowed after 2 consecutive blocks' <<<"$CAP_MESSAGE"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s CAP\n' "precommit_oscillation_cap_allows_third"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_oscillation_cap_allows_third: expected statuses 1,1,0 plus cap message; got $CAP_STATUS_1,$CAP_STATUS_2,$CAP_STATUS_3 output=$CAP_MESSAGE")
+    printf '  FAIL  %-45s expected CAP\n' "precommit_oscillation_cap_allows_third"
+  fi
+
+  rm -rf "$CAP_STATE"
+  mkdir -p "$CAP_STATE"
+  printf 'needs\n' > "$CAP_MODE"
+  run_cap_guard
+  RESET_STATUS_1=$?
+  run_cap_guard
+  RESET_STATUS_2=$?
+  printf 'approve\n' > "$CAP_MODE"
+  run_cap_guard
+  RESET_STATUS_3=$?
+  printf 'needs\n' > "$CAP_MODE"
+  run_cap_guard
+  RESET_STATUS_4=$?
+  if [[ "$RESET_STATUS_1" == "1" && "$RESET_STATUS_2" == "1" && "$RESET_STATUS_3" == "0" && "$RESET_STATUS_4" == "1" ]]; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s RESET\n' "precommit_oscillation_cap_approve_resets"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_oscillation_cap_approve_resets: expected statuses 1,1,0,1; got $RESET_STATUS_1,$RESET_STATUS_2,$RESET_STATUS_3,$RESET_STATUS_4")
+    printf '  FAIL  %-45s expected RESET\n' "precommit_oscillation_cap_approve_resets"
+  fi
 fi
 
 echo

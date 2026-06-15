@@ -19,6 +19,7 @@ import { applyMode } from "./cli/mode.js";
 import { isModeName, MODE_NAMES } from "./config/modes.js";
 import { runStatus } from "./cli/status.js";
 import { runInstallGitHook } from "./cli/installGitHook.js";
+import { runGoal } from "./cli/goal.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -27,6 +28,18 @@ const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // agent-composer from any cwd that lacks a local .env.json (manifested as
 // "missing ANTHROPIC_AUTH_TOKEN" from composer_code).
 const ENV_PATH = process.env["COMPOSER_ENV"];
+const CLI_SUBCOMMANDS = new Set([
+  "help",
+  "--help",
+  "-h",
+  "init",
+  "doctor",
+  "cleanup",
+  "status",
+  "install-git-hook",
+  "goal",
+  "mode",
+]);
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
@@ -82,6 +95,13 @@ async function main(): Promise<void> {
     runInstallGitHook(process.cwd());
     return;
   }
+  if (subcommand === "goal") {
+    runGoal(process.cwd(), {
+      action: process.argv[3],
+      flags: process.argv.slice(4),
+    });
+    return;
+  }
   if (subcommand === "mode") {
     const name = process.argv[3];
     if (!name || !isModeName(name)) {
@@ -109,6 +129,11 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`composer MCP server startup failed: ${msg}\n`);
+  const subcommand = process.argv[2];
+  if (subcommand && CLI_SUBCOMMANDS.has(subcommand)) {
+    process.stderr.write(`agent-composer failed: ${msg}\n`);
+  } else {
+    process.stderr.write(`composer MCP server startup failed: ${msg}\n`);
+  }
   process.exit(1);
 });

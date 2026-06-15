@@ -115,6 +115,26 @@ describe("doctor config checks", () => {
     });
   });
 
+  it("warns when coder model is glm-5.2 but the endpoint is not z.ai", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      roles: {
+        ...BASE_CONFIG.roles,
+        coder: {
+          provider: "anthropic",
+          baseUrl: "https://example.com/v1",
+          apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+          model: "glm-5.2",
+        },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: coder model")).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("not a z.ai endpoint"),
+    });
+  });
+
   it("reports enabled triggers and resolved defaults without throwing", () => {
     const checks = buildConfigChecks({
       ...BASE_CONFIG,
@@ -151,6 +171,19 @@ describe("doctor config checks", () => {
       status: "warn",
       detail: expect.stringContaining("free-text only"),
     });
+  });
+
+  it("reports the pre-commit oscillation cap setting", () => {
+    const checks = buildConfigChecks({
+      ...BASE_CONFIG,
+      codexReview: {
+        enabled: true,
+        preCommitHook: { enabled: true, maxConsecutiveBlocks: 2 },
+      },
+    });
+
+    expect(checks.find((check) => check.name === "config: codexReview preCommitHook")?.detail)
+      .toContain("maxConsecutiveBlocks=2");
   });
 
   it("reports configured codexReview.model in defaults", () => {
