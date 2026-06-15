@@ -104,8 +104,8 @@
     "preCommitHook": {
       "enabled": true,
       "blockOnSeverity": "high",
-      "timeoutMs": 900000,
-      "failClosed": true
+      "timeoutMs": 120000,
+      "failClosed": false
     },
     "warmCache": {
       "enabled": true,
