@@ -21,6 +21,7 @@ import { COMPOSER_STATE_DIR_ENV } from "./codexLifecycleJob.js";
 
 export const ORACLE_JOB_DIR = "oracle-jobs";
 export const ORACLE_JOB_VERSION = 1;
+const LATEST_ORACLE_JOB_POINTER = ".latest";
 
 export const OracleJobModeSchema = z.enum([
   "auto",
@@ -92,6 +93,7 @@ export function writeOracleJob(root: string, job: OracleJob): OracleJob {
     resultPath,
   });
   writeJobFileAtomically(resultPath, `${JSON.stringify(next, null, 2)}\n`);
+  writePointerFileAtomically(path.join(dir, LATEST_ORACLE_JOB_POINTER), `${next.jobId}\n`);
   return next;
 }
 
@@ -128,6 +130,9 @@ export function readLatestOracleJob(root: string): OracleJob | null {
   const dir = existingOracleJobDir(root);
   if (!dir) return null;
 
+  const pointed = readLatestOracleJobPointer(root, dir);
+  if (pointed) return pointed;
+
   const candidates = readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .map((name) => path.join(dir, name))
@@ -150,6 +155,29 @@ export function readLatestOracleJob(root: string): OracleJob | null {
     }
   }
   return null;
+}
+
+function readLatestOracleJobPointer(root: string, dir: string): OracleJob | null {
+  const pointerPath = path.join(dir, LATEST_ORACLE_JOB_POINTER);
+  try {
+    if (!existsSync(pointerPath)) return null;
+    if (lstatSync(pointerPath).isSymbolicLink()) return null;
+    const jobId = readFileSync(pointerPath, "utf8").trim();
+    const parsed = z.string().uuid().safeParse(jobId);
+    if (!parsed.success) return null;
+    const filePath = path.join(dir, `${parsed.data}.json`);
+    if (!existsSync(filePath)) return null;
+    if (lstatSync(filePath).isSymbolicLink()) return null;
+    if (!statSync(filePath).isFile()) return null;
+    const raw = readFileSync(filePath, "utf8");
+    const job = OracleJobSchema.parse(JSON.parse(raw));
+    if (job.jobId !== parsed.data || path.resolve(job.resultPath) !== path.resolve(filePath)) {
+      return null;
+    }
+    return reconcileOracleJob(root, job);
+  } catch {
+    return null;
+  }
 }
 
 export function reconcileOracleJob(root: string, job: OracleJob): OracleJob {
@@ -243,6 +271,19 @@ function assertUsableDirectory(dir: string, label: string): void {
 }
 
 function writeJobFileAtomically(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(tmp, filePath);
+    chmodSync(filePath, 0o600);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
+}
+
+function writePointerFileAtomically(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
   try {

@@ -6,11 +6,12 @@ import type { ComposerConfig } from "../config/schema.js";
 import { globalConfigDir } from "../config/paths.js";
 import { readLatestOracleJob } from "../util/oracleJob.js";
 import { readLatestCodexLifecycleJob } from "../util/codexLifecycleJob.js";
-import { readAuditEvents } from "../util/auditLog.js";
+import { readRecentAuditEvents } from "../util/auditLog.js";
 import { isComposerDisabled } from "../util/composerDisabled.js";
 import { readActiveGoal } from "../util/goal.js";
 
 export interface ComposerStatus {
+  fast?: boolean;
   config: {
     path: string;
     exists: boolean;
@@ -147,7 +148,7 @@ function resolveStatusConfigPath(cwd: string): string | null {
   return null;
 }
 
-export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): ComposerStatus {
+export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean } = {}): ComposerStatus {
   const nowMs = opts.nowMs ?? Date.now();
   const resolvedPath = resolveStatusConfigPath(cwd);
   let exists = resolvedPath !== null;
@@ -177,6 +178,24 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
   };
 
   const mode = deriveMode(config);
+
+  if (opts.fast) {
+    return {
+      fast: true,
+      config: {
+        path: configPath,
+        exists,
+        mode,
+        oracleDefaultMode: config?.oracle?.defaultMode,
+        oracleRequireExplicitTag: config?.oracle?.requireExplicitTag,
+      },
+      integrations,
+      active: {},
+      latestJob: {},
+      latest: {},
+      recommendation: {},
+    };
+  }
 
   const active: ComposerStatus["active"] = {};
   const latestJob: ComposerStatus["latestJob"] = {};
@@ -217,7 +236,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
 
   const latest: ComposerStatus["latest"] = {};
   try {
-    const recent = readAuditEvents(root, { limit: 50 });
+    const recent = readRecentAuditEvents(root, 50);
     const findLast = (pred: (e: (typeof recent)[number]) => boolean) => {
       for (let i = recent.length - 1; i >= 0; i--) {
         if (pred(recent[i]!)) return recent[i]!;
@@ -302,15 +321,14 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
       : null,
   ].filter(Boolean);
 
-  const last =
-    lastParts.length > 0
-      ? lastParts.join(" ")
-      : s.recommendation.nextAction
-        ? `next=${s.recommendation.nextAction}`
-        : "-";
+  const last = lastParts.length > 0
+    ? lastParts.join(" ")
+    : s.recommendation.nextAction
+      ? `next=${s.recommendation.nextAction}`
+      : undefined;
 
   const disabledPart = s.integrations.composerDisabled ? " · DISABLED" : "";
-  const next = s.recommendation.nextAction ?? "-";
+  const next = s.recommendation.nextAction;
   const profilePart = session?.profile ? ` · P:${session.profile}` : "";
   const goalPart = s.goal
     ? ` · goal:${s.goal.state} ${s.goal.turns}t${s.goal.nextReason ? ` · next:${shortStatusText(s.goal.nextReason)}` : ""}`
@@ -320,7 +338,16 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
     fg && fg.length > 0
       ? `active:${fg[0]!.tool.replace(/^composer_/, "")} ${fg[0]!.ageSeconds < 60 ? fg[0]!.ageSeconds + "s" : Math.round(fg[0]!.ageSeconds / 60) + "m"}`
       : "active:none";
-  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart}${goalPart} · ${activeSeg} · last:${last} · next:${next}`;
+  const scanParts = s.fast
+    ? []
+    : [
+        goalPart ? goalPart.trim().replace(/^·\s*/, "") : null,
+        activeSeg,
+        last ? `last:${last}` : null,
+        next ? `next:${next}` : null,
+      ].filter(Boolean);
+  const scanSuffix = scanParts.length > 0 ? ` · ${scanParts.join(" · ")}` : "";
+  return `CMP ${mode}${profilePart} · R:${R} · L:${L} · O:${O} · H:${H}${disabledPart}${scanSuffix}`;
 }
 
 function shortStatusText(value: string): string {
@@ -393,13 +420,13 @@ export function statusEnvelope(
 
 export function runStatus(
   cwd: string,
-  opts: { json?: boolean; line?: boolean; watch?: boolean; replace?: boolean } = {},
+  opts: { json?: boolean; line?: boolean; watch?: boolean; replace?: boolean; fast?: boolean } = {},
 ): void {
   if (opts.watch) {
     if (opts.replace) {
       let prevLen = 0;
       const tick = () => {
-        const line = renderStatusLine(buildStatus(cwd));
+        const line = renderStatusLine(buildStatus(cwd, { fast: opts.fast }));
         const padded = line.padEnd(prevLen);
         prevLen = line.length;
         process.stdout.write(`\r${padded}`);
@@ -413,20 +440,20 @@ export function runStatus(
       tick();
       setInterval(tick, 2000);
     } else {
-      process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
+      process.stdout.write(renderStatusLine(buildStatus(cwd, { fast: opts.fast })) + "\n");
       setInterval(() => {
-        process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
+        process.stdout.write(renderStatusLine(buildStatus(cwd, { fast: opts.fast })) + "\n");
       }, 2000);
     }
     return;
   }
   if (opts.json) {
-    process.stdout.write(JSON.stringify(statusEnvelope(buildStatus(cwd)), null, 2) + "\n");
+    process.stdout.write(JSON.stringify(statusEnvelope(buildStatus(cwd, { fast: opts.fast })), null, 2) + "\n");
     return;
   }
   if (opts.line) {
-    process.stdout.write(renderStatusLine(buildStatus(cwd)) + "\n");
+    process.stdout.write(renderStatusLine(buildStatus(cwd, { fast: opts.fast })) + "\n");
     return;
   }
-  process.stdout.write(renderStatusHuman(buildStatus(cwd)));
+  process.stdout.write(renderStatusHuman(buildStatus(cwd, { fast: opts.fast })));
 }

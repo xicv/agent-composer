@@ -1,12 +1,13 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { mkdtempSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import {
   newOracleJob,
+  readLatestOracleJob,
   readOracleJob,
   updateOracleJob,
   writeOracleJob,
@@ -64,6 +65,38 @@ describe("oracle job files", () => {
     expect(read?.answerText).toBe("x");
     expect(read?.answerPath).toBe(".composer/oracle/answers/foo.md");
     expect(read?.oracleSlug).toBe("foo");
+  });
+
+  it("readLatestOracleJob uses a valid latest pointer", () => {
+    const root = process.cwd();
+    const first = writeOracleJob(root, newOracleJob(root, { mode: "quick" }));
+    const second = writeOracleJob(root, newOracleJob(root, { mode: "deep" }));
+
+    expect(readLatestOracleJob(root)?.jobId).toBe(second.jobId);
+    expect(readLatestOracleJob(root)?.jobId).not.toBe(first.jobId);
+  });
+
+  it("readLatestOracleJob falls back to scan when the pointer target is deleted", () => {
+    const root = process.cwd();
+    const first = writeOracleJob(root, newOracleJob(root, { mode: "quick" }));
+    const second = writeOracleJob(root, newOracleJob(root, { mode: "deep" }));
+    const newer = new Date(Date.now() + 10_000);
+    utimesSync(first.resultPath, newer, newer);
+    unlinkSync(second.resultPath);
+
+    expect(readLatestOracleJob(root)?.jobId).toBe(first.jobId);
+  });
+
+  it("readLatestOracleJob falls back to scan when the pointer is corrupt", () => {
+    const root = process.cwd();
+    const first = writeOracleJob(root, newOracleJob(root, { mode: "quick" }));
+    const second = writeOracleJob(root, newOracleJob(root, { mode: "deep" }));
+    const newer = new Date(Date.now() + 10_000);
+    utimesSync(second.resultPath, newer, newer);
+    writeFileSync(join(dirname(second.resultPath), ".latest"), "not-a-job-id\n", "utf8");
+
+    expect(readLatestOracleJob(root)?.jobId).toBe(second.jobId);
+    expect(readLatestOracleJob(root)?.jobId).not.toBe(first.jobId);
   });
 
   it("reconciles and persists orphaned foreign running jobs", () => {

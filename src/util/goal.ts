@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   linkSync,
   lstatSync,
@@ -16,6 +17,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 
 export const GOAL_DIR = ".composer/goals";
+const ACTIVE_GOAL_INDEX = ".active";
 const GOAL_LOCK_TTL_MS = 30 * 60 * 1000;
 
 export type GoalState = "active" | "blocked" | "achieved" | "failed" | "cancelled";
@@ -110,7 +112,7 @@ export interface StartGoalInput {
 
 export function startGoal(root: string, input: StartGoalInput): GoalRecord {
   return withGoalLock(root, () => {
-    const open = readActiveGoal(root);
+    const open = scanActiveGoal(root);
     if (open) {
       throw new Error(`open goal already exists: ${open.goalId} (${open.state})`);
     }
@@ -140,11 +142,20 @@ export function startGoal(root: string, input: StartGoalInput): GoalRecord {
       history: [],
     });
     writeGoal(root, record, { exclusive: true });
+    writeActiveGoalIndex(root, record.goalId);
     return record;
   });
 }
 
 export function readActiveGoal(root: string): GoalRecord | null {
+  const indexed = readIndexedActiveGoal(root);
+  if (indexed) return indexed;
+  const scanned = scanActiveGoal(root);
+  refreshActiveGoalIndex(root, scanned);
+  return scanned;
+}
+
+function scanActiveGoal(root: string): GoalRecord | null {
   const dir = goalDir(root);
   if (!existsSync(dir)) return null;
   const records = readdirSync(dir)
@@ -206,6 +217,7 @@ export function clearGoal(root: string, goalId?: string): GoalRecord | null {
       updatedAt: new Date().toISOString(),
     });
     writeGoal(root, updated);
+    clearActiveGoalIndex(root, updated.goalId);
     return updated;
   });
 }
@@ -264,6 +276,7 @@ export function stepGoal(
       };
       record = recordWithAction(record, verdict, nextAction);
       writeGoal(root, record);
+      updateActiveGoalIndexForRecord(root, record);
       return { record, nextAction };
     }
 
@@ -271,6 +284,7 @@ export function stepGoal(
     const verdict = nextAction.tool === "none" ? "achieved" : "active";
     record = recordWithAction(record, verdict, nextAction);
     writeGoal(root, record);
+    updateActiveGoalIndexForRecord(root, record);
     return { record, nextAction };
   });
 }
@@ -435,6 +449,77 @@ function writeGoal(root: string, record: GoalRecord, options: { exclusive?: bool
     throw error;
   }
   return filePath;
+}
+
+function activeGoalIndexPath(root: string): string {
+  return resolve(goalDir(root), ACTIVE_GOAL_INDEX);
+}
+
+function readIndexedActiveGoal(root: string): GoalRecord | null {
+  const dir = goalDir(root);
+  if (!existsSync(dir)) return null;
+  const indexPath = activeGoalIndexPath(root);
+  try {
+    if (!existsSync(indexPath)) return null;
+    if (lstatSync(indexPath).isSymbolicLink()) return null;
+    const goalId = readFileSync(indexPath, "utf8").trim();
+    if (goalId.length === 0) return null;
+    const record = readGoal(root, goalId);
+    if (!record) return null;
+    if (record.goalId !== goalId || isTerminal(record.state)) return null;
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function refreshActiveGoalIndex(root: string, record: GoalRecord | null): void {
+  try {
+    if (record && !isTerminal(record.state)) {
+      writeActiveGoalIndex(root, record.goalId);
+    } else {
+      rmSync(activeGoalIndexPath(root), { force: true });
+    }
+  } catch {
+    // The index is only a fast-path hint.
+  }
+}
+
+function updateActiveGoalIndexForRecord(root: string, record: GoalRecord): void {
+  if (isTerminal(record.state)) {
+    clearActiveGoalIndex(root, record.goalId);
+  } else {
+    writeActiveGoalIndex(root, record.goalId);
+  }
+}
+
+function writeActiveGoalIndex(root: string, goalId: string): void {
+  const dir = goalDir(root);
+  ensureGoalDirectory(dir);
+  const indexPath = activeGoalIndexPath(root);
+  const tmpPath = resolve(dir, `.${ACTIVE_GOAL_INDEX}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmpPath, `${goalId}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(tmpPath, indexPath);
+    chmodSync(indexPath, 0o600);
+  } catch (error) {
+    rmSync(tmpPath, { force: true });
+    throw error;
+  }
+}
+
+function clearActiveGoalIndex(root: string, goalId: string): void {
+  const indexPath = activeGoalIndexPath(root);
+  try {
+    if (!existsSync(indexPath)) return;
+    if (lstatSync(indexPath).isSymbolicLink()) return;
+    const indexedGoalId = readFileSync(indexPath, "utf8").trim();
+    if (indexedGoalId === goalId) {
+      rmSync(indexPath, { force: true });
+    }
+  } catch {
+    // The index is only a fast-path hint.
+  }
 }
 
 function withGoalLock<T>(root: string, fn: () => T): T {

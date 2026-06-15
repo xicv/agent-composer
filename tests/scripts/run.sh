@@ -267,6 +267,29 @@ SH
 fi
 
 echo
+echo "=== bench-composer.mjs smoke ==="
+
+BENCH_OUT="$(mktemp -t composer_bench_speed.XXXXXX)"
+if npm run bench:speed --silent >"$BENCH_OUT" 2>&1; then
+  BENCH_STATUS=0
+else
+  BENCH_STATUS=$?
+fi
+# Performance budgets are intentionally not a CI gate here: local CPU load and
+# runner variance can move p50 timings. The release gate remains the manual
+# bench:speed exit code; this harness only proves the benchmark runs and emits
+# its table.
+if grep -q '^op .*p50 ms .*budget .*result' "$BENCH_OUT" && grep -q 'status --fast --line' "$BENCH_OUT"; then
+  PASS=$((PASS+1))
+  printf '  ok    %-45s exit=%s\n' "bench_speed_table_prints" "$BENCH_STATUS"
+else
+  FAIL=$((FAIL+1))
+  FAILED+=("bench_speed_table_prints: expected bench:speed to print op/p50/budget table; exit=$BENCH_STATUS output=$(cat "$BENCH_OUT")")
+  printf '  FAIL  %-45s expected TABLE\n' "bench_speed_table_prints"
+fi
+rm -f "$BENCH_OUT"
+
+echo
 echo "------------------------------------------"
 printf '  PASS: %d\n  FAIL: %d\n' "$PASS" "$FAIL"
 if (( FAIL > 0 )); then

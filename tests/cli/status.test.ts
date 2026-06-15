@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { buildStatus, renderStatusLine, statusEnvelope } from "../../src/cli/status.js";
+import { buildStatus, renderStatusLine, runStatus, statusEnvelope } from "../../src/cli/status.js";
 import { newOracleJob, writeOracleJob } from "../../src/util/oracleJob.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 import { appendAuditEvent } from "../../src/util/auditLog.js";
@@ -248,6 +248,72 @@ describe("buildStatus", () => {
     const status = buildStatus(tmp);
     expect(status.latest.route).toBe("composer-code-cli");
     expect(status.latest.taskClass).toBe("implementation");
+  });
+
+  it("status --fast keeps cheap gates and omits audit/job/goal scan fields", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+        oraclePlanner: { provider: "mock", model: "oracle" },
+      },
+      codexReview: { enabled: true },
+      codexLifecycle: { enabled: true },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+    appendAuditEvent(tmp, { kind: "route-decision", route: "composer-code-cli", taskClass: "implementation" });
+    const job = newOracleJob(tmp, { mode: "research" });
+    writeOracleJob(tmp, { ...job, status: "running", startedAt: new Date().toISOString() });
+    startGoal(tmp, {
+      objective: "fast status must not read this",
+      condition: "goal is omitted",
+      checks: [{ name: "unit", command: "true" }],
+    });
+
+    const status = buildStatus(tmp, { fast: true });
+    const line = renderStatusLine(status);
+
+    expect(status.fast).toBe(true);
+    expect(status.config.mode).toBe("balanced");
+    expect(status.integrations.codexReview).toBe(true);
+    expect(status.integrations.codexLifecycle).toBe(true);
+    expect(status.integrations.oraclePlanner).toBe(true);
+    expect(status.latest.route).toBeUndefined();
+    expect(status.latestJob.oracleJob).toBeUndefined();
+    expect(status.active.oracleJob).toBeUndefined();
+    expect(status.goal).toBeUndefined();
+    expect(status.recommendation.nextAction).toBeUndefined();
+    expect(line).toContain("CMP balanced");
+    expect(line).toContain("R:on");
+    expect(line).toContain("L:on");
+    expect(line).toContain("O:idle");
+    expect(line).toContain("H:off");
+    expect(line).not.toContain("goal:");
+    expect(line).not.toContain("active:");
+    expect(line).not.toContain("last:");
+    expect(line).not.toContain("next:");
+    expect(line).not.toContain("undefined");
+  });
+
+  it("runStatus --fast composes with --line", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    let line = "";
+    try {
+      runStatus(tmp, { fast: true, line: true });
+      line = String(write.mock.calls.map((call) => call[0]).join(""));
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(line).toMatch(/^CMP /);
+    expect(line).toContain("R:off");
+    expect(line).toContain("L:off");
+    expect(line).not.toContain("last:");
+    expect(line).not.toContain("active:");
+    expect(line).not.toContain("undefined");
   });
 
   it("includes the active goal snapshot without running checks", () => {

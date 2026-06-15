@@ -6,6 +6,9 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -17,6 +20,7 @@ import {
   COMPOSER_STATE_DIR_ENV,
   classifyCodexLifecycleUnavailable,
   newCodexLifecycleJob,
+  readLatestCodexLifecycleJob,
   readCodexLifecycleJob,
   writeCodexLifecycleJob,
 } from "../../src/util/codexLifecycleJob.js";
@@ -164,6 +168,92 @@ describe("codex lifecycle job files", () => {
 
       expect(read?.status).toBe("queued");
       expect(read?.pid).toBe(process.pid);
+    } finally {
+      if (previous === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+      else process.env[COMPOSER_STATE_DIR_ENV] = previous;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  it("readLatestCodexLifecycleJob uses a valid latest pointer", () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-life-"));
+    const state = mkdtempSync(join(tmpdir(), "composer-life-state-"));
+    const previous = process.env[COMPOSER_STATE_DIR_ENV];
+    process.env[COMPOSER_STATE_DIR_ENV] = state;
+    try {
+      const first = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "postPlan",
+        decision,
+        execution: "background",
+      }));
+      const second = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "preCommit",
+        decision: { ...decision, event: "preCommit" },
+        execution: "background",
+      }));
+
+      expect(readLatestCodexLifecycleJob(root)?.jobId).toBe(second.jobId);
+      expect(readLatestCodexLifecycleJob(root)?.jobId).not.toBe(first.jobId);
+    } finally {
+      if (previous === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+      else process.env[COMPOSER_STATE_DIR_ENV] = previous;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  it("readLatestCodexLifecycleJob falls back to scan when the pointer target is deleted", () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-life-"));
+    const state = mkdtempSync(join(tmpdir(), "composer-life-state-"));
+    const previous = process.env[COMPOSER_STATE_DIR_ENV];
+    process.env[COMPOSER_STATE_DIR_ENV] = state;
+    try {
+      const first = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "postPlan",
+        decision,
+        execution: "background",
+      }));
+      const second = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "preCommit",
+        decision: { ...decision, event: "preCommit" },
+        execution: "background",
+      }));
+      const newer = new Date(Date.now() + 10_000);
+      utimesSync(first.resultPath, newer, newer);
+      unlinkSync(second.resultPath);
+
+      expect(readLatestCodexLifecycleJob(root)?.jobId).toBe(first.jobId);
+    } finally {
+      if (previous === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+      else process.env[COMPOSER_STATE_DIR_ENV] = previous;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  it("readLatestCodexLifecycleJob falls back to scan when the pointer is corrupt", () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-life-"));
+    const state = mkdtempSync(join(tmpdir(), "composer-life-state-"));
+    const previous = process.env[COMPOSER_STATE_DIR_ENV];
+    process.env[COMPOSER_STATE_DIR_ENV] = state;
+    try {
+      const first = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "postPlan",
+        decision,
+        execution: "background",
+      }));
+      const second = writeCodexLifecycleJob(root, newCodexLifecycleJob(root, {
+        event: "preCommit",
+        decision: { ...decision, event: "preCommit" },
+        execution: "background",
+      }));
+      const newer = new Date(Date.now() + 10_000);
+      utimesSync(second.resultPath, newer, newer);
+      writeFileSync(join(dirname(second.resultPath), ".latest"), "not-a-job-id\n", "utf8");
+
+      expect(readLatestCodexLifecycleJob(root)?.jobId).toBe(second.jobId);
+      expect(readLatestCodexLifecycleJob(root)?.jobId).not.toBe(first.jobId);
     } finally {
       if (previous === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
       else process.env[COMPOSER_STATE_DIR_ENV] = previous;

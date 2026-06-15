@@ -8,6 +8,7 @@ import {
   appendAuditEvent,
   readAuditEvents,
   readAuditFailures,
+  readRecentAuditEvents,
   renderAuditMarkdown,
   summarizeAudit,
 } from "../../src/util/auditLog.js";
@@ -106,6 +107,46 @@ describe("auditLog", () => {
     const events = readAuditEvents(projectRoot!);
     // Should have 2 valid events (skipping the malformed line)
     expect(events.length).toBe(2);
+  });
+
+  it("readRecentAuditEvents returns the last N events in chronological order", () => {
+    const written = Array.from({ length: 12 }, (_, i) =>
+      appendAuditEvent(projectRoot!, { kind: "note", runId: `r-${i}`, note: `event-${i}` })
+    );
+
+    for (const limit of [0, 1, 3, 20]) {
+      expect(readRecentAuditEvents(projectRoot!, limit)).toEqual(limit === 0 ? [] : written.slice(-limit));
+    }
+  });
+
+  it("readRecentAuditEvents handles empty and short logs", () => {
+    const fresh = mkdtempSync(join(tmpdir(), "composer-audit-recent-empty-"));
+    try {
+      expect(readRecentAuditEvents(fresh, 5)).toEqual([]);
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
+
+    const event = appendAuditEvent(projectRoot!, { kind: "outcome", status: "succeeded" });
+    expect(readRecentAuditEvents(projectRoot!, 5)).toEqual([event]);
+  });
+
+  it("readRecentAuditEvents skips malformed trailing lines and matches full-history slicing", () => {
+    for (let i = 0; i < 90; i += 1) {
+      appendAuditEvent(projectRoot!, {
+        kind: "note",
+        runId: `r-${i}`,
+        note: `event-${i}-${"x".repeat(1000)}`,
+      });
+    }
+    const auditDir = join(stateDir!, "audit");
+    const files = readdirSync(auditDir);
+    const logFile = join(auditDir, files[0]!);
+    appendFileSync(logFile, "NOT_JSON\n", "utf8");
+
+    const expected = readAuditEvents(projectRoot!, { limit: Number.MAX_SAFE_INTEGER }).slice(-5);
+
+    expect(readRecentAuditEvents(projectRoot!, 5)).toEqual(expected);
   });
 
   it("appendAuditEvent caps oversized free-text fields before writing", () => {

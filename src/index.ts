@@ -88,6 +88,7 @@ async function main(): Promise<void> {
       line: flags.includes("--line"),
       watch: flags.includes("--watch"),
       replace: flags.includes("--replace"),
+      fast: flags.includes("--fast"),
     });
     return;
   }
