@@ -50,6 +50,6 @@ fi
 
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 killed="${#killed_pids[@]}"
-pids="${killed_pids[*]}"
+pids="${killed_pids[*]:-}"
 
 printf '%s scanned=%s killed=%s pids=[%s]\n' "$timestamp" "$scanned" "$killed" "$pids" >> "$LOG_FILE"
