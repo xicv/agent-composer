@@ -371,6 +371,7 @@ Lifecycle runs are advisory. They should not silently mutate files; apply sugges
 ### Codex review gate
 
 `codexReview` controls optional cross-LLM review and pre-commit gating.
+`codexReview.preCommitHook.maxConsecutiveBlocks` is an escape hatch for review-gate oscillation. Keep it unset by default. When set to `N` (> 0), after `N` consecutive blocks on the same branch the gate allows the commit once, emits an audited `allow-cap` event, and resets the counter.
 
 ```json
 {
