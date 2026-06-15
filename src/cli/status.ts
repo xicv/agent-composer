@@ -8,7 +8,7 @@ import { readLatestOracleJob } from "../util/oracleJob.js";
 import { readLatestCodexLifecycleJob } from "../util/codexLifecycleJob.js";
 import { readAuditEvents } from "../util/auditLog.js";
 import { isComposerDisabled } from "../util/composerDisabled.js";
-import { readActiveGoal } from "../util/goal.js";
+import { isTerminal, readActiveGoal, readLatestGoal } from "../util/goal.js";
 
 export interface ComposerStatus {
   config: {
@@ -57,6 +57,7 @@ export interface ComposerStatus {
     state: string;
     turns: number;
     nextReason?: string;
+    reportHint?: boolean;
   };
 }
 
@@ -245,6 +246,16 @@ export function buildStatus(cwd: string, opts: { nowMs?: number } = {}): Compose
         turns: activeGoal.turns,
         nextReason: activeGoal.lastReason,
       };
+    } else {
+      const latestGoal = readLatestGoal(root);
+      if (latestGoal && isTerminal(latestGoal.state)) {
+        goal = {
+          goalId: latestGoal.goalId,
+          state: latestGoal.state,
+          turns: latestGoal.turns,
+          reportHint: true,
+        };
+      }
     }
   } catch {
     // ignore
@@ -313,7 +324,7 @@ export function renderStatusLine(s: ComposerStatus, session?: StatusSessionView)
   const next = s.recommendation.nextAction ?? "-";
   const profilePart = session?.profile ? ` · P:${session.profile}` : "";
   const goalPart = s.goal
-    ? ` · goal:${s.goal.state} ${s.goal.turns}t${s.goal.nextReason ? ` · next:${shortStatusText(s.goal.nextReason)}` : ""}`
+    ? ` · goal:${s.goal.state}${s.goal.reportHint ? " (report)" : ` ${s.goal.turns}t`}${s.goal.nextReason ? ` · next:${shortStatusText(s.goal.nextReason)}` : ""}`
     : "";
   const fg = s.active.foreground;
   const activeSeg =

@@ -113,6 +113,7 @@ describe("composer MCP server", () => {
       "composer_config_get",
       "composer_config_set",
       "composer_goal_clear",
+      "composer_goal_report",
       "composer_goal_start",
       "composer_goal_status",
       "composer_goal_step",

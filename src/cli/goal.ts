@@ -1,7 +1,9 @@
 import { clearGoal, isTerminal, readActiveGoal, readGoal, startGoal, stepGoal } from "../util/goal.js";
 import type { GoalCheck, GoalRecord, NextAction } from "../util/goal.js";
+import { buildGoalReport, renderGoalReportMarkdown } from "../util/goalReport.js";
+import type { GoalReportResult } from "../util/goalReport.js";
 
-export type GoalAction = "start" | "status" | "step" | "clear";
+export type GoalAction = "start" | "status" | "step" | "clear" | "report";
 type GoalBootstrapAction = {
   tool: "composer_route_decide";
   reason: string;
@@ -22,12 +24,38 @@ export interface GoalSummary {
 
 export function runGoal(
   root: string,
+  opts: { action: "report"; flags?: string[] },
+): GoalReportResult;
+export function runGoal(
+  root: string,
+  opts: { action?: Exclude<GoalAction, "report"> | string; flags?: string[] },
+): GoalSummary;
+export function runGoal(
+  root: string,
   opts: { action?: string; flags?: string[] },
-): GoalSummary {
+): GoalSummary | GoalReportResult {
   const action = opts.action;
   const flags = opts.flags ?? [];
   if (!isGoalAction(action)) {
-    throw new Error(`composer goal: expected action start|status|step|clear (got ${action ?? "nothing"})`);
+    throw new Error(`composer goal: expected action start|status|step|clear|report (got ${action ?? "nothing"})`);
+  }
+
+  if (action === "report") {
+    const report = buildGoalReport(root, {
+      goalId: getFlagValue(flags, "--goal-id") ?? firstReportPositional(flags),
+      includeAudit: flags.includes("--audit"),
+      auditLimit: parseOptionalNonNegativeNumber(flags, "--audit-limit"),
+      includeCommands: flags.includes("--include-commands"),
+      includeAuditEvents: flags.includes("--include-audit-events"),
+    });
+    const format = parseReportFormat(flags);
+    process.stdout.write(format === "json"
+      ? `${JSON.stringify(report, null, 2)}\n`
+      : renderGoalReportMarkdown(report, {
+        includeCommands: flags.includes("--include-commands"),
+        includeAuditEvents: flags.includes("--include-audit-events"),
+      }));
+    return report;
   }
 
   let summary: GoalSummary;
@@ -177,7 +205,15 @@ function formatGoalSummary(summary: GoalSummary): string {
 }
 
 function isGoalAction(action: string | undefined): action is GoalAction {
-  return action === "start" || action === "status" || action === "step" || action === "clear";
+  return action === "start" || action === "status" || action === "step" || action === "clear" || action === "report";
+}
+
+function parseReportFormat(flags: string[]): "json" | "markdown" {
+  const format = getFlagValue(flags, "--format") ?? "markdown";
+  if (format !== "json" && format !== "markdown") {
+    throw new Error(`composer goal report: --format expects markdown|json, got "${format}"`);
+  }
+  return format;
 }
 
 function getFlagValue(flags: string[], name: string): string | undefined {
@@ -203,12 +239,20 @@ function firstPositional(flags: string[]): string | undefined {
   return positionalArgs(flags)[0];
 }
 
-function positionalArgs(flags: string[]): string[] {
+const REPORT_VALUE_FLAGS = new Set(["--audit-limit", "--format", "--goal-id"]);
+
+function firstReportPositional(flags: string[]): string | undefined {
+  return positionalArgs(flags, REPORT_VALUE_FLAGS)[0];
+}
+
+function positionalArgs(flags: string[], valueFlags?: ReadonlySet<string>): string[] {
   const out: string[] = [];
   for (let i = 0; i < flags.length; i++) {
     const value = flags[i]!;
     if (value.startsWith("--")) {
-      if (!value.includes("=") && flags[i + 1] && !flags[i + 1]!.startsWith("--")) i += 1;
+      const flagName = value.includes("=") ? value.slice(0, value.indexOf("=")) : value;
+      const consumesValue = valueFlags ? valueFlags.has(flagName) : !value.includes("=");
+      if (consumesValue && !value.includes("=") && flags[i + 1] && !flags[i + 1]!.startsWith("--")) i += 1;
       continue;
     }
     out.push(value);
