@@ -22,6 +22,7 @@ import {
 import type { ServerToolContext } from "./context.js";
 
 const REVIEW_SCOPE_SCHEMA = z.enum(["staged", "unstaged", "working-tree", "branch"]);
+const REVIEW_JOB_POLL_AFTER_MS = 2000;
 
 export function registerReviewTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
@@ -178,7 +179,14 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         // The runner persists failures to the durable job record; this only
         // prevents an unobserved promise rejection from escaping the server.
       });
-      return { content: [{ type: "text", text: JSON.stringify(job, null, 2) }] };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ ...job, pollAfterMs: REVIEW_JOB_POLL_AFTER_MS }, null, 2),
+          },
+        ],
+      };
     },
   );
 

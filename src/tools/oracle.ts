@@ -21,6 +21,8 @@ import {
 import { acquireOracleLock } from "../util/oracleLock.js";
 import type { ServerToolContext } from "./context.js";
 
+const ORACLE_JOB_POLL_AFTER_MS = 3000;
+
 export function registerOracleTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
 
@@ -215,7 +217,14 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         // The runner persists its own failures to the durable job record;
         // this guard only prevents an unobserved promise rejection.
       });
-      return { content: [{ type: "text", text: JSON.stringify(job, null, 2) }] };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ ...job, pollAfterMs: ORACLE_JOB_POLL_AFTER_MS }, null, 2),
+          },
+        ],
+      };
     },
   );
 

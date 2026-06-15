@@ -20,6 +20,8 @@ import {
 import { runCodexLifecycleJob } from "../server/codexLifecycleRunner.js";
 import type { ServerToolContext } from "./context.js";
 
+const CODEX_LIFECYCLE_JOB_POLL_AFTER_MS = 2000;
+
 export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
 
@@ -192,7 +194,16 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
           // this guard only prevents an unobserved promise rejection.
         });
         return {
-          content: [{ type: "text", text: JSON.stringify(job, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { ...job, pollAfterMs: CODEX_LIFECYCLE_JOB_POLL_AFTER_MS },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       }
 

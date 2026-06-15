@@ -92,8 +92,14 @@ describe("review tools", () => {
       },
     });
     expect(started.isError).not.toBe(true);
-    const startJob = JSON.parse(textBlock(started)) as { jobId: string; status: string };
+    const startJob = JSON.parse(textBlock(started)) as {
+      jobId: string;
+      pollAfterMs: number;
+      status: string;
+    };
     expect(startJob.jobId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(Number.isInteger(startJob.pollAfterMs)).toBe(true);
+    expect(startJob.pollAfterMs).toBeGreaterThan(0);
     expect(["queued", "running"]).toContain(startJob.status);
 
     const polled = await client.callTool({
@@ -109,6 +115,7 @@ describe("review tools", () => {
     expect(job.result?.verdict).toBe("PASS");
     expect(job.result?.summary).toBe("No blocking findings.");
     expect(job.result?.text).toContain("Full review text.");
+    expect(job).not.toHaveProperty("pollAfterMs");
     expect(reviewer.calls[0]?.context).toContain("console.log()");
     expect(reviewer.calls[0]?.cwd).toBe(resolve(root));
   });

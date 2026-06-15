@@ -295,6 +295,8 @@ describe("composer MCP server", () => {
     const block = (result.content as Array<{ type: string; text: string }>)[0];
     const job = JSON.parse(block!.text);
     expect(job.jobId).toMatch(/[0-9a-f-]{36}/);
+    expect(Number.isInteger(job.pollAfterMs)).toBe(true);
+    expect(job.pollAfterMs).toBeGreaterThan(0);
     expect(["queued", "running", "succeeded"]).toContain(job.status);
     expect(job.mode).toBe("research");
   });
@@ -315,6 +317,7 @@ describe("composer MCP server", () => {
     const job = JSON.parse(block!.text);
     expect(job.status).toBe("succeeded");
     expect(job.answerText).toContain("mock:plan the billing adapter");
+    expect(job).not.toHaveProperty("pollAfterMs");
   });
 
   it("composer_code routes to the coder MockProvider", async () => {
@@ -1006,10 +1009,14 @@ describe("composer MCP server", () => {
       const block = (result.content as Array<{ type: string; text: string }>)[0];
       const started = JSON.parse(block?.text ?? "{}") as {
         jobId: string;
+        pollAfterMs: number;
         status: string;
         resultPath: string;
       };
 
+      expect(started.jobId).toMatch(/[0-9a-f-]{36}/);
+      expect(Number.isInteger(started.pollAfterMs)).toBe(true);
+      expect(started.pollAfterMs).toBeGreaterThan(0);
       expect(["queued", "running", "succeeded"]).toContain(started.status);
       expect(existsSync(started.resultPath)).toBe(true);
 
@@ -1026,6 +1033,7 @@ describe("composer MCP server", () => {
 
       expect(fetchedText).toContain('"status": "succeeded"');
       expect(fetchedText).toContain("background lifecycle result");
+      expect(JSON.parse(fetchedText)).not.toHaveProperty("pollAfterMs");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
