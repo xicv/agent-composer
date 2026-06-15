@@ -18,6 +18,7 @@ export function formatHelp(): string {
     "  agent-composer goal start <objective> --condition <condition> [--check name=cmd ...] [--max-turns N] [--max-cost USD]",
     "  agent-composer goal status [goalId]",
     "  agent-composer goal step [goalId] [--check-result name=pass|fail ...] [--condition-met|--condition-not-met] [--spent USD] [--raise-max-turns N] [--raise-max-cost USD]",
+    "  agent-composer goal report [goalId] [--format markdown|json] [--audit] [--audit-limit N] [--include-commands] [--include-audit-events]",
     "  agent-composer goal clear [goalId]",
     "  agent-composer install-git-hook Install the Composer pre-commit gate into .git/hooks/pre-commit",
     "  agent-composer help             Show this help",

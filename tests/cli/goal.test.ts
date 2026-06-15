@@ -4,19 +4,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { runGoal } from "../../src/cli/goal.js";
+import { appendAuditEvent } from "../../src/util/auditLog.js";
+import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 
 describe("runGoal", () => {
   let root: string;
+  let stateDir: string;
+  let previousComposerStateDir: string | undefined;
   let writeSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "composer-goal-cli-"));
+    stateDir = mkdtempSync(join(tmpdir(), "composer-goal-cli-state-"));
+    previousComposerStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+    process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
     writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
     writeSpy.mockRestore();
+    if (previousComposerStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+    else process.env[COMPOSER_STATE_DIR_ENV] = previousComposerStateDir;
     rmSync(root, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
   });
 
   it("runs start, status, step, and clear against the persisted goal store", () => {
@@ -172,5 +182,87 @@ describe("runGoal", () => {
 
     expect(achieved.state).toBe("achieved");
     expect(achieved.nextAction?.tool).toBe("none");
+  });
+
+  it("goal report prints markdown for active goals by default and toggles commands", () => {
+    appendAuditEvent(root, { kind: "tool-call", tool: "composer_code_cli" });
+    runGoal(root, {
+      action: "start",
+      flags: ["report active", "--condition", "check visible", "--check", "unit=echo RAW_CLI_COMMAND"],
+    });
+
+    const report = runGoal(root, { action: "report", flags: [] });
+    const output = writeSpy.mock.calls.at(-1)?.[0] as string;
+
+    expect("goal" in report && report.goal.state).toBe("active");
+    expect(output).toContain("# Goal Report");
+    expect(output).toContain("| unit | pending |");
+    expect(output).not.toContain("toolCalls=1");
+    expect(output).not.toContain("- recent:");
+    expect(output).not.toContain("composer_code_cli");
+    expect(output).not.toContain("RAW_CLI_COMMAND");
+
+    runGoal(root, { action: "report", flags: ["--include-commands"] });
+    expect(writeSpy.mock.calls.at(-1)?.[0]).toContain("RAW_CLI_COMMAND");
+
+    runGoal(root, { action: "report", flags: ["--audit"] });
+    const withAudit = writeSpy.mock.calls.at(-1)?.[0] as string;
+    expect(withAudit).toContain("## Recent project activity (not goal-scoped)");
+    expect(withAudit).toContain("toolCalls=1");
+    expect(withAudit).not.toContain("- recent:");
+    expect(withAudit).not.toContain("composer_code_cli");
+
+    runGoal(root, { action: "report", flags: ["--audit", "--include-audit-events"] });
+    const withAuditEvents = writeSpy.mock.calls.at(-1)?.[0] as string;
+    expect(withAuditEvents).toContain("- recent:");
+    expect(withAuditEvents).toContain("composer_code_cli");
+  });
+
+  it("goal report boolean flags do not consume the positional goal id", () => {
+    const started = runGoal(root, {
+      action: "start",
+      flags: ["boolean parser", "--condition", "goal id survives flags", "--check", "unit=echo RAW_CLI_COMMAND"],
+    });
+
+    const afterGoalId = runGoal(root, { action: "report", flags: [started.goalId!, "--include-commands"] });
+    const afterGoalOutput = writeSpy.mock.calls.at(-1)?.[0] as string;
+    expect("goal" in afterGoalId && afterGoalId.goal.goalId).toBe(started.goalId);
+    expect(afterGoalOutput).toContain("RAW_CLI_COMMAND");
+
+    const beforeGoalId = runGoal(root, { action: "report", flags: ["--include-commands", started.goalId!] });
+    const beforeGoalOutput = writeSpy.mock.calls.at(-1)?.[0] as string;
+    expect("goal" in beforeGoalId && beforeGoalId.goal.goalId).toBe(started.goalId);
+    expect(beforeGoalOutput).toContain("RAW_CLI_COMMAND");
+
+    const formatAfterGoalId = runGoal(root, {
+      action: "report",
+      flags: [started.goalId!, "--format", "json"],
+    });
+    expect("goal" in formatAfterGoalId && formatAfterGoalId.goal.goalId).toBe(started.goalId);
+    expect(JSON.parse(writeSpy.mock.calls.at(-1)?.[0] as string).goal.goalId).toBe(started.goalId);
+
+    const formatBeforeGoalId = runGoal(root, {
+      action: "report",
+      flags: ["--format", "json", started.goalId!],
+    });
+    expect("goal" in formatBeforeGoalId && formatBeforeGoalId.goal.goalId).toBe(started.goalId);
+    expect(JSON.parse(writeSpy.mock.calls.at(-1)?.[0] as string).goal.goalId).toBe(started.goalId);
+  });
+
+  it("goal report prints json for terminal goals by id", () => {
+    const started = runGoal(root, {
+      action: "start",
+      flags: ["report terminal", "--condition", "eventually terminal"],
+    });
+    runGoal(root, { action: "clear", flags: [started.goalId!] });
+
+    const report = runGoal(root, {
+      action: "report",
+      flags: [started.goalId!, "--format", "json"],
+    });
+    const output = writeSpy.mock.calls.at(-1)?.[0] as string;
+
+    expect("goal" in report && report.goal.state).toBe("cancelled");
+    expect(JSON.parse(output).goal.state).toBe("cancelled");
   });
 });

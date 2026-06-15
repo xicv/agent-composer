@@ -167,6 +167,17 @@ function scanActiveGoal(root: string): GoalRecord | null {
   return records[0] ?? null;
 }
 
+export function readLatestGoal(root: string): GoalRecord | null {
+  const dir = goalDir(root);
+  if (!existsSync(dir)) return null;
+  const records = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => readGoal(root, name.slice(0, -".json".length)))
+    .filter((record): record is GoalRecord => record !== null)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return records[0] ?? null;
+}
+
 export function readGoal(root: string, goalId: string): GoalRecord | null {
   const dir = goalDir(root);
   if (!existsSync(dir)) return null;

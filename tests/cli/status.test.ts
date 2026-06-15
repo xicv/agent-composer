@@ -416,6 +416,34 @@ describe("buildStatus", () => {
     expect(status.recommendation.nextAction).toBe("composer_route_decide");
   });
 
+  it("shows a subtle report hint for a latest terminal goal without changing route recommendation", () => {
+    writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
+    const goal = startGoal(tmp, {
+      objective: "terminal hint",
+      condition: "check passes",
+      checks: [{ name: "unit", command: "true" }],
+    });
+    stepGoal(tmp, {
+      goalId: goal.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    const status = buildStatus(tmp);
+    const line = renderStatusLine(status);
+
+    expect(status.goal).toMatchObject({
+      goalId: goal.goalId,
+      state: "achieved",
+      reportHint: true,
+    });
+    expect(status.recommendation).toEqual({
+      nextAction: "composer_route_decide",
+      reason: "ask Composer which lane fits the next task",
+    });
+    expect(line).toContain("goal:achieved (report)");
+    expect(line).toContain("next:composer_route_decide");
+  });
+
   it("ACTIVE-VS-LATEST: succeeded oracle job → latestJob present, active absent", () => {
     writeFileSync(join(tmp, "composer.config.json"), MINIMAL_CONFIG, "utf8");
     const job = newOracleJob(tmp, { mode: "research" });
