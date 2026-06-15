@@ -148,6 +148,7 @@ export const COMPOSER_GOAL_START = "composer_goal_start" as const;
 export const COMPOSER_GOAL_STATUS = "composer_goal_status" as const;
 export const COMPOSER_GOAL_STEP = "composer_goal_step" as const;
 export const COMPOSER_GOAL_CLEAR = "composer_goal_clear" as const;
+export const COMPOSER_GOAL_REPORT = "composer_goal_report" as const;
 export const GOAL_START_DESCRIPTION =
   "Use when beginning a bounded Composer goal. Creates one active project-local goal under .composer/goals, " +
   "stores immutable objective/condition plus optional deterministic checks and budgets, and returns the initial route decision.";
@@ -157,3 +158,5 @@ export const GOAL_STEP_DESCRIPTION =
   "Use when advancing a Composer goal. Consumes orchestrator-reported deterministic check results and returns the next recommended tool (advisory; executes nothing).";
 export const GOAL_CLEAR_DESCRIPTION =
   "Use when cancelling the active or named Composer goal. Marks the goal cancelled and leaves the project-local goal record for auditability.";
+export const GOAL_REPORT_DESCRIPTION =
+  "Use when you need a read-only summary of a goal's state, checks, and recommended next action. Executes nothing and excludes raw check commands by default. Audit is opt-in with includeAudit, is recent project-wide activity rather than goal-scoped evidence, and raw audit events require includeAuditEvents.";

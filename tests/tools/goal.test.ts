@@ -9,6 +9,7 @@ import { createComposerServer } from "../../src/server.js";
 import { ProviderRegistry } from "../../src/registry.js";
 import { parseConfig } from "../../src/config/loader.js";
 import type { ComposerConfig } from "../../src/config/schema.js";
+import { appendAuditEvent } from "../../src/util/auditLog.js";
 import { COMPOSER_STATE_DIR_ENV } from "../../src/util/codexLifecycleJob.js";
 
 const config: ComposerConfig = parseConfig({
@@ -257,5 +258,80 @@ describe("composer goal MCP tools", () => {
     });
     expect(step?.description).toContain("Consumes orchestrator-reported deterministic check results");
     expect(step?.description).toContain("executes nothing");
+  });
+
+  it("reports goals as json by default and markdown on request without raw commands", async () => {
+    const { client } = await bootClient(root);
+    appendAuditEvent(root, { kind: "tool-call", tool: "composer_code_cli" });
+
+    const started = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_start",
+      arguments: {
+        objective: "report through mcp",
+        condition: "check visible",
+        checks: [{ name: "unit", command: "echo RAW_MCP_COMMAND" }],
+      },
+    })));
+
+    const json = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_report",
+      arguments: { goalId: started.goalId },
+    })));
+    expect(json.goal.checks).toEqual([{ name: "unit", status: "pending" }]);
+    expect(json.audit).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain("RAW_MCP_COMMAND");
+    expect(JSON.stringify(json)).not.toContain("composer_code_cli");
+
+    const jsonWithAudit = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_report",
+      arguments: { goalId: started.goalId, includeAudit: true },
+    })));
+    expect(jsonWithAudit.audit).toMatchObject({ toolCalls: 1, recent: [] });
+    expect(JSON.stringify(jsonWithAudit)).not.toContain("composer_code_cli");
+
+    const jsonWithEvents = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_report",
+      arguments: { goalId: started.goalId, includeAudit: true, includeAuditEvents: true },
+    })));
+    expect(jsonWithEvents.audit.recent).toHaveLength(1);
+    expect(JSON.stringify(jsonWithEvents.audit.recent)).toContain("composer_code_cli");
+
+    const markdown = textResult(await client.callTool({
+      name: "composer_goal_report",
+      arguments: { goalId: started.goalId, format: "markdown" },
+    }));
+    expect(markdown).toContain("# Goal Report");
+    expect(markdown).toContain("| unit | pending |");
+    expect(markdown).not.toContain("Recent project activity");
+    expect(markdown).not.toContain("- recent:");
+    expect(markdown).not.toContain("composer_code_cli");
+    expect(markdown).not.toContain("RAW_MCP_COMMAND");
+
+    const markdownWithEvents = textResult(await client.callTool({
+      name: "composer_goal_report",
+      arguments: { goalId: started.goalId, format: "markdown", includeAudit: true, includeAuditEvents: true },
+    }));
+    expect(markdownWithEvents).toContain("## Recent project activity (not goal-scoped)");
+    expect(markdownWithEvents).toContain("- recent:");
+    expect(markdownWithEvents).toContain("composer_code_cli");
+  });
+
+  it("declares composer_goal_report read-only and closed-world", async () => {
+    const { client } = await bootClient(root);
+
+    const listed = await client.listTools();
+    const report = listed.tools.find((tool) => tool.name === "composer_goal_report");
+
+    expect(report?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(report?.description).toContain("read-only summary");
+    expect(report?.description).toContain("excludes raw check commands by default");
+    expect(report?.description).toContain("Audit is opt-in");
+    expect(report?.description).toContain("project-wide activity rather than goal-scoped evidence");
+    expect(report?.description).toContain("raw audit events require includeAuditEvents");
   });
 });

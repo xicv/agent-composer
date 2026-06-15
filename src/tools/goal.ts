@@ -1,14 +1,17 @@
 import { z } from "zod";
 import {
   COMPOSER_GOAL_CLEAR,
+  COMPOSER_GOAL_REPORT,
   COMPOSER_GOAL_START,
   COMPOSER_GOAL_STATUS,
   COMPOSER_GOAL_STEP,
   GOAL_CLEAR_DESCRIPTION,
+  GOAL_REPORT_DESCRIPTION,
   GOAL_START_DESCRIPTION,
   GOAL_STEP_DESCRIPTION,
   GOAL_STATUS_DESCRIPTION,
 } from "../server/toolDescriptions.js";
+import { buildGoalReport, renderGoalReportMarkdown } from "../util/goalReport.js";
 import { clearGoal, isTerminal, readActiveGoal, readGoal, startGoal, stepGoal } from "../util/goal.js";
 import type { ServerToolContext } from "./context.js";
 
@@ -80,6 +83,48 @@ export function registerGoalTools(ctx: ServerToolContext): void {
           }
         : { state: "none" };
       return { content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    COMPOSER_GOAL_REPORT,
+    {
+      description: GOAL_REPORT_DESCRIPTION,
+      inputSchema: {
+        goalId: z.string().optional(),
+        format: z.enum(["json", "markdown"]).default("json").optional(),
+        includeAudit: z.boolean().default(false).optional(),
+        auditLimit: z.number().int().nonnegative().default(100).optional(),
+        includeCommands: z.boolean().default(false).optional(),
+        includeAuditEvents: z.boolean().default(false).optional(),
+      },
+      annotations: {
+        title: "Composer Goal Report",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({
+      goalId,
+      format = "json",
+      includeAudit = false,
+      auditLimit = 100,
+      includeCommands = false,
+      includeAuditEvents = false,
+    }) => {
+      const report = buildGoalReport(ctx.root, {
+        goalId,
+        includeAudit,
+        auditLimit,
+        includeCommands,
+        includeAuditEvents,
+      });
+      const text = format === "markdown"
+        ? renderGoalReportMarkdown(report, { includeCommands, includeAuditEvents })
+        : JSON.stringify(report, null, 2);
+      return { content: [{ type: "text" as const, text }] };
     },
   );
 
