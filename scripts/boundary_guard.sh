@@ -32,6 +32,19 @@ if composer_disabled; then
   exit 0
 fi
 
+# Scope to the Composer project only. The hook is wired globally
+# (~/.claude/settings.json) and fires in every project; without this,
+# main-thread Edit/Write is blocked everywhere — even unrelated repos and
+# ~/.claude config. Enforce the brain/executor boundary ONLY when the active
+# project is the Composer repo, detected by its unique root marker.
+composer_project() {
+  local dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+  [[ -e "$dir/composer.config.schema.json" ]]
+}
+if ! composer_project; then
+  exit 0
+fi
+
 emit_deny() {
   local reason="$1"
   # Claude Code v2.1.150+ requires the decision wrapped in hookSpecificOutput.
@@ -99,6 +112,20 @@ if [[ "$TRANSCRIPT" == */subagents/* ]] \
    || [[ -n "$AGENT_NAME" ]] \
    || [[ "$SIDECHAIN" == "true" ]]; then
   exit 0
+fi
+
+# Allow when the target file is OUTSIDE the Composer repo. The boundary
+# exists to keep main Claude from mutating Composer's own code directly; a
+# file outside the repo root is not Composer code, so it is not gated.
+# Tools without a file path (Bash, mcp__*__bash/exec) fall through to the
+# block list below and stay gated.
+ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+FILE="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // empty' <<<"$INPUT" 2>/dev/null)"
+if [[ -n "$FILE" ]]; then
+  [[ "$FILE" != /* ]] && FILE="$PWD/$FILE"
+  if [[ "$FILE" != "$ROOT"/* ]]; then
+    exit 0
+  fi
 fi
 
 # 4. Block list — native dangerous file-mutating tools + MCP-prefixed variants.
