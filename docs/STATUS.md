@@ -23,13 +23,13 @@
 | **Wave 3 F3.1** | End-to-end smoke (real subagent dispatch) | ⏸ gated on baseline |
 | **Eval expansion** | Remaining 4 task classes from plan §7 | ⏸ optional, $0 cost |
 
-## Test gates (last green run, Wave 3 Step 2 HEAD)
+## Test gates (last green run, control-plane HEAD ccce999)
 
 | Gate | Value |
 |---|---|
-| Vitest | **210 / 210** pass across 22 test files |
-| Bash hook harness | **25 / 25** pass |
-| Bash script harness | **14 / 14** pass |
+| Vitest | **873 / 873** pass across 216 test files |
+| Bash hook harness | **71 / 71** pass |
+| Bash script harness | **26 / 26** pass |
 | Coverage — statements | 93.12% (target 80%) |
 | Coverage — branches | 85.30% |
 | Coverage — functions | 100% |
@@ -42,6 +42,13 @@
 | Real agy tape | `tests/fixtures/tapes/cli-agy.json` (free) |
 
 ## What ships
+
+Current loop-engineering control plane:
+
+- Advisory-pure goal substrate (`composer_goal_start/status/step/clear`) with the agent-composer goal CLI, status segment, ADR 0008, and an opt-in anti-oscillation cap for repeated Codex gate blocks.
+- Read-only `composer_goal_report` in JSON/Markdown, with raw check commands redacted by default and audit capture opt-in.
+- Status hot-path indexes and tail readers (`status --fast`, `.latest` pointers, active-goal index) guarded by authoritative-scan fallbacks plus `bench:speed` budgets.
+- Background review jobs (`composer_review_job_start/result`) for async detached review while sync `composer_review` remains the pre-commit/merge gate path.
 
 ```
 composer/
@@ -204,6 +211,10 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-06-10 | Build 6 (visible + warm-cached codex gate) | opus-4-8 | ~45 | n/a | n/a | n/a | 3 | 22 modified + 2 new | +1571/-199 | systemMessage on all gate outcomes; warm-cache Stop hook + diff-hash cache; codexReview.model + codexRescue config; fixed verdict parsing (.result.verdict nested — native 'review' has no structured verdict, gate switched to adversarial-review); agy retries 1 + print-timeout 110s; dispatch_guard dedupe + removed dup registration; usage logs skip under vitest; learn.sh dedupe+cap. 461 vitest + 53 hook checks green |
 | 2026-06-12 | Oracle planner lane (`oraclePlanner` role + `composer_oracle_plan` MCP tool + v2-safe Oracle adapter scripts) | codex exec via `composer_code_cli` | n/a | n/a | n/a | n/a | 1 | config + MCP/tooling docs + scripts | n/a | `oraclePlanner` role, `composer_oracle_plan` tool, and v2-safe Oracle adapter scripts wired; tests green: 513 vitest |
 | 2026-06-14 | Build 7 (Model migration: product default + init scaffold + dogfood `roles.coder.model` moved from GLM `glm-5.1` to `glm-5.2`; codexReview gate moved to `gpt-5.5` (research-verified; `gpt-5.5-pro` corrected to `gpt-5.5`)) | `composer_code_cli` (codex) | n/a | n/a | n/a | n/a | n/a | 9 files | n/a | tsc+vitest+schema green, 9 files |
+| 2026-06-15 | Build 8 (PR #24 — Goal substrate: advisory-pure composer_goal_start/status/step/clear + agent-composer goal CLI + status segment + ADR 0008; doctor glm-5.2 non-z.ai endpoint warn; opt-in anti-oscillation gate cap codexReview.preCommitHook.maxConsecutiveBlocks) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | ~14 | 16 files | n/a | Merged 6997976. Codex fail-closed gate blocked 13x surfacing ~30 real findings (state machine, signal plumbing, ordering, cross-process races, lock TTL, corruption/tamper, shell-exec security) — drove a user-approved re-architecture to advisory-pure (substrate never runs shell; orchestrator attests checkResults; completion caller-attested). 830 vitest green |
+| 2026-06-15 | Build 9 (PR #25 — composer_goal_report: read-only json/markdown goal report + CLI + status hint) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 12 files | n/a | Merged into main. Raw check commands redacted by default; audit OFF by default + opt-in (project-wide, not goal-scoped); no-id reports fall back to latest goal. 844 vitest green |
+| 2026-06-15 | Build 10 (PR #26 — status hot-path perf: readRecentAuditEvents tail reader, .latest job pointers, .composer/goals/.active index, status --fast, scripts/bench-composer.mjs + bench:speed budgets) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 15 files | n/a | Merged 8366dc4. Every pointer/index is a fast-path hint with authoritative-scan fallback (one-open-goal invariant stays on the scan). Bench: status --line @10k audit events ~4ms (budget 150ms). 861 vitest green |
+| 2026-06-15 | Build 11 (PR #27 — background review jobs composer_review_job_start/result + subagent speed contract in both byte-identical SKILL.md copies) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | ~9 files | n/a | Merged ccce999. Async in-process detached runner mirroring Oracle jobs; sync composer_review reserved for the pre-commit/merge gate. 873 vitest green |
 
 ### Build 1 (Step 5 v1) — findings
 
