@@ -1287,7 +1287,7 @@ import type { SpawnFn, SpawnResult } from "./codex.js";
 
 const realSpawn: SpawnFn = (req) =>
   new Promise<SpawnResult>((resolve, reject) => {
-    const child = spawn("claude", ["-p", "--output-format", "json", "--permission-mode", "bypassPermissions", req.prompt], { cwd: req.root, timeout: 1_800_000 });
+    const child = spawn("claude", ["-p", "--output-format", "json", req.prompt], { cwd: req.root, timeout: 1_800_000 }); // NOTE: bypassPermissions removed in Phase 5 (Task 23). With no flag, claude -p inherits the ambient permission default — NOT guaranteed safe; explicit allowed-tools + sandbox is Phase 6 item 1.
     let stdout = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.on("error", reject);
@@ -1621,3 +1621,30 @@ git -C /Users/xicao/Projects/composer add docs/integrations/gproj.md && git -C /
 - **Spec coverage:** format (§4.1) → Tasks 1–2; assembler (§4.2) → Tasks 3–4; CLI verbs (§4.3) → Tasks 6–10; planner/executor backends (§4.4) → Tasks 5, 11–14; Composer integration (§4.5) → Task 16; CC skill (form factor decision) → Task 15. MVP scope (§5) fully covered. `update` verb from §4.3 is intentionally deferred post-MVP (package subsumes its planner-refresh for v1) — noted here as the one §4.3 item not built.
 - **Type consistency:** `PlannerBackend.ask(PlannerAsk)` and `ExecutorTarget.run(ExecutorRun)→ExecutorResult` are defined once (Task 5) and reused unchanged (Tasks 11–14). `State.status` enum values are produced only by commands that the status `NEXT` map (Task 6) covers.
 - **Known deferral:** the `review.ts` reads run evidence from JSON files under `runs/` (written by `ingestRun`), not an `runs.ndjson`; the unused `readNdjson(root, "runs.ndjson")` line in Task 9 Step 3 should be deleted during implementation (left as a no-op to avoid an extra import churn in the plan; remove it).
+---
+
+## Phase 5 — Verified Run Evidence (SHIPPED 2026-06-16, gproj commit 6077594)
+
+> Implementation + tests live in the standalone **gproj** repo (`/Users/xicao/Projects/gproj`, commit `6077594`, 55 vitest passing, tsc clean) — NOT in this composer repo. This composer document is the plan/record only; the code is cross-repo by design (composer consumes gproj).
+
+Built in response to the oracle deep-review (`.composer/oracle/answers/20260616-071333-review.md`), which found the MVP unsound because `exec` trusted executor stdout as authoritative evidence ("review of a press release"). 55 vitest, tsc clean.
+
+**NOT YET SAFE FOR UNATTENDED EXECUTION.** Phase 5 closes only the evidence-trust hole (the planner can no longer be fooled by executor self-report). The executor trust boundary is still open: dropping the bypassPermissions default removes one explicit danger flag but does NOT reduce risk to a safe level (claude -p then inherits an ambient permission default that may be permissive) — real isolation (worktree/container sandbox), crash recovery, file locking, and secret redaction remain UNBUILT (Phase 6). Do not run write-executors unattended on a repo you care about until Phase 6 ships.
+
+- **Project config** `src/config/projectConfig.ts` (`.gproj/config.json`): testCommand, typecheckCommand, plannerBackend/executorBackend, plannerModel, maxPackTokens, sandbox.mode, redactions. `loadConfig` merges over defaults; malformed JSON throws a clear error.
+- **gproj-owned verifier** `src/verifier/git.ts` (baseHead/postHead, `git status --porcelain`, diffstat, non-repo safe) + `src/verifier/tests.ts` (runs configured test/typecheck; **fail-closed** when none configured; spawnSync timeout + maxBuffer + abnormal-result handling).
+- **RunSchema v2** + **exec rewired**: executor output is now `executorClaims` (UNTRUSTED); `run.testsPassed`/`changedFiles`/`diffStat` derive from the verifier/git ONLY. Key test: executor prints `TESTS: pass` but the verifier command exits 1 → evidence says failed.
+- **pack** renders verified facts first, executor claims labelled UNTRUSTED; `latestRunForPhase` sorts by numeric run index (not readdir order).
+- **Removed an explicit danger flag (NOT a safety guarantee)**: dropped `--permission-mode bypassPermissions` from the claude executor default. With no flag, `claude -p` inherits the ambient/global permission default, which may itself be permissive — so this is not hardening. Treat the claude write-executor as EXPERIMENTAL/unsafe-for-unattended-use; explicit allowed-tools + sandbox is Phase 6 item 1.
+
+## Phase 6 — backlog (deferred, from oracle review — not yet built)
+
+Ranked, still open before "usable for unattended daily 10k-LOC work":
+1. **Sandbox/worktree execution** for write executors (run in a disposable git worktree; merge on accept). The bypass default is dropped but full isolation is not built.
+2. **Crash recovery**: append-only run journal (packaging/executing/verifying/…/aborted), `packageId`/`attemptId`, `gproj recover`, atomic state transitions.
+3. **File locking** around state/id-allocation/NDJSON/backend.json (max-index ids race across concurrent processes).
+4. **Pack manifest + fail-closed `PACK_TOO_LARGE`**: per-section caps, rolling compaction of unbounded decisions/known-issues, model-aware token estimate (replace chars/4).
+5. **Secret redaction / prompt-injection defense**: pack sanitizer (denylist `.env*`, key/token regexes), treat executor output as untrusted data, store raw logs separately.
+6. **Backend hardening**: oracle-browser pass pack via stdin/temp-file not argv (E2BIG) + shared `runChild()` wrapper; openai-responses scope conversationId by {project,branch,phase} + lock; default a cheaper planner model than gpt-5.5-pro + print cost before paid calls.
+7. **`gproj status`/`doctor` surface**: report phase, verified changed files, verified tests, dropped context, backend/model, cost, lock holder, recovery recommendation — without opening `.gproj/`.
+8. **Phase/package versioning**: don't overwrite `packages/NN-exec-prompt.md` without preserving the package id that produced a run.
