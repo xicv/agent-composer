@@ -124,6 +124,8 @@ describe("composer MCP server", () => {
       "composer_research",
       "composer_review",
       "composer_review_claude",
+      "composer_review_job_result",
+      "composer_review_job_start",
       "composer_route_decide",
       "composer_session_get",
       "composer_session_set",
@@ -171,6 +173,8 @@ describe("composer MCP server", () => {
     expect(byName["composer_review"]?.description).toContain("Default off-CC review lane");
     expect(byName["composer_review"]?.description).toContain("bounded summary");
     expect(byName["composer_review_claude"]?.description).toContain("call this directly");
+    expect(byName["composer_review_job_start"]?.description).toContain("NON-BLOCKING");
+    expect(byName["composer_review_job_result"]?.description).toContain("durable Composer review job");
   });
 
   it("declares correct tool annotations (advisor pass 2026-05-23)", async () => {
@@ -208,6 +212,16 @@ describe("composer MCP server", () => {
     expect(byName["composer_review_claude"]?.annotations).toMatchObject({
       readOnlyHint: true,
       idempotentHint: true,
+    });
+    expect(byName["composer_review_job_start"]?.annotations).toMatchObject({
+      readOnlyHint: false,
+      openWorldHint: true,
+      idempotentHint: false,
+    });
+    expect(byName["composer_review_job_result"]?.annotations).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      destructiveHint: false,
     });
     expect(byName["composer_handoff_create"]?.annotations).toMatchObject({
       readOnlyHint: false,
