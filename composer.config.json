@@ -12,7 +12,7 @@
         "--sandbox",
         "read-only",
         "-c",
-        "model=\"gpt-5.4-mini\""
+        "model=\"gpt-5.4\""
       ],
       "timeoutMs": 180000,
       "retries": 0
@@ -25,15 +25,27 @@
     },
     "reviewer": {
       "provider": "cli",
+      "model": "claude-sonnet-4-6",
       "cli": [
-        "agy",
-        "--dangerously-skip-permissions",
-        "--print-timeout",
-        "110s",
-        "-p"
+        "claude",
+        "-p",
+        "--model",
+        "claude-sonnet-4-6",
+        "--permission-mode",
+        "bypassPermissions",
+        "--setting-sources",
+        "project",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--max-budget-usd",
+        "0.50",
+        "--tools",
+        "Read,Glob,Grep,Bash",
+        "--allowedTools",
+        "Read,Glob,Grep,Bash(npx tsc --noEmit),Bash(npm test),Bash(npm run test:*),Bash(npx vitest*)"
       ],
-      "timeoutMs": 120000,
-      "retries": 1
+      "timeoutMs": 300000,
+      "retries": 0
     },
     "reviewerClaude": {
       "provider": "cli",
@@ -70,7 +82,9 @@
         "-c",
         "approval_policy=\"never\"",
         "-c",
-        "model_reasoning_effort=\"medium\""
+        "model_reasoning_effort=\"medium\"",
+        "-c",
+        "model=\"gpt-5.5\""
       ],
       "timeoutMs": 900000,
       "retries": 0

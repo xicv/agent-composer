@@ -54,6 +54,54 @@ log() { printf '[oracle-pro] %s\n' "$*" >&2; }
 warn() { printf '[oracle-pro][warn] %s\n' "$*" >&2; }
 die() { printf '[oracle-pro][error] %s\n' "$*" >&2; exit 1; }
 
+node_major() {
+  { "$1" --version 2>/dev/null || true; } | sed -E 's/^v?([0-9]+).*/\1/'
+}
+
+is_bad_node_major() {
+  # Keep this in sync with ORACLE_BAD_NODE_MAJORS in src/cli/doctor.ts.
+  case "$1" in
+    26) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+select_good_node() {
+  local node_bin major c version dir
+  if node_bin="$(command -v node 2>/dev/null)"; then
+    major="$(node_major "$node_bin")"
+    if [[ -n "$major" ]] && ! is_bad_node_major "$major"; then
+      return 0
+    fi
+  fi
+
+  shopt -u failglob nullglob
+
+  local candidates=(
+    "${ORACLE_NODE_BIN:-}"
+    /opt/homebrew/opt/node@24/bin/node
+    /usr/local/opt/node@24/bin/node
+    "$HOME"/.nvm/versions/node/v24*/bin/node
+    "$HOME"/.nvm/versions/node/v25*/bin/node
+  )
+
+  for c in "${candidates[@]}"; do
+    [[ -n "$c" && -x "$c" ]] || continue
+    major="$(node_major "$c")"
+    [[ -n "$major" ]] || continue
+    is_bad_node_major "$major" && continue
+    dir="$(dirname "$c")"
+    PATH="$dir:$PATH"
+    export PATH
+    version="$("$c" --version 2>/dev/null || true)"
+    log "pinned node $version from $dir (avoids undici setTypeOfService EINVAL)"
+    return 0
+  done
+
+  warn "no known-good node found; oracle may crash under bad node majors (undici setTypeOfService EINVAL)"
+  return 0
+}
+
 MODE="auto"
 PROMPT=""
 SLUG=""
@@ -97,6 +145,7 @@ done
 
 [[ -n "$PROMPT" ]] || die "prompt is required"
 command -v oracle >/dev/null 2>&1 || die "oracle not found in PATH"
+select_good_node
 
 case "$MODE" in
   auto|quick|standard|deep|plan|review|debug|research) ;;
@@ -240,14 +289,40 @@ write_context_file() {
 }
 
 if [[ "$AUTO_CONTEXT" -eq 1 ]]; then
-  for candidate in AGENTS.md CLAUDE.md README.md package.json composer.config.json pyproject.toml Cargo.toml go.mod; do
+  # Authority class B — current policy/context (safe as source-of-truth).
+  policy_files=(CLAUDE.md composer.config.json docs/STATUS.md)
+  # Authority class C — background/history (risky as source-of-truth; only for planning/research).
+  background_files=(README.md AGENTS.md)
+  # Project manifest files (dependency intent + language).
+  base_files=(package.json pyproject.toml Cargo.toml go.mod)
+
+  # Task-aware attach set: minimal for trivial modes, no stale background for review/debug.
+  attach_candidates=()
+  case "$MODE" in
+    quick|standard)
+      attach_candidates=(CLAUDE.md docs/STATUS.md)
+      ;;
+    review|debug)
+      attach_candidates=("${policy_files[@]}" "${base_files[@]}")
+      ;;
+    deep|plan|research|*)
+      attach_candidates=("${policy_files[@]}" "${background_files[@]}" "${base_files[@]}")
+      ;;
+  esac
+
+  for candidate in "${attach_candidates[@]}"; do
     [[ -f "$candidate" ]] && AUTO_FILES+=("$candidate")
   done
+
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     write_context_file "git-status.txt" "git status --short"
     write_context_file "git-diff-stat.txt" "git diff --stat"
     if [[ "$MODE" != "quick" && "$MODE" != "standard" ]]; then
       write_context_file "git-diff.patch" "git diff -- . ':(exclude).env' ':(exclude).env.*' ':(exclude)*.pem' ':(exclude)*.key' ':(exclude)*.p12' | sed -E -e '/(api[_-]?key|secret|token|passwd|password|credential|authorization|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key)[^a-z0-9]{0,4}[:=]/Id' -e '/bearer[[:space:]]+[a-z0-9._-]{6,}/Id' | head -c 200000"
+    fi
+    # Exact installed top-level deps (package.json shows ranges, not the installed tree).
+    if [[ "$MODE" != "quick" && "$MODE" != "standard" ]] && [[ -f package.json ]]; then
+      write_context_file "deps.txt" "npm ls --depth=0 2>/dev/null || true"
     fi
   fi
 fi
@@ -281,21 +356,111 @@ add_supported_flag ARGS --browser-auto-reattach-interval "${ORACLE_PRO_REATTACH_
 add_supported_flag ARGS --browser-auto-reattach-timeout "${ORACLE_PRO_REATTACH_TIMEOUT:-2m}"
 add_supported_flag ARGS --heartbeat "${ORACLE_PRO_HEARTBEAT:-30}"
 
-# File inputs. Pass user files first, then auto context.
+# Validate + collect the exact attachment set (user files first, then auto context).
+ATTACH=()
 for f in "${FILES[@]}"; do
   [[ -n "$f" ]] || continue
   if is_secret_file "$f" && [[ "${ORACLE_PRO_ALLOW_SECRET_FILES:-0}" != "1" ]]; then
     die "refusing to upload potential secret file: $f (matches secret denylist). Rename/relocate it, or set ORACLE_PRO_ALLOW_SECRET_FILES=1 to override."
   fi
-  ARGS+=(--file "$f")
+  ATTACH+=("$f")
 done
 for f in "${AUTO_FILES[@]}"; do
+  [[ -n "$f" ]] && ATTACH+=("$f")
+done
+
+# Snapshot manifest: authoritative identity of the repo state this call may discuss.
+# Lets the model (and us) detect drift between turns and bounds it to current disk state.
+captured_at="$(date +%Y-%m-%dT%H:%M:%S%z)"
+repo_root="$(pwd)"
+git_branch="n/a"; git_head="n/a"; dirty="false"; status_hash="n/a"; diff_hash="n/a"
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo n/a)"
+  git_head="$(git rev-parse HEAD 2>/dev/null || echo n/a)"
+  [[ -n "$(git status --porcelain 2>/dev/null)" ]] && dirty="true"
+  status_hash="$(git status --short 2>/dev/null | shasum -a 256 2>/dev/null | awk '{print $1}')"
+  diff_hash="$(git diff 2>/dev/null | shasum -a 256 2>/dev/null | awk '{print $1}')"
+fi
+[[ -n "$status_hash" ]] || status_hash="n/a"
+[[ -n "$diff_hash" ]] || diff_hash="n/a"
+node_ver="$(node --version 2>/dev/null || echo n/a)"
+npm_ver="$(npm --version 2>/dev/null || echo n/a)"
+os_ver="$(uname -sr 2>/dev/null || echo n/a)"
+arch_ver="$(uname -m 2>/dev/null || echo n/a)"
+short_head="${git_head:0:12}"
+repo_state_hash="$(printf '%s' "${git_head}${status_hash}${diff_hash}${node_ver}${npm_ver}" | shasum -a 256 2>/dev/null | awk '{print $1}')"
+[[ -n "$repo_state_hash" ]] || repo_state_hash="n/a"
+snapshot_id="${SLUG}-${short_head}-${repo_state_hash:0:8}"
+
+MANIFEST_PATH="$CTX_DIR/$SLUG.manifest.json"
+# JSON-escape a string value (backslash and double-quote only; inputs are paths/hashes/versions).
+json_escape() { printf '%s' "${1-}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+{
+  printf '{\n'
+  printf '  "snapshotId": "%s",\n' "$(json_escape "$snapshot_id")"
+  printf '  "capturedAt": "%s",\n' "$(json_escape "$captured_at")"
+  printf '  "repoRoot": "%s",\n' "$(json_escape "$repo_root")"
+  printf '  "branch": "%s",\n' "$(json_escape "$git_branch")"
+  printf '  "head": "%s",\n' "$(json_escape "$git_head")"
+  printf '  "dirty": %s,\n' "$dirty"
+  printf '  "gitStatusHash": "%s",\n' "$(json_escape "$status_hash")"
+  printf '  "diffHash": "%s",\n' "$(json_escape "$diff_hash")"
+  printf '  "repoStateHash": "%s",\n' "$(json_escape "$repo_state_hash")"
+  printf '  "mode": "%s",\n' "$(json_escape "$MODE")"
+  printf '  "runtime": { "node": "%s", "npm": "%s", "os": "%s", "arch": "%s" },\n' \
+    "$(json_escape "$node_ver")" "$(json_escape "$npm_ver")" "$(json_escape "$os_ver")" "$(json_escape "$arch_ver")"
+  printf '  "attachments": [\n'
+  manifest_n=${#ATTACH[@]}
+  manifest_i=0
+  for f in "${ATTACH[@]}"; do
+    manifest_i=$((manifest_i + 1))
+    sha="$(shasum -a 256 "$f" 2>/dev/null | awk '{print $1}')"
+    bytes="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+    sep=","
+    [[ "$manifest_i" -eq "$manifest_n" ]] && sep=""
+    printf '    { "path": "%s", "sha256": "%s", "bytes": %s }%s\n' \
+      "$(json_escape "$f")" "${sha:-}" "${bytes:-0}" "$sep"
+  done
+  printf '  ]\n'
+  printf '}\n'
+} > "$MANIFEST_PATH" 2>/dev/null || warn "manifest generation failed (continuing without manifest)"
+[[ -f "$MANIFEST_PATH" ]] && ATTACH+=("$MANIFEST_PATH")
+
+# CONTEXT CONTRACT: bound the model to this snapshot; defeat stale memory/attachments.
+CONTRACT="$(cat <<EOF
+CONTEXT CONTRACT
+Authoritative snapshot: ${snapshot_id}
+Captured at: ${captured_at}
+Branch / HEAD: ${git_branch} / ${git_head}
+Dirty tree: ${dirty}
+Repo-state hash: ${repo_state_hash}
+Runtime: node=${node_ver} npm=${npm_ver} os=${os_ver} arch=${arch_ver}
+Task: ${MODE}
+Authority order:
+  A. Live source-of-truth: ${SLUG}.manifest.json, ${SLUG}.git-status.txt, ${SLUG}.git-diff.patch, ${SLUG}.deps.txt, targeted source/tests
+  B. Current policy/context: CLAUDE.md, composer.config.json, docs/STATUS.md, relevant ADRs
+  C. Background/history: README.md, AGENTS.md
+Rules:
+- Treat class A as authoritative for the local repo. If A conflicts with B or C, A wins.
+- Ignore prior chat memory, project memory, and earlier attachments if they conflict with this snapshot.
+- For each substantive claim, tag it [attached], [runtime], [web], or [inference].
+- Cite attached claims with file path and line span.
+- For current API/library claims not proven by attached files, verify on the web against primary docs.
+- If evidence is insufficient, say: "unknown from provided context".
+EOF
+)"
+PROMPT="${CONTRACT}
+
+${PROMPT}"
+
+# Emit all attachments (incl. the manifest) as --file inputs.
+for f in "${ATTACH[@]}"; do
   [[ -n "$f" ]] && ARGS+=(--file "$f")
 done
 
 log "oracle version: ${ORACLE_VERSION:-unknown}"
 log "mode=$MODE model=$MODEL thinking=$THINKING research=$RESEARCH_MODE output=$OUT_FILE"
-log "files: user=${#FILES[@]} auto=${#AUTO_FILES[@]}"
+log "files: user=${#FILES[@]} auto=${#AUTO_FILES[@]} total=${#ATTACH[@]} snapshot=${snapshot_id}"
 
 oracle "${ARGS[@]}" -p "$PROMPT"
 
