@@ -38,7 +38,7 @@ describe("runGoal", () => {
     expect(started.turns).toBe(0);
     expect(started.nextAction?.tool).toBe("composer_route_decide");
 
-    const files = readdirSync(join(root, ".composer", "goals"));
+    const files = readdirSync(join(root, ".composer", "goals")).filter((name) => name.endsWith(".json"));
     expect(files).toHaveLength(1);
     expect(existsSync(join(root, ".composer", "goals", files[0]!))).toBe(true);
 

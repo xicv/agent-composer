@@ -1,5 +1,16 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -71,6 +82,45 @@ export function readAuditEvents(root: string, opts?: { limit?: number; runId?: s
   const limit = opts?.limit ?? 100;
   if (limit <= 0) return [];
   return events.slice(-limit);
+}
+
+export function readRecentAuditEvents(root: string, limit: number): AuditEvent[] {
+  if (limit <= 0) return [];
+  const filePath = auditLogPath(root);
+  if (!existsSync(filePath)) return [];
+
+  const maxBufferBytes = 1024 * 1024;
+  const chunkSize = 64 * 1024;
+  let fd: number | undefined;
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return [];
+    if (stat.size <= chunkSize) {
+      return readAuditEvents(root, { limit });
+    }
+
+    fd = openSync(filePath, "r");
+    let offset = stat.size;
+    let raw = "";
+    let parsed: AuditEvent[] = [];
+    while (offset > 0 && Buffer.byteLength(raw, "utf8") < maxBufferBytes) {
+      const readLength = Math.min(chunkSize, offset);
+      offset -= readLength;
+      const buffer = Buffer.allocUnsafe(readLength);
+      readSync(fd, buffer, 0, readLength, offset);
+      raw = `${buffer.toString("utf8")}${raw}`;
+      parsed = parseAuditTail(raw, limit);
+      if (parsed.length >= limit) return parsed.slice(-limit);
+    }
+    if (offset > 0 && parsed.length < limit) {
+      return readAuditEvents(root, { limit });
+    }
+    return parsed.slice(-limit);
+  } catch {
+    return readAuditEvents(root, { limit });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 export function readAuditFailures(root: string, opts?: { limit?: number }): AuditEvent[] {
@@ -162,6 +212,25 @@ function auditStateRoot(): string {
 
 function auditLogPath(root: string): string {
   return path.join(auditStateRoot(), "audit", `${projectStateKey(realpathSync(root))}.jsonl`);
+}
+
+function parseAuditTail(raw: string, limit: number): AuditEvent[] {
+  const lines = raw
+    .split("\n")
+    .filter((line, index, array) => {
+      if (index === 0 && !raw.startsWith("{")) return false;
+      if (index === array.length - 1 && line.trim().length === 0) return false;
+      return line.trim().length > 0;
+    });
+  const events: AuditEvent[] = [];
+  for (let i = lines.length - 1; i >= 0 && events.length < limit; i -= 1) {
+    try {
+      events.push(AuditEventSchema.parse(JSON.parse(lines[i]!)));
+    } catch {
+      continue;
+    }
+  }
+  return events.reverse();
 }
 
 function ensureAuditDir(root: string): void {

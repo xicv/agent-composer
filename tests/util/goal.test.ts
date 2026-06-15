@@ -40,6 +40,7 @@ describe("goal", () => {
     expect(record.turns).toBe(0);
     expect(record.checks[0]?.status).toBe("pending");
     expect(existsSync(join(root, GOAL_DIR, `${record.goalId}.json`))).toBe(true);
+    expect(readFileSync(join(root, GOAL_DIR, ".active"), "utf8").trim()).toBe(record.goalId);
 
     const active = readActiveGoal(root);
     expect(active?.goalId).toBe(record.goalId);
@@ -60,6 +61,102 @@ describe("goal", () => {
       now: "2026-06-14T00:01:00.000Z",
       idHint: "two",
     })).toThrow(/open goal already exists/);
+  });
+
+  it("readActiveGoal uses the active-goal index when it is valid", () => {
+    const record = startGoal(root, {
+      objective: "indexed",
+      condition: "active index points here",
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "indexed",
+    });
+
+    expect(readActiveGoal(root)?.goalId).toBe(record.goalId);
+    expect(readFileSync(join(root, GOAL_DIR, ".active"), "utf8").trim()).toBe(record.goalId);
+  });
+
+  it("readActiveGoal falls back to scan and refreshes when the active-goal index is missing", () => {
+    const record = startGoal(root, {
+      objective: "missing index",
+      condition: "scan still finds it",
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "missing-index",
+    });
+    rmSync(join(root, GOAL_DIR, ".active"), { force: true });
+
+    expect(readActiveGoal(root)?.goalId).toBe(record.goalId);
+    expect(readFileSync(join(root, GOAL_DIR, ".active"), "utf8").trim()).toBe(record.goalId);
+  });
+
+  it("readActiveGoal falls back to scan when the active-goal index is stale", () => {
+    const first = startGoal(root, {
+      objective: "terminal indexed",
+      condition: "first completes",
+      checks: [{ name: "pass", command: "true" }],
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "terminal-indexed",
+    });
+    stepGoal(root, {
+      goalId: first.goalId,
+      signals: { checkResults: [{ name: "pass", passed: true }] },
+    });
+    const second = startGoal(root, {
+      objective: "real active",
+      condition: "scan finds second",
+      now: "2026-06-14T00:01:00.000Z",
+      idHint: "real-active",
+    });
+    writeFileSync(join(root, GOAL_DIR, ".active"), `${first.goalId}\n`, "utf8");
+
+    expect(readActiveGoal(root)?.goalId).toBe(second.goalId);
+    expect(readFileSync(join(root, GOAL_DIR, ".active"), "utf8").trim()).toBe(second.goalId);
+  });
+
+  it("readActiveGoal falls back to scan when the active-goal index points to a nonexistent goal", () => {
+    const record = startGoal(root, {
+      objective: "nonexistent index",
+      condition: "scan still wins",
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "nonexistent-index",
+    });
+    writeFileSync(join(root, GOAL_DIR, ".active"), "missing-goal\n", "utf8");
+
+    expect(readActiveGoal(root)?.goalId).toBe(record.goalId);
+    expect(readFileSync(join(root, GOAL_DIR, ".active"), "utf8").trim()).toBe(record.goalId);
+  });
+
+  it("startGoal rejects a second open goal even when the active-goal index is deleted", () => {
+    const record = startGoal(root, {
+      objective: "scan invariant",
+      condition: "one open goal",
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "scan-invariant",
+    });
+    rmSync(join(root, GOAL_DIR, ".active"), { force: true });
+
+    expect(() => startGoal(root, {
+      objective: "second",
+      condition: "must be rejected",
+      now: "2026-06-14T00:01:00.000Z",
+      idHint: "second",
+    })).toThrow(`open goal already exists: ${record.goalId} (active)`);
+  });
+
+  it("startGoal rejects a second open goal even when the active-goal index is stale", () => {
+    const record = startGoal(root, {
+      objective: "scan invariant stale",
+      condition: "one open goal",
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "scan-invariant-stale",
+    });
+    writeFileSync(join(root, GOAL_DIR, ".active"), "missing-goal\n", "utf8");
+
+    expect(() => startGoal(root, {
+      objective: "second",
+      condition: "must be rejected",
+      now: "2026-06-14T00:01:00.000Z",
+      idHint: "second",
+    })).toThrow(`open goal already exists: ${record.goalId} (active)`);
   });
 
   it("startGoal rejects duplicate check names", () => {
