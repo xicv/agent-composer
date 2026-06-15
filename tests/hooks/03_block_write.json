@@ -1,1 +1,1 @@
-{ "hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": { "file_path": "/tmp/x", "content": "y" }, "session_id": "test-session" }
+{ "hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": { "file_path": "src/index.ts", "content": "y" }, "session_id": "test-session" }

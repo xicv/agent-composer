@@ -1,1 +1,1 @@
-{ "hook_event_name": "PreToolUse", "tool_name": "NotebookEdit", "tool_input": { "notebook_path": "/tmp/x.ipynb", "cell_id": "abc", "new_source": "print('x')" }, "session_id": "test-session" }
+{ "hook_event_name": "PreToolUse", "tool_name": "NotebookEdit", "tool_input": { "notebook_path": "src/index.ts", "cell_id": "abc", "new_source": "print('x')" }, "session_id": "test-session" }
