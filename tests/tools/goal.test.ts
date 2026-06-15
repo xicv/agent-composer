@@ -65,10 +65,13 @@ describe("composer goal MCP tools", () => {
         objective: "ship goal tool",
         condition: "check passes",
         checks: [{ name: "unit", command: "true" }],
+        maxConsecutiveStalls: 5,
       },
     })));
     expect(started.state).toBe("active");
     expect(started.turns).toBe(0);
+    expect(started.stallCount).toBe(0);
+    expect(started.maxConsecutiveStalls).toBe(5);
     expect(started.nextAction).toMatchObject({ tool: "composer_route_decide", reason: "begin" });
 
     const status = JSON.parse(textResult(await client.callTool({
@@ -77,6 +80,8 @@ describe("composer goal MCP tools", () => {
     })));
     expect(status.state).toBe("active");
     expect(status.turns).toBe(0);
+    expect(status.stallCount).toBe(0);
+    expect(status.maxConsecutiveStalls).toBe(5);
 
     const statusAgain = JSON.parse(textResult(await client.callTool({
       name: "composer_goal_status",
@@ -90,6 +95,8 @@ describe("composer goal MCP tools", () => {
     })));
     expect(pending.state).toBe("active");
     expect(pending.turns).toBe(1);
+    expect(pending.stallCount).toBe(1);
+    expect(pending.maxConsecutiveStalls).toBe(5);
     expect(pending.nextAction).toMatchObject({
       tool: "composer_goal_status",
       manualChecks: ["unit"],
@@ -212,6 +219,51 @@ describe("composer goal MCP tools", () => {
       tool: "none",
       reason: "condition met",
     });
+  });
+
+  it("surfaces completeness-check fields and accepts verification through composer_goal_step", async () => {
+    const { client } = await bootClient(root);
+
+    const started = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_start",
+      arguments: {
+        objective: "verify completeness",
+        condition: "check passes and review verifies completeness",
+        checks: [{ name: "unit", command: "true" }],
+        requireCompletenessCheck: true,
+      },
+    })));
+    expect(started.requireCompletenessCheck).toBe(true);
+    expect(started.completenessVerified).toBeUndefined();
+
+    const review = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_step",
+      arguments: {
+        goalId: started.goalId,
+        signals: { checkResults: [{ name: "unit", passed: true }] },
+      },
+    })));
+    expect(review.state).toBe("active");
+    expect(review.requireCompletenessCheck).toBe(true);
+    expect(review.nextAction.tool).toBe("composer_review");
+
+    const status = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_status",
+      arguments: { goalId: started.goalId },
+    })));
+    expect(status.requireCompletenessCheck).toBe(true);
+    expect(status.completenessVerified).toBeUndefined();
+
+    const verified = JSON.parse(textResult(await client.callTool({
+      name: "composer_goal_step",
+      arguments: {
+        goalId: started.goalId,
+        signals: { completenessVerified: true },
+      },
+    })));
+    expect(verified.state).toBe("achieved");
+    expect(verified.completenessVerified).toBe(true);
+    expect(verified.nextAction.tool).toBe("none");
   });
 
   it("does not achieve a passing checked goal when conditionMet is false", async () => {

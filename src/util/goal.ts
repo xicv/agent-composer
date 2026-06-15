@@ -39,6 +39,7 @@ export const NextActionToolSchema = z.enum([
   "composer_code_cli",
   "composer_codex_lifecycle_run",
   "composer_oracle_plan",
+  "composer_review",
   "composer_goal_status",
   "composer_goal_step",
   "composer_route_decide",
@@ -69,8 +70,12 @@ export const GoalSchema = z.object({
   turns: z.number().int().nonnegative(),
   maxTurns: z.number().int().positive(),
   maxCost: z.number().nonnegative().optional(),
+  stallCount: z.number().int().nonnegative().optional(),
+  maxConsecutiveStalls: z.number().int().positive().optional(),
   spentUsd: z.number().nonnegative().optional(),
   conditionMet: z.boolean().optional(),
+  requireCompletenessCheck: z.boolean().optional(),
+  completenessVerified: z.boolean().optional(),
   workflow: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
   risk: z.string().min(1).optional(),
@@ -95,6 +100,7 @@ export interface StepGoalSignals {
   budgetExtension?: { maxTurns?: number; maxCost?: number };
   reviewVerdict?: string;
   testsPassed?: boolean;
+  completenessVerified?: boolean;
 }
 
 export interface StartGoalInput {
@@ -103,6 +109,8 @@ export interface StartGoalInput {
   checks?: { name: string; command: string }[];
   maxTurns?: number;
   maxCost?: number;
+  maxConsecutiveStalls?: number;
+  requireCompletenessCheck?: boolean;
   workflow?: string;
   mode?: string;
   risk?: string;
@@ -134,6 +142,9 @@ export function startGoal(root: string, input: StartGoalInput): GoalRecord {
       turns: 0,
       maxTurns: input.maxTurns ?? 12,
       maxCost: input.maxCost,
+      stallCount: 0,
+      maxConsecutiveStalls: input.maxConsecutiveStalls ?? 3,
+      requireCompletenessCheck: input.requireCompletenessCheck,
       workflow: input.workflow,
       mode: input.mode,
       risk: input.risk,
@@ -251,14 +262,17 @@ export function stepGoal(
 
     const signals = input.signals ?? {};
     let base = existing;
-    if (base.state === "blocked" && signals.budgetExtension) {
+    const budgetExtension = signals.budgetExtension;
+    const reactivatedWithBudgetExtension = base.state === "blocked" && budgetExtension !== undefined;
+    if (reactivatedWithBudgetExtension) {
       base = GoalSchema.parse({
         ...base,
         state: "active",
-        maxTurns: signals.budgetExtension.maxTurns !== undefined
-          ? Math.max(base.maxTurns, signals.budgetExtension.maxTurns)
+        stallCount: 0,
+        maxTurns: budgetExtension.maxTurns !== undefined
+          ? Math.max(base.maxTurns, budgetExtension.maxTurns)
           : base.maxTurns,
-        maxCost: maxOptional(base.maxCost, signals.budgetExtension.maxCost),
+        maxCost: maxOptional(base.maxCost, budgetExtension.maxCost),
         updatedAt: new Date().toISOString(),
       });
     }
@@ -267,32 +281,55 @@ export function stepGoal(
     const spentUsd = (base.spentUsd ?? 0) + (signals.spentUsd ?? 0);
     const beforeChecks = base.checks;
     const checks = applyCheckResults(base.checks, signals.checkResults ?? []);
+    const beforeByName = new Map(beforeChecks.map((check) => [check.name, check.status]));
+    const madeProgress =
+      checks.some((check) => check.status === "pass" && beforeByName.get(check.name) !== "pass") ||
+      (signals.conditionMet === true && base.conditionMet !== true) ||
+      (signals.completenessVerified === true && base.completenessVerified !== true);
+    const newStallCount =
+      signals.budgetExtension !== undefined || madeProgress
+        ? 0
+        : (base.stallCount ?? 0) + 1;
     let record = GoalSchema.parse({
       ...base,
       checks,
       turns,
       spentUsd,
+      stallCount: newStallCount,
       conditionMet: signals.conditionMet !== undefined ? signals.conditionMet : base.conditionMet,
+      completenessVerified: signals.completenessVerified !== undefined
+        ? signals.completenessVerified
+        : base.completenessVerified,
       updatedAt: new Date().toISOString(),
     });
 
     const overBudget = turns > record.maxTurns || isProjectedOverBudget(record);
-    if (overBudget) {
-      const verdict = record.checks.some((check) => check.status === "fail") ? "failed" : "blocked";
-      const nextAction: NextAction = {
+    const normalAction = decideNextAction(record, beforeChecks, signals);
+    const stallLimit = record.maxConsecutiveStalls ?? 3;
+    let nextAction: NextAction;
+    let verdict: GoalState;
+    if (normalAction.tool === "none") {
+      nextAction = normalAction;
+      verdict = "achieved";
+    } else if (overBudget) {
+      const failed = record.checks.some((check) => check.status === "fail");
+      verdict = failed ? "failed" : "blocked";
+      nextAction = {
         tool: "composer_goal_status",
-        reason: verdict === "failed"
+        reason: failed
           ? "condition not met within budget - goal failed"
           : "budget/turn cap reached - extend budget (budgetExtension) or clear",
       };
-      record = recordWithAction(record, verdict, nextAction);
-      writeGoal(root, record);
-      updateActiveGoalIndexForRecord(root, record);
-      return { record, nextAction };
+    } else if (newStallCount >= stallLimit) {
+      nextAction = {
+        tool: "composer_goal_status",
+        reason: `convergence stall: ${newStallCount} consecutive steps without progress - change approach, escalate to oracle (composer_oracle_plan), extend budget, or clear the goal`,
+      };
+      verdict = "blocked";
+    } else {
+      nextAction = normalAction;
+      verdict = "active";
     }
-
-    const nextAction = decideNextAction(record, beforeChecks, signals);
-    const verdict = nextAction.tool === "none" ? "achieved" : "active";
     record = recordWithAction(record, verdict, nextAction);
     writeGoal(root, record);
     updateActiveGoalIndexForRecord(root, record);
@@ -362,6 +399,12 @@ function decideNextAction(
   );
 
   if (achieved) {
+    if (record.requireCompletenessCheck === true && record.completenessVerified !== true) {
+      return {
+        tool: "composer_review",
+        reason: "condition met — run an independent completeness check (composer_review), then call composer_goal_step with completenessVerified=true to close the goal",
+      };
+    }
     return {
       tool: "none",
       reason: "condition met",

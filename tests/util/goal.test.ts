@@ -566,6 +566,225 @@ describe("goal", () => {
     });
   });
 
+  it("stepGoal recommends completeness review before closing opted-in goals", () => {
+    const record = startGoal(root, {
+      objective: "verify completion independently",
+      condition: "declared check passes",
+      checks: [{ name: "unit", command: "true" }],
+      requireCompletenessCheck: true,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "completeness-review",
+    });
+
+    const review = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    expect(review.record.state).toBe("active");
+    expect(review.record.requireCompletenessCheck).toBe(true);
+    expect(review.record.completenessVerified).toBeUndefined();
+    expect(review.nextAction.tool).toBe("composer_review");
+    expect(review.nextAction.reason).toContain("completeness");
+  });
+
+  it("stepGoal closes an opted-in goal after completeness is verified", () => {
+    const record = startGoal(root, {
+      objective: "close after independent verification",
+      condition: "declared check passes and completeness is verified",
+      checks: [{ name: "unit", command: "true" }],
+      requireCompletenessCheck: true,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "completeness-close",
+    });
+    const review = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    const verified = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { completenessVerified: true },
+    });
+
+    expect(review.record.state).toBe("active");
+    expect(review.nextAction.tool).toBe("composer_review");
+    expect(verified.record.state).toBe("achieved");
+    expect(verified.record.completenessVerified).toBe(true);
+    expect(verified.record.stallCount).toBe(0);
+    expect(verified.nextAction).toEqual({
+      tool: "none",
+      reason: "condition met",
+    });
+  });
+
+  it("stepGoal still closes non-opted-in goals immediately when all checks pass", () => {
+    const record = startGoal(root, {
+      objective: "close without completeness gate",
+      condition: "declared check passes",
+      checks: [{ name: "unit", command: "true" }],
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "no-completeness-gate",
+    });
+
+    const result = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    expect(result.record.state).toBe("achieved");
+    expect(result.record.requireCompletenessCheck).toBeUndefined();
+    expect(result.nextAction).toEqual({
+      tool: "none",
+      reason: "condition met",
+    });
+  });
+
+  it("stepGoal increments stallCount and blocks after consecutive no-progress steps", () => {
+    const record = startGoal(root, {
+      objective: "detect dry loop",
+      condition: "declared check eventually passes",
+      checks: [{ name: "unit", command: "true" }],
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "stall-default",
+    });
+
+    const first = stepGoal(root, { goalId: record.goalId });
+    const second = stepGoal(root, { goalId: record.goalId });
+    const third = stepGoal(root, { goalId: record.goalId });
+
+    expect(first.record.stallCount).toBe(1);
+    expect(first.record.state).toBe("active");
+    expect(second.record.stallCount).toBe(2);
+    expect(second.record.state).toBe("active");
+    expect(third.record.stallCount).toBe(3);
+    expect(third.record.state).toBe("blocked");
+    expect(third.nextAction.reason).toContain("convergence stall");
+  });
+
+  it("stepGoal resets stallCount when a check newly passes", () => {
+    const record = startGoal(root, {
+      objective: "notice progress",
+      condition: "checks pass one by one",
+      checks: [
+        { name: "unit", command: "true" },
+        { name: "typecheck", command: "true" },
+      ],
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "stall-progress",
+    });
+    const stalled = stepGoal(root, { goalId: record.goalId });
+
+    const progressed = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    expect(stalled.record.stallCount).toBe(1);
+    expect(progressed.record.stallCount).toBe(0);
+    expect(progressed.record.state).toBe("active");
+    expect(progressed.nextAction.tool).toBe("composer_goal_status");
+    expect(progressed.nextAction.reason ?? "").not.toContain("convergence stall");
+  });
+
+  it("stepGoal marks achieved instead of blocked when all checks pass at the stall threshold", () => {
+    const record = startGoal(root, {
+      objective: "achieve before stall",
+      condition: "check passes",
+      checks: [{ name: "unit", command: "true" }],
+      maxConsecutiveStalls: 1,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "stall-achieved",
+    });
+
+    const result = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { checkResults: [{ name: "unit", passed: true }] },
+    });
+
+    expect(result.record.state).toBe("achieved");
+    expect(result.record.stallCount).toBe(0);
+    expect(result.nextAction).toEqual({
+      tool: "none",
+      reason: "condition met",
+    });
+  });
+
+  it("stepGoal resets stallCount when budgetExtension reactivates a stalled goal", () => {
+    const record = startGoal(root, {
+      objective: "resume after stall",
+      condition: "brain changes approach",
+      maxConsecutiveStalls: 2,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "stall-budget-extension",
+    });
+    stepGoal(root, { goalId: record.goalId });
+    const blocked = stepGoal(root, { goalId: record.goalId });
+
+    const resumed = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { budgetExtension: { maxTurns: 20 } },
+    });
+
+    expect(blocked.record.state).toBe("blocked");
+    expect(blocked.record.stallCount).toBe(2);
+    expect(resumed.record.state).toBe("active");
+    expect(resumed.record.stallCount).toBe(0);
+    expect(resumed.record.maxTurns).toBe(20);
+  });
+
+  it("stepGoal resets stallCount when an active goal receives a budget extension", () => {
+    const record = startGoal(root, {
+      objective: "change approach before stall",
+      condition: "brain extends budget while active",
+      maxConsecutiveStalls: 2,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "active-budget-extension",
+    });
+    const first = stepGoal(root, { goalId: record.goalId });
+
+    const extended = stepGoal(root, {
+      goalId: record.goalId,
+      signals: { budgetExtension: { maxTurns: 20 } },
+    });
+
+    expect(first.record.state).toBe("active");
+    expect(first.record.stallCount).toBe(1);
+    expect(extended.record.state).toBe("active");
+    expect(extended.record.stallCount).toBe(0);
+    expect(extended.nextAction.reason ?? "").not.toContain("convergence stall");
+  });
+
+  it("stepGoal honors a custom maxConsecutiveStalls threshold", () => {
+    const record = startGoal(root, {
+      objective: "custom dry loop",
+      condition: "declared check eventually passes",
+      checks: [{ name: "unit", command: "true" }],
+      maxConsecutiveStalls: 2,
+      maxTurns: 10,
+      now: "2026-06-15T00:00:00.000Z",
+      idHint: "stall-custom",
+    });
+
+    const first = stepGoal(root, { goalId: record.goalId });
+    const second = stepGoal(root, { goalId: record.goalId });
+
+    expect(record.maxConsecutiveStalls).toBe(2);
+    expect(first.record.state).toBe("active");
+    expect(first.record.stallCount).toBe(1);
+    expect(second.record.state).toBe("blocked");
+    expect(second.record.stallCount).toBe(2);
+    expect(second.nextAction.reason).toContain("convergence stall");
+  });
+
   it("stepGoal rejects duplicate checkResult names", () => {
     const record = startGoal(root, {
       objective: "reject ambiguous results",
@@ -709,6 +928,33 @@ describe("goal", () => {
     expect(second.nextAction).toEqual({
       tool: "composer_goal_status",
       reason: "budget/turn cap reached - extend budget (budgetExtension) or clear",
+    });
+  });
+
+  it("stepGoal marks achieved when checks pass on an over-budget turn", () => {
+    const record = startGoal(root, {
+      objective: "finish on budget edge",
+      condition: "declared check passes",
+      checks: [{ name: "unit", command: "true" }],
+      maxCost: 1,
+      maxTurns: 10,
+      now: "2026-06-14T00:00:00.000Z",
+      idHint: "achieved-over-budget",
+    });
+
+    const result = stepGoal(root, {
+      goalId: record.goalId,
+      signals: {
+        spentUsd: 1,
+        checkResults: [{ name: "unit", passed: true }],
+      },
+    });
+
+    expect(result.record.state).toBe("achieved");
+    expect(result.record.spentUsd).toBe(1);
+    expect(result.nextAction).toEqual({
+      tool: "none",
+      reason: "condition met",
     });
   });
 
@@ -935,6 +1181,7 @@ describe("goal", () => {
       objective: "keep history bounded",
       condition: "eventually done",
       maxTurns: 200,
+      maxConsecutiveStalls: 200,
       now: "2026-06-14T00:00:00.000Z",
       idHint: "bounded-history",
     });
