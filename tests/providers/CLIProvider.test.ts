@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -6,6 +6,10 @@ import {
   type ExecFileFn,
 } from "../../src/providers/CLIProvider.js";
 import { TapeProvider, loadTape } from "../util/recorder.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("CLIProvider (execFile injected)", () => {
   type CapturedExec = {
@@ -440,7 +444,8 @@ describe("CLIProvider (execFile injected)", () => {
       maxBuffer: 1024,
     });
     await p.execute({ prompt: "x" });
-    expect(optsSeen[0]?.timeout).toBe(7000);
+    expect(optsSeen[0]?.timeout).toBeGreaterThan(0);
+    expect(optsSeen[0]?.timeout).toBeLessThanOrEqual(7000);
     expect(optsSeen[0]?.maxBuffer).toBe(1024);
   });
 
@@ -637,6 +642,70 @@ describe("CLIProvider retry-on-transient", () => {
     const out = await p.execute({ prompt: "x" });
     expect(out.text).toBe("clean output");
     expect(calls()).toBe(1);
+  });
+
+  it("does not schedule another retry after aborting a retry attempt", async () => {
+    const ac = new AbortController();
+    let calls = 0;
+    let secondStarted!: () => void;
+    const secondAttemptStarted = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    const exec = (async (_bin, _args, options) => {
+      calls += 1;
+      if (calls === 1) {
+        return { stdout: "rate limit exceeded", stderr: "" };
+      }
+      secondStarted();
+      const signal = options.signal;
+      if (!signal) throw new Error("missing retry signal");
+      return new Promise<never>((_resolve, reject) => {
+        const onAbort = () => {
+          signal.removeEventListener("abort", onAbort);
+          reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }) as ExecFileFn;
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      retries: 5,
+      totalWallClockMs: 10_000,
+      execFn: exec,
+    });
+
+    const pending = p.execute({ prompt: "review", signal: ac.signal });
+    await secondAttemptStarted;
+    ac.abort(new Error("manual abort"));
+
+    await expect(pending).rejects.toThrow("manual abort");
+    expect(calls).toBe(2);
+  });
+
+  it("stops retrying when totalWallClockMs expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const timeouts: Array<number | undefined> = [];
+    let calls = 0;
+    const exec = (async (_bin, _args, options) => {
+      calls += 1;
+      timeouts.push(options.timeout);
+      vi.setSystemTime(60);
+      return { stdout: "rate limit exceeded", stderr: "" };
+    }) as ExecFileFn;
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      retries: 5,
+      timeoutMs: 100,
+      totalWallClockMs: 50,
+      execFn: exec,
+    });
+
+    await expect(p.execute({ prompt: "review" })).rejects.toThrow(
+      /timed out after 50ms/,
+    );
+    expect(calls).toBe(1);
+    expect(timeouts).toEqual([50]);
   });
 
   it("isTransientFailure detects known patterns, ignores normal output", () => {

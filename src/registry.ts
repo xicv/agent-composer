@@ -108,6 +108,7 @@ export class ProviderRegistry {
           cli: roleConfig.cli,
           model: roleConfig.model,
           timeoutMs: roleConfig.timeoutMs,
+          totalWallClockMs: roleConfig.totalWallClockMs,
           maxBuffer: roleConfig.maxBuffer,
           retries: roleConfig.retries,
           maxResultChars: roleConfig.maxResultChars,

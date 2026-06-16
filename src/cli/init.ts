@@ -180,6 +180,7 @@ const DEFAULT_COMPOSER_CONFIG = {
       enabled: false,
       order: ["reviewerClaude", "reviewer", "coder"],
     },
+    totalWallClockMs: 900000,
   },
 };
 

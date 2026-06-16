@@ -48,6 +48,7 @@ export interface ResolvedCodexLifecycle {
     enabled: boolean;
     order: Array<"researcher" | "coder" | "reviewer" | "reviewerClaude" | "coderCli">;
   };
+  totalWallClockMs: number;
 }
 
 export interface CodexLifecycleDecision {

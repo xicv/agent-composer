@@ -54,7 +54,7 @@ on Codex; see ADR 0005). Add the role to your active config:
 "oraclePlanner": {
   "provider": "cli",
   "cli": ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
-  "timeoutMs": 1500000,
+  "timeoutMs": 1200000,
   "retries": 0,
   "maxResultChars": 14000
 }

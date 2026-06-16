@@ -271,6 +271,12 @@
         },
         "fallback": {
           "$ref": "#/$defs/codexLifecycleFallback"
+        },
+        "totalWallClockMs": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 900000,
+          "description": "Hard total_wall_clock_ms cap in milliseconds across one lifecycle run and all fallback roles. Omitted = 900000."
         }
       }
     },
@@ -526,6 +532,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "CLIProvider wall-clock timeout in milliseconds for one attempt. Ignored by non-CLI providers."
+        },
+        "totalWallClockMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Hard total_wall_clock_ms cap in milliseconds for one CLIProvider invocation, including all retries. Omitted = timeoutMs."
         },
         "maxBuffer": {
           "type": "integer",

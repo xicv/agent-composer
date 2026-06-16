@@ -90,6 +90,7 @@ describe("composer init", () => {
     expect(cfg.codexLifecycle.thresholds.minScore).toBe(60);
     expect(cfg.codexLifecycle.fallback.enabled).toBe(false);
     expect(cfg.codexLifecycle.fallback.order).toEqual(["reviewerClaude", "reviewer", "coder"]);
+    expect(cfg.codexLifecycle.totalWallClockMs).toBe(900000);
   });
 
   it("does not install Oracle scripts or role by default", () => {
@@ -114,6 +115,7 @@ describe("composer init", () => {
       const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
       expect(cfg.roles.oraclePlanner.cli[0]).toBe("bash");
       expect(cfg.roles.oraclePlanner.cli).toContain("scripts/oracle-plan-mcp.sh");
+      expect(cfg.roles.oraclePlanner.timeoutMs).toBe(1200000);
       const ig = readFileSync(join(cwd, ".gitignore"), "utf8");
       expect(ig).toContain(".composer/oracle/");
       expect(ig).toContain(".composer/results/");

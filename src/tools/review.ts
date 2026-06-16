@@ -20,6 +20,8 @@ import {
   writeReviewJob,
 } from "../util/reviewJob.js";
 import { DEFAULT_ANTHROPIC_TIMEOUT_MS } from "../providers/AnthropicCompatibleProvider.js";
+import { createDeadlineSignal } from "../util/asyncControl.js";
+import { pollJobResult } from "../util/jobPolling.js";
 import type { ServerToolContext } from "./context.js";
 
 const REVIEW_SCOPE_SCHEMA = z.enum(["staged", "unstaged", "working-tree", "branch"]);
@@ -234,18 +236,13 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ jobId, waitMs }) => {
-      const deadline = Date.now() + (waitMs ?? 0);
+    async ({ jobId, waitMs }, extra) => {
       const read = () => (jobId ? readReviewJob(root, jobId) : readLatestReviewJob(root));
-      let job = read();
-      while (
-        job &&
-        (job.status === "queued" || job.status === "running") &&
-        Date.now() < deadline
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        job = read();
-      }
+      const job = await pollJobResult(read, {
+        waitMs,
+        signal: extra.signal,
+        label: COMPOSER_REVIEW_JOB_RESULT,
+      });
       const response = job ?? {
         found: false,
         jobId: jobId ?? null,
@@ -303,47 +300,5 @@ function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: Ab
   signal: AbortSignal;
   cleanup: () => void;
 } {
-  const combinedController = new AbortController();
-  const controller = new AbortController();
-  const timeoutError = new Error(`${label}: timed out after ${timeoutMs}ms`);
-  timeoutError.name = "TimeoutError";
-  const timer = setTimeout(() => {
-    controller.abort(timeoutError);
-  }, timeoutMs);
-  timer.unref?.();
-
-  const abortFrom = (source: AbortSignal) => {
-    if (combinedController.signal.aborted) return;
-    combinedController.abort(abortReason(source, label));
-  };
-  const onTimeoutAbort = () => abortFrom(controller.signal);
-  const onCallerAbort = () => {
-    if (callerSignal) abortFrom(callerSignal);
-  };
-
-  if (callerSignal?.aborted) {
-    abortFrom(callerSignal);
-  } else {
-    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
-  }
-  controller.signal.addEventListener("abort", onTimeoutAbort, { once: true });
-
-  return {
-    signal: combinedController.signal,
-    cleanup: () => {
-      clearTimeout(timer);
-      callerSignal?.removeEventListener("abort", onCallerAbort);
-      controller.signal.removeEventListener("abort", onTimeoutAbort);
-    },
-  };
-}
-
-function abortReason(signal: AbortSignal, label: string): Error {
-  const reason = signal.reason as unknown;
-  if (reason instanceof Error) return reason;
-  const error = new Error(
-    typeof reason === "string" && reason.length > 0 ? reason : `${label}: aborted`,
-  );
-  error.name = "AbortError";
-  return error;
+  return createDeadlineSignal(label, timeoutMs, callerSignal);
 }

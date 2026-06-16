@@ -36,6 +36,7 @@ export const RoleConfigSchema = z
     maxTokens: z.number().int().min(1).optional(),
     thinking: ThinkingConfigSchema.optional(),
     timeoutMs: z.number().int().min(1).optional(),
+    totalWallClockMs: z.number().int().min(1).optional(),
     maxBuffer: z.number().int().min(1).optional(),
     retries: z.number().int().min(0).optional(),
     maxResultChars: z.number().int().min(0).optional(),
@@ -211,6 +212,7 @@ export const DEFAULT_CODEX_LIFECYCLE_FALLBACK_ORDER = [
   "reviewer",
   "coder",
 ] as const;
+export const DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS = 15 * 60_000;
 
 const CodexLifecycleFallbackRoleSchema = z.enum([
   "researcher",
@@ -249,6 +251,11 @@ export const CodexLifecycleSchema = z
       enabled: false,
       order: [...DEFAULT_CODEX_LIFECYCLE_FALLBACK_ORDER],
     })),
+    totalWallClockMs: z
+      .number()
+      .int()
+      .min(1)
+      .default(DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS),
   })
   .strict();
 export type CodexLifecycle = z.infer<typeof CodexLifecycleSchema>;

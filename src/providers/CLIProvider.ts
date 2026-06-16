@@ -16,6 +16,10 @@ import type {
   ProviderId,
 } from "./IProvider.js";
 import { projectToolResult } from "../util/projectToolResult.js";
+import {
+  createDeadlineSignal,
+  isAbortError,
+} from "../util/asyncControl.js";
 
 export interface ExecFileResult {
   stdout: string;
@@ -96,12 +100,18 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
             killChildTree();
           }, timeoutMs)
         : null;
+    const onAbort = () => killChildTree();
+    const cleanupTimers = () => {
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      options.signal?.removeEventListener("abort", onAbort);
+    };
 
     if (options.signal) {
       if (options.signal.aborted) {
         killChildTree();
       } else {
-        options.signal.addEventListener("abort", killChildTree, { once: true });
+        options.signal.addEventListener("abort", onAbort, { once: true });
       }
     }
 
@@ -124,14 +134,16 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
     });
 
     child.once("error", (err) => {
-      if (timer) clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      cleanupTimers();
+      if (options.signal?.aborted && options.signal.reason instanceof Error) {
+        reject(options.signal.reason);
+        return;
+      }
       reject(err);
     });
 
     child.once("close", (code, signal) => {
-      if (timer) clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      cleanupTimers();
       if (timedOut) {
         return reject(
           new Error(`CLIProvider: '${file}' timed out after ${timeoutMs}ms`),
@@ -160,6 +172,8 @@ export interface CLIProviderOptions {
   model?: string;
   cwd?: string;
   timeoutMs?: number;
+  /** Hard wall-clock cap across all retry attempts. Default = timeoutMs. */
+  totalWallClockMs?: number;
   maxBuffer?: number;
   /** Retry attempts on transient failure (timeout / empty / rate-limit). Default 2. */
   retries?: number;
@@ -183,6 +197,7 @@ export class CLIProvider implements IProvider {
   private readonly exec: ExecFileFn;
   private readonly cwd?: string;
   private readonly timeoutMs: number;
+  private readonly totalWallClockMs: number;
   private readonly maxBuffer: number;
   private readonly retries: number;
   private readonly maxResultChars: number;
@@ -198,6 +213,13 @@ export class CLIProvider implements IProvider {
     this.exec = opts.execFn ?? DEFAULT_EXEC;
     this.cwd = opts.cwd;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.totalWallClockMs = opts.totalWallClockMs ?? this.timeoutMs;
+    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+      throw new Error("CLIProvider: timeoutMs must be a positive finite number");
+    }
+    if (!Number.isFinite(this.totalWallClockMs) || this.totalWallClockMs <= 0) {
+      throw new Error("CLIProvider: total_wall_clock_ms must be a positive finite number");
+    }
     this.maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
     this.retries = opts.retries ?? DEFAULT_RETRIES;
     this.maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
@@ -222,67 +244,85 @@ export class CLIProvider implements IProvider {
     }
     const baseCwd = input.cwd ?? this.cwd;
 
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt <= this.retries; attempt++) {
-      const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt, {
-        projectDir: input.projectDir,
-        readOnly: input.readOnly,
-        model: input.model,
-        reasoningEffort: input.reasoningEffort,
-        sandbox: input.sandbox,
-      });
-      const startedAt = Date.now();
-      try {
-        const { stdout } = await this.exec(bin, execution.args, {
-          cwd: execution.cwd ?? baseCwd,
-          maxBuffer: this.maxBuffer,
-          timeout: this.timeoutMs,
-          signal: input.signal,
-        });
-        const durationMs = Date.now() - startedAt;
-        const text = execution.finalMessagePath
-          ? CLIProvider.readFinalMessage(execution.finalMessagePath) ?? stdout
-          : stdout;
-        const transientFailure = CLIProvider.isTransientFailure(text);
-        CLIProvider.logUsage({
-          bin,
-          model: this.modelLabel,
-          durationMs,
-          stdoutChars: stdout.length,
-          textChars: text.length,
-          attempt: attempt + 1,
-          status: transientFailure ? "transient" : "success",
-        });
-        if (transientFailure) {
-          lastError = new Error(
-            `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${text.trim().slice(0, 200)}`,
-          );
-          continue;
-        }
-        const bounded = this.maxResultChars > 0
-          ? projectToolResult(text, { maxChars: this.maxResultChars }).text
-          : text;
-        return { text: bounded };
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        CLIProvider.logUsage({
-          bin,
-          model: this.modelLabel,
-          durationMs: Date.now() - startedAt,
-          stdoutChars: 0,
-          textChars: 0,
-          attempt: attempt + 1,
-          status: "error",
-          error: lastError.message.slice(0, 300),
-        });
-      } finally {
-        execution.cleanup();
-      }
-    }
-    throw (
-      lastError ??
-      new Error(`CLIProvider: '${bin}' failed after ${this.retries + 1} attempts`)
+    const deadline = createDeadlineSignal(
+      `CLIProvider '${bin}' total_wall_clock_ms`,
+      this.totalWallClockMs,
+      input.signal,
     );
+    try {
+      let lastError: Error | undefined;
+      for (let attempt = 0; attempt <= this.retries; attempt++) {
+        deadline.throwIfAborted();
+        const remainingMs = deadline.remainingMs();
+        if (remainingMs <= 0) deadline.throwIfAborted();
+        const execution = CLIProvider.prepareArgs(bin, staticArgs, fullPrompt, {
+          projectDir: input.projectDir,
+          readOnly: input.readOnly,
+          model: input.model,
+          reasoningEffort: input.reasoningEffort,
+          sandbox: input.sandbox,
+        });
+        const startedAt = Date.now();
+        try {
+          const { stdout } = await this.exec(bin, execution.args, {
+            cwd: execution.cwd ?? baseCwd,
+            maxBuffer: this.maxBuffer,
+            timeout: Math.max(1, Math.min(this.timeoutMs, remainingMs)),
+            signal: deadline.signal,
+          });
+          deadline.throwIfAborted();
+          const durationMs = Date.now() - startedAt;
+          const text = execution.finalMessagePath
+            ? CLIProvider.readFinalMessage(execution.finalMessagePath) ?? stdout
+            : stdout;
+          const transientFailure = CLIProvider.isTransientFailure(text);
+          CLIProvider.logUsage({
+            bin,
+            model: this.modelLabel,
+            durationMs,
+            stdoutChars: stdout.length,
+            textChars: text.length,
+            attempt: attempt + 1,
+            status: transientFailure ? "transient" : "success",
+          });
+          if (transientFailure) {
+            lastError = new Error(
+              `CLIProvider: '${bin}' transient failure on attempt ${attempt + 1}: ${text.trim().slice(0, 200)}`,
+            );
+            deadline.throwIfAborted();
+            continue;
+          }
+          const bounded = this.maxResultChars > 0
+            ? projectToolResult(text, { maxChars: this.maxResultChars }).text
+            : text;
+          return { text: bounded };
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          CLIProvider.logUsage({
+            bin,
+            model: this.modelLabel,
+            durationMs: Date.now() - startedAt,
+            stdoutChars: 0,
+            textChars: 0,
+            attempt: attempt + 1,
+            status: "error",
+            error: lastError.message.slice(0, 300),
+          });
+          if (deadline.signal.aborted || input.signal?.aborted || isAbortError(lastError)) {
+            throw lastError;
+          }
+          deadline.throwIfAborted();
+        } finally {
+          execution.cleanup();
+        }
+      }
+      throw (
+        lastError ??
+        new Error(`CLIProvider: '${bin}' failed after ${this.retries + 1} attempts`)
+      );
+    } finally {
+      deadline.cleanup();
+    }
   }
 
   /** Output signalling a retryable transient failure (timeout / rate-limit / empty). */

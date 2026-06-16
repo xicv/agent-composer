@@ -8,8 +8,16 @@ import {
   updateCodexLifecycleJob,
   type CodexLifecycleJob,
 } from "../util/codexLifecycleJob.js";
-import type { CodexLifecycleFallback, RoleName } from "../config/schema.js";
+import {
+  DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS,
+  type CodexLifecycleFallback,
+  type RoleName,
+} from "../config/schema.js";
 import type { ProviderRegistry } from "../registry.js";
+import {
+  createDeadlineSignal,
+  isAbortError,
+} from "../util/asyncControl.js";
 
 export interface RunCodexLifecycleJobInput {
   root: string;
@@ -21,6 +29,7 @@ export interface RunCodexLifecycleJobInput {
   projectDir?: string;
   signal?: AbortSignal;
   fallback?: CodexLifecycleFallback;
+  maxTotalMs?: number;
 }
 
 export async function runCodexLifecycleJob(
@@ -35,70 +44,109 @@ export async function runCodexLifecycleJob(
   const roles = lifecycleProviderRoles(input.fallback);
   let lastError: unknown;
   let lastReason: ReturnType<typeof classifyCodexLifecycleUnavailable> = "unknown";
+  const deadline = createDeadlineSignal(
+    "composer_codex_lifecycle_run total_wall_clock_ms",
+    input.maxTotalMs ?? DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS,
+    input.signal,
+  );
 
-  for (const role of roles) {
-    const attemptStartedAt = new Date().toISOString();
-    const executionTarget = lifecycleExecutionTarget(role, targetRoot);
-    try {
-      const provider = input.registry.getProviderForRole(role);
-      const result = await provider.execute({
-        prompt: codexLifecyclePrompt(job, input.prompt, role),
-        context: contextWithHandoff(input.root, input.context, input.handoffPath),
-        cwd: executionTarget.cwd,
-        projectDir: executionTarget.projectDir,
-        readOnly: executionTarget.readOnly,
-        model: input.job.model,
-        signal: input.signal,
-      });
-      job = updateCodexLifecycleJob(input.root, job, {
-        status: "succeeded",
-        completedAt: new Date().toISOString(),
-        resultText: result.text,
-        providerRole: role,
-        fallbackUsed: role === "coderCli" ? undefined : role,
-        attempts: [
-          ...job.attempts,
-          {
-            role,
-            status: "succeeded",
-            startedAt: attemptStartedAt,
-            completedAt: new Date().toISOString(),
-          },
-        ],
-      });
-      return job;
-    } catch (error) {
-      lastError = error;
-      lastReason = classifyCodexLifecycleUnavailable(error);
-      job = updateCodexLifecycleJob(input.root, job, {
-        attempts: [
-          ...job.attempts,
-          {
-            role,
-            status: "unavailable",
-            startedAt: attemptStartedAt,
-            completedAt: new Date().toISOString(),
-            unavailableReason: lastReason,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        ],
-      });
-    } finally {
-      executionTarget.cleanup();
+  try {
+    for (const role of roles) {
+      try {
+        deadline.throwIfAborted();
+      } catch (error) {
+        return finishStoppedLifecycleJob(input.root, job, error);
+      }
+
+      const attemptStartedAt = new Date().toISOString();
+      const executionTarget = lifecycleExecutionTarget(role, targetRoot);
+      try {
+        const provider = input.registry.getProviderForRole(role);
+        const result = await provider.execute({
+          prompt: codexLifecyclePrompt(job, input.prompt, role),
+          context: contextWithHandoff(input.root, input.context, input.handoffPath),
+          cwd: executionTarget.cwd,
+          projectDir: executionTarget.projectDir,
+          readOnly: executionTarget.readOnly,
+          model: input.job.model,
+          signal: deadline.signal,
+        });
+        deadline.throwIfAborted();
+        job = updateCodexLifecycleJob(input.root, job, {
+          status: "succeeded",
+          completedAt: new Date().toISOString(),
+          resultText: result.text,
+          providerRole: role,
+          fallbackUsed: role === "coderCli" ? undefined : role,
+          attempts: [
+            ...job.attempts,
+            {
+              role,
+              status: "succeeded",
+              startedAt: attemptStartedAt,
+              completedAt: new Date().toISOString(),
+            },
+          ],
+        });
+        return job;
+      } catch (error) {
+        lastError = error;
+        lastReason = classifyCodexLifecycleUnavailable(error);
+        job = updateCodexLifecycleJob(input.root, job, {
+          attempts: [
+            ...job.attempts,
+            {
+              role,
+              status: "unavailable",
+              startedAt: attemptStartedAt,
+              completedAt: new Date().toISOString(),
+              unavailableReason: lastReason,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        });
+        if (deadline.signal.aborted || input.signal?.aborted || isAbortError(error)) {
+          return finishStoppedLifecycleJob(input.root, job, error);
+        }
+        try {
+          deadline.throwIfAborted();
+        } catch (deadlineError) {
+          return finishStoppedLifecycleJob(input.root, job, deadlineError);
+        }
+      } finally {
+        executionTarget.cleanup();
+      }
     }
-  }
 
-  job = updateCodexLifecycleJob(input.root, job, {
-    status: "unavailable",
+    job = updateCodexLifecycleJob(input.root, job, {
+      status: "unavailable",
+      completedAt: new Date().toISOString(),
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+      unavailableReason: lastReason,
+      resultText:
+        `Lifecycle providers unavailable (${lastReason}) and no fallback provider succeeded. ` +
+        "Coco should continue optional lifecycle work without treating this as a policy skip; " +
+        "forced gates must fail closed in their own hook.",
+    });
+    return job;
+  } finally {
+    deadline.cleanup();
+  }
+}
+
+function finishStoppedLifecycleJob(
+  root: string,
+  job: CodexLifecycleJob,
+  error: unknown,
+): CodexLifecycleJob {
+  const unavailableReason = classifyCodexLifecycleUnavailable(error);
+  return updateCodexLifecycleJob(root, job, {
+    status: "failed",
     completedAt: new Date().toISOString(),
-    error: lastError instanceof Error ? lastError.message : String(lastError),
-    unavailableReason: lastReason,
-    resultText:
-      `Lifecycle providers unavailable (${lastReason}) and no fallback provider succeeded. ` +
-      "Coco should continue optional lifecycle work without treating this as a policy skip; " +
-      "forced gates must fail closed in their own hook.",
+    error: error instanceof Error ? error.message : String(error),
+    unavailableReason,
+    resultText: `Lifecycle run stopped (${unavailableReason}).`,
   });
-  return job;
 }
 
 export function lifecycleProviderRoles(fallback: CodexLifecycleFallback | undefined): RoleName[] {

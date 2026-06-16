@@ -155,6 +155,7 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
           provider: "cli",
           cli: ["agy", "--dangerously-skip-permissions", "--print-timeout", "90s", "-p"],
           timeoutMs: 120000,
+          totalWallClockMs: 120000,
           maxBuffer: 1048576,
           retries: 0,
           maxResultChars: 8000,
@@ -162,6 +163,7 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
       },
     });
     expect(cfg.roles.reviewer.timeoutMs).toBe(120000);
+    expect(cfg.roles.reviewer.totalWallClockMs).toBe(120000);
     expect(cfg.roles.reviewer.maxBuffer).toBe(1048576);
     expect(cfg.roles.reviewer.retries).toBe(0);
     expect(cfg.roles.reviewer.maxResultChars).toBe(8000);
@@ -188,6 +190,18 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
             provider: "cli",
             cli: ["agy", "-p"],
             retries: -1,
+          },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseConfig({
+        roles: {
+          ...VALID.roles,
+          reviewer: {
+            provider: "cli",
+            cli: ["agy", "-p"],
+            totalWallClockMs: 0,
           },
         },
       }),
@@ -495,6 +509,7 @@ describe("parseConfig - codexLifecycle", () => {
         enabled: false,
         order: ["reviewerClaude", "reviewer", "coder"],
       },
+      totalWallClockMs: 900000,
     });
   });
 
@@ -526,6 +541,7 @@ describe("parseConfig - codexLifecycle", () => {
           enabled: true,
           order: ["reviewerClaude", "reviewer"],
         },
+        totalWallClockMs: 600000,
       },
     });
     expect(cfg.codexLifecycle?.enabled).toBe(true);
@@ -536,6 +552,7 @@ describe("parseConfig - codexLifecycle", () => {
     expect(cfg.codexLifecycle?.thresholds.minScore).toBe(40);
     expect(cfg.codexLifecycle?.fallback.enabled).toBe(true);
     expect(cfg.codexLifecycle?.fallback.order).toEqual(["reviewerClaude", "reviewer"]);
+    expect(cfg.codexLifecycle?.totalWallClockMs).toBe(600000);
   });
 
   it("rejects invalid codexLifecycle thresholds and extra properties", () => {

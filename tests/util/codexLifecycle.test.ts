@@ -32,6 +32,7 @@ describe("resolveCodexLifecycle", () => {
         enabled: false,
         order: ["reviewerClaude", "reviewer", "coder"],
       },
+      totalWallClockMs: 900000,
     });
   });
 });

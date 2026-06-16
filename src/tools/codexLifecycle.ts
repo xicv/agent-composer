@@ -9,7 +9,10 @@ import {
   CODEX_LIFECYCLE_RUN_DESCRIPTION,
   CODEX_LIFECYCLE_RESULT_DESCRIPTION,
 } from "../server/toolDescriptions.js";
-import { decideCodexLifecycle } from "../util/codexLifecycle.js";
+import {
+  decideCodexLifecycle,
+  resolveCodexLifecycle,
+} from "../util/codexLifecycle.js";
 import {
   newCodexLifecycleJob,
   readCodexLifecycleJob,
@@ -127,8 +130,10 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
       extra,
     ) => {
       ctx.refreshConfigIfChanged();
+      const lifecycleConfig = ctx.getActiveConfig()?.codexLifecycle;
+      const resolvedLifecycle = resolveCodexLifecycle(lifecycleConfig);
       const policyDecision = decideCodexLifecycle(
-        ctx.getActiveConfig()?.codexLifecycle,
+        lifecycleConfig,
         event,
         signals,
       );
@@ -184,7 +189,8 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
           handoffPath,
           projectDir: targetRoot,
           signal: selectedExecution === "foreground" ? extra.signal : undefined,
-          fallback: ctx.getActiveConfig()?.codexLifecycle?.fallback,
+          fallback: resolvedLifecycle.fallback,
+          maxTotalMs: resolvedLifecycle.totalWallClockMs,
         });
 
       if (selectedExecution === "background") {

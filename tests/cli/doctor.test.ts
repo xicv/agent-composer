@@ -245,6 +245,7 @@ describe("doctor config checks", () => {
           enabled: true,
           order: ["reviewerClaude", "reviewer"],
         },
+        totalWallClockMs: 900000,
       },
     });
 
