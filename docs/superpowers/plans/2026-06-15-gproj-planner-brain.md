@@ -1648,3 +1648,16 @@ Ranked, still open before "usable for unattended daily 10k-LOC work":
 6. **Backend hardening**: oracle-browser pass pack via stdin/temp-file not argv (E2BIG) + shared `runChild()` wrapper; openai-responses scope conversationId by {project,branch,phase} + lock; default a cheaper planner model than gpt-5.5-pro + print cost before paid calls.
 7. **`gproj status`/`doctor` surface**: report phase, verified changed files, verified tests, dropped context, backend/model, cost, lock holder, recovery recommendation — without opening `.gproj/`.
 8. **Phase/package versioning**: don't overwrite `packages/NN-exec-prompt.md` without preserving the package id that produced a run.
+---
+
+## Phase 6 — SHIPPED 2026-06-16 (all 8 backlog items; gproj repo commits d659175→e9020df, 100 vitest, tsc clean)
+
+> Implementation + tests live in the standalone gproj repo (`/Users/xicao/Projects/gproj`), NOT this composer repo. This is the plan/record.
+
+- **6a** (`d659175`): atomic file writes (temp+rename, cleanup-on-error) + nonce-based advisory repo lock (`.gproj/.lock`; mtime-staleness, ESRCH-only dead-pid, atomic wx-steal, token-matched release); mutating commands locked, `status` lock-free.
+- **6b** (`134bfa0`): append-only run journal (`*_start`/`*_done`); `gproj recover` (clears dead/stale lock first, then journals abort on interrupted op, recommends retry — never silently mutates currentPhase); `gproj doctor` read-only health surface.
+- **6c** (`f5ce4a8`): worktree-sandboxed execution — when `sandbox.mode==="worktree"` the executor + verifier run in a disposable `git worktree`; **atomic `git apply` to the user repo only on `decide accept`** (plain apply, no --3way → all-or-nothing, never leaves conflict markers), discard on reject/adjust; `state.activeWorktree`; recover removes orphaned worktrees; node_modules symlinked for the in-worktree verifier and excluded from the applied patch.
+- **6d-1** (`232f27c`): pack manifest (estimatedTokens/dropped/truncated/mandatoryOverflow); per-section truncation instead of cliff-drop; fail-closed `PACK_TOO_LARGE` when mandatory exceeds budget; 15% token-estimate margin; secret sanitizer (`src/redact/sanitize.ts`) applied to every pack section.
+- **6d-2** (`e9020df`): oracle-browser stderr drain + non-zero/signal rejection; openai-responses default `gpt-5.5` (pro is opt-in), config-driven model, phase-scoped conversations in backend.json (+ legacy migration), error-body surfaced; package versioning (`packageId`, versioned `packages/p{phase}-pkg{N}` + canonical latest, run links packageId); cli backend/token precedence env > config > default.
+
+**Still open (not gproj features):** real `npm install` (offline; node_modules symlinked) and live smoke against real codex/oracle/openai (backends are injected-spawn/fetch unit-tested only).
