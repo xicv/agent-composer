@@ -121,6 +121,14 @@ assert_deny_payload "block_edit_inside_repo_dotdot" \
   "$(jq -nc --arg f "$REPO_ROOT/scripts/../src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
 assert_pass_payload "allow_edit_outside_repo_abs" \
   '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/composer-not-a-repo-file.ts","old_string":"a","new_string":"b"},"session_id":"t"}'
+# New-directory cases (canonicalizer walks to nearest existing ancestor).
+# Outside-repo write into a not-yet-existing dir must be ALLOWED (this is
+# the false-deny that the nearest-ancestor fix removes).
+assert_pass_payload "allow_edit_outside_repo_new_dir" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/composer-not-a-repo-NEWDIR/sub/deep/new.md","content":"x"},"session_id":"t"}'
+# In-repo write into a not-yet-existing dir must STILL be DENIED.
+assert_deny_payload "block_edit_inside_repo_new_dir" \
+  "$(jq -nc --arg f "$REPO_ROOT/this-dir-does-not-exist-yet/sub/new.ts" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$f,content:"x"},session_id:"t"}')"
 # Fail-open regression: invoked from a SUBDIR (CLAUDE_PROJECT_DIR points at a
 # subdir of the repo) editing a repo file ABOVE that subdir must still DENY.
 SUBDIR_PAYLOAD="$(jq -nc --arg f "$REPO_ROOT/src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"

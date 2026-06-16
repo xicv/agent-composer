@@ -142,19 +142,32 @@ fi
 # uncertainty fall through to the block list and stay gated. Tools without a
 # file path (Bash, mcp__*__bash/exec) also fall through and stay gated.
 canonicalize_path() {
-  # Canonicalize a possibly-not-yet-existing path via its parent directory.
-  # Prints the physical path and returns 0 on success; returns 1 when the
-  # parent dir cannot be resolved (caller must then fail safe = gate).
-  local p="$1" d b dc
+  # Canonicalize a path that may not exist yet. Walk up to the nearest
+  # EXISTING ancestor directory, resolve it physically (pwd -P follows
+  # symlinks), then apply the remaining (non-existent) components logically:
+  # "." is skipped and ".." pops a segment. No symlink can exist inside a
+  # non-existent path segment, so logical resolution of the tail is sound
+  # and matches how the filesystem would resolve it once created. Returns 0
+  # with a normalized absolute path; returns 1 only if even the root is not
+  # resolvable (then the caller fails safe = gate).
+  local p="$1" base tail="" comp canon
   [[ "$p" != /* ]] && p="$PWD/$p"
-  d="$(dirname "$p")"
-  b="$(basename "$p")"
-  dc="$(cd "$d" 2>/dev/null && pwd -P)" || return 1
-  if [[ "$b" == "." ]]; then
-    printf '%s' "$dc"
-  else
-    printf '%s/%s' "$dc" "$b"
-  fi
+  base="$p"
+  while [[ -n "$base" && "$base" != "/" && ! -d "$base" ]]; do
+    tail="${base##*/}/$tail"
+    base="${base%/*}"
+    [[ -z "$base" ]] && base="/"
+  done
+  canon="$(cd "$base" 2>/dev/null && pwd -P)" || return 1
+  local IFS=/
+  for comp in $tail; do
+    case "$comp" in
+      ""|".") ;;
+      "..") canon="${canon%/*}"; [[ -z "$canon" ]] && canon="/" ;;
+      *) canon="$canon/$comp" ;;
+    esac
+  done
+  printf '%s' "$canon"
   return 0
 }
 FILE="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // empty' <<<"$INPUT" 2>/dev/null)"
