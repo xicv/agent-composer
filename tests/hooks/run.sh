@@ -114,6 +114,23 @@ assert_pass_payload "subagent_agent_name_allows_bash" \
 assert_pass_payload "subagent_transcript_allows_update" \
   '{"hook_event_name":"PreToolUse","tool_name":"Update","transcript_path":"/tmp/claude/subagents/coder/transcript.jsonl","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
 
+# Path-scoped boundary (fail-safe canonicalization). REPO_ROOT IS the composer repo.
+assert_deny_payload "block_edit_inside_repo_abs" \
+  "$(jq -nc --arg f "$REPO_ROOT/src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
+assert_deny_payload "block_edit_inside_repo_dotdot" \
+  "$(jq -nc --arg f "$REPO_ROOT/scripts/../src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
+assert_pass_payload "allow_edit_outside_repo_abs" \
+  '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/composer-not-a-repo-file.ts","old_string":"a","new_string":"b"},"session_id":"t"}'
+# Fail-open regression: invoked from a SUBDIR (CLAUDE_PROJECT_DIR points at a
+# subdir of the repo) editing a repo file ABOVE that subdir must still DENY.
+SUBDIR_PAYLOAD="$(jq -nc --arg f "$REPO_ROOT/src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
+SUBDIR_OUT="$(printf '%s' "$SUBDIR_PAYLOAD" | CLAUDE_PROJECT_DIR="$REPO_ROOT/scripts" "$SCRIPT" 2>&1)"
+if is_deny <<<"$SUBDIR_OUT"; then
+  PASS=$((PASS+1)); printf '  ok    %-40s DENY\n' "block_edit_subdir_project_dir"
+else
+  FAIL=$((FAIL+1)); FAILED+=("block_edit_subdir_project_dir: expected DENY, got: ${SUBDIR_OUT:-<empty>}"); printf '  FAIL  %-40s expected DENY\n' "block_edit_subdir_project_dir"
+fi
+
 # COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS (Wave 3 Step 1)
 export COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=true
 assert_pass_payload "bypass_allows_bash" \
@@ -410,6 +427,27 @@ JSON
   assert_precommit_system_message "precommit_native_text_fail_open_warns" "$PAYLOAD_COMMIT" "$CONFIG_ENABLED" "$REVIEW_NATIVE_TEXT" "structured review verdict missing"
   assert_precommit_deny_payload "precommit_native_text_fail_closed_denies" "$PAYLOAD_COMMIT" "$CONFIG_FAIL_CLOSED" "$REVIEW_NATIVE_TEXT"
   assert_precommit_bash_watchdog_timeout "precommit_bash_watchdog_timeout" "$PAYLOAD_COMMIT" "$CONFIG_TIMEOUT"
+
+  # Process-tree teardown: a reviewer that spawns a grandchild inheriting stdout
+  # and outliving the parent must NOT hang the commit. With only the parent
+  # killed, the grandchild keeps the stdout pipe open and the $(...) capture
+  # hangs until the grandchild exits (300s). The fix kills the whole group/tree
+  # so the pipe closes and the gate returns promptly with a timeout message.
+  GRANDCHILD_CMD="$PRECOMMIT_TMP/reviewer-grandchild.sh"
+  cat >"$GRANDCHILD_CMD" <<'SH'
+#!/usr/bin/env bash
+sleep 300 &
+wait
+SH
+  chmod +x "$GRANDCHILD_CMD"
+  start="$(date +%s)"
+  out="$(printf '%s' "$PAYLOAD_COMMIT" | CLAUDE_PROJECT_DIR="$PRECOMMIT_GIT_ROOT" COMPOSER_CONFIG="$CONFIG_TIMEOUT" COMPOSER_CODEX_REVIEW_CMD="$GRANDCHILD_CMD" COMPOSER_FORCE_BASH_TIMEOUT=1 "$GUARD2" 2>/dev/null)"
+  end="$(date +%s)"; elapsed=$((end - start))
+  if ! is_deny <<<"$out" && grep -Eq '"systemMessage"[[:space:]]*:' <<<"$out" && grep -Fq "timed out" <<<"$out" && [[ "$elapsed" -le 12 ]]; then
+    PASS=$((PASS+1)); printf '  ok    %-40s TREEKILL\n' "precommit_grandchild_pipe_closed"
+  else
+    FAIL=$((FAIL+1)); FAILED+=("precommit_grandchild_pipe_closed: expected timeout systemMessage within 12s, elapsed=${elapsed}s, got: ${out:-<empty>}"); printf '  FAIL  %-40s expected TREEKILL\n' "precommit_grandchild_pipe_closed"
+  fi
 
   CACHE_HIT_CODEX_ROOT="$PRECOMMIT_TMP/cache-hit-codex"
   CACHE_APPROVE_CODEX_ROOT="$PRECOMMIT_TMP/cache-approve-codex"

@@ -32,6 +32,37 @@ if composer_disabled; then
   exit 0
 fi
 
+# Scope to the Composer project only. The hook is wired globally
+# (~/.claude/settings.json) and fires in every project; without this,
+# main-thread Edit/Write is blocked everywhere — even unrelated repos and
+# ~/.claude config. Enforce the brain/executor boundary ONLY when the active
+# project is the Composer repo, detected by its unique root marker.
+#
+# Walk ancestors from the active dir so the guard still fires when invoked
+# from a SUBDIRECTORY of the repo with CLAUDE_PROJECT_DIR unset — checking
+# the marker on $PWD alone fails OPEN inside the repo. Sets COMPOSER_ROOT to
+# the canonical (physical) repo root, reused by the outside-repo check below.
+COMPOSER_ROOT=""
+composer_project() {
+  local dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+  dir="$(cd "$dir" 2>/dev/null && pwd -P)" || return 1
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -e "$dir/composer.config.schema.json" ]]; then
+      COMPOSER_ROOT="$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  if [[ -e "/composer.config.schema.json" ]]; then
+    COMPOSER_ROOT="/"
+    return 0
+  fi
+  return 1
+}
+if ! composer_project; then
+  exit 0
+fi
+
 emit_deny() {
   local reason="$1"
   # Claude Code v2.1.150+ requires the decision wrapped in hookSpecificOutput.
@@ -99,6 +130,41 @@ if [[ "$TRANSCRIPT" == */subagents/* ]] \
    || [[ -n "$AGENT_NAME" ]] \
    || [[ "$SIDECHAIN" == "true" ]]; then
   exit 0
+fi
+
+# Allow when the target file is CONFIDENTLY OUTSIDE the Composer repo. The
+# boundary exists to keep main Claude from mutating Composer's own code; a
+# file outside the repo root is not Composer code. Canonicalize both the
+# repo root (COMPOSER_ROOT, already physical) and the target path before
+# comparing, so symlinks, `..` traversal, and macOS /tmp->/private/tmp
+# cannot smuggle an in-repo path past a naive string prefix. FAIL SAFE: only
+# exit-allow when the path canonicalizes AND lands outside the root; on any
+# uncertainty fall through to the block list and stay gated. Tools without a
+# file path (Bash, mcp__*__bash/exec) also fall through and stay gated.
+canonicalize_path() {
+  # Canonicalize a possibly-not-yet-existing path via its parent directory.
+  # Prints the physical path and returns 0 on success; returns 1 when the
+  # parent dir cannot be resolved (caller must then fail safe = gate).
+  local p="$1" d b dc
+  [[ "$p" != /* ]] && p="$PWD/$p"
+  d="$(dirname "$p")"
+  b="$(basename "$p")"
+  dc="$(cd "$d" 2>/dev/null && pwd -P)" || return 1
+  if [[ "$b" == "." ]]; then
+    printf '%s' "$dc"
+  else
+    printf '%s/%s' "$dc" "$b"
+  fi
+  return 0
+}
+FILE="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // empty' <<<"$INPUT" 2>/dev/null)"
+if [[ -n "$FILE" ]]; then
+  if FILE_CANON="$(canonicalize_path "$FILE")"; then
+    if [[ "$FILE_CANON" != "$COMPOSER_ROOT" && "$FILE_CANON" != "$COMPOSER_ROOT"/* ]]; then
+      exit 0
+    fi
+  fi
+  # Inside the repo, or path could not be canonicalized -> gate (fall through).
 fi
 
 # 4. Block list — native dangerous file-mutating tools + MCP-prefixed variants.

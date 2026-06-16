@@ -235,17 +235,30 @@ find_codex_plugin_root() {
   fi
 }
 
-# Recursively signal a process and ALL its descendants. The reviewer is a
-# `node codex-companion.mjs` process that spawns `codex`/`agy` as a grandchild;
-# killing only the direct child leaves the grandchild reparented and alive,
-# still holding the stdout pipe that the calling $(...) waits on — which hangs
-# the commit far past the timeout. Walk the tree so the pipe actually closes.
+# kill_tree: fallback teardown when no process group could be created. STOP
+# each node BEFORE enumerating its children so it cannot fork a new child
+# mid-teardown (the race), then CONT so a delivered TERM is actually acted
+# on. Note: a descendant that has already reparented (double-fork) is not
+# reachable via pgrep -P walking — the process-group path below handles that.
 kill_tree() {
   local sig="$1" root="$2" child
+  kill -STOP "$root" 2>/dev/null || true
   for child in $(pgrep -P "$root" 2>/dev/null); do
     kill_tree "$sig" "$child"
   done
   kill -"$sig" "$root" 2>/dev/null || true
+  kill -CONT "$root" 2>/dev/null || true
+}
+
+# teardown_reviewer: prefer an ATOMIC process-group signal (kill -SIG -PGID)
+# when the reviewer leads its own group — this also reaches descendants that
+# reparented away from the immediate child. Fall back to kill_tree otherwise.
+teardown_reviewer() {
+  local sig="$1" pid="$2" pgid_mode="$3"
+  if [[ "$pgid_mode" == "1" ]] && kill -"$sig" "-$pid" 2>/dev/null; then
+    return 0
+  fi
+  kill_tree "$sig" "$pid"
 }
 
 run_reviewer() {
@@ -260,10 +273,26 @@ run_reviewer() {
     return $?
   fi
 
-  local pid watchdog status marker
+  local pid watchdog status marker pgid_mode
   marker="${TMPDIR:-/tmp}/composer-timeout.$$.$RANDOM"
-  "$@" &
-  pid=$!
+  # Launch the reviewer as the leader of a NEW process group so the watchdog
+  # can signal the whole subtree atomically (catching reparented grandchildren
+  # that hold the stdout pipe). setsid (Linux) or perl setpgrp (portable;
+  # ships on macOS where setsid does not) make the child its own group leader.
+  # If neither exists, fall back to in-group launch + kill_tree teardown.
+  pgid_mode=0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" &
+    pid=$!
+    pgid_mode=1
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'setpgrp(0,0); exec @ARGV or die "exec failed: $!"' "$@" &
+    pid=$!
+    pgid_mode=1
+  else
+    "$@" &
+    pid=$!
+  fi
   (
     sleeper=""
     trap '[[ -n "$sleeper" ]] && kill "$sleeper" 2>/dev/null || true; exit 0' TERM INT
@@ -271,9 +300,9 @@ run_reviewer() {
     sleeper=$!
     wait "$sleeper" 2>/dev/null || exit 0
     printf '1' >"$marker" 2>/dev/null || true
-    kill_tree TERM "$pid"
+    teardown_reviewer TERM "$pid" "$pgid_mode"
     sleep 5
-    kill_tree KILL "$pid"
+    teardown_reviewer KILL "$pid" "$pgid_mode"
   ) &
   watchdog=$!
   wait "$pid"
