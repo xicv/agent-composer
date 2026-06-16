@@ -86,7 +86,7 @@
         "-c",
         "model=\"gpt-5.5\""
       ],
-      "timeoutMs": 900000,
+      "timeoutMs": 240000,
       "retries": 0
     },
     "oraclePlanner": {

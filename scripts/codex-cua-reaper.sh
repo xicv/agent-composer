@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MAX_AGE_SECONDS="${MAX_AGE_SECONDS:-3600}"
+MAX_AGE_SECONDS="${MAX_AGE_SECONDS:-300}"
 LOG_DIR="$HOME/.claude/logs"
 LOG_FILE="$LOG_DIR/codex-cua-reaper.log"
 
@@ -20,9 +20,6 @@ for pattern in "${patterns[@]}"; do
   while IFS= read -r pid; do
     [[ -n "$pid" ]] || continue
     scanned=$((scanned + 1))
-
-    cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
-    [[ "$cmd" == *"/Applications/Codex.app/"* ]] && continue
 
     ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
     etimes="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
