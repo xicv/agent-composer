@@ -196,6 +196,31 @@ describe("ProviderRegistry — cli (Day 2)", () => {
   });
 });
 
+describe("ProviderRegistry — config reload", () => {
+  it("setConfig replaces role config and clears cached providers", () => {
+    const reg = new ProviderRegistry(
+      makeConfig({
+        provider: "cli",
+        cli: ["node", "-e", "setTimeout(() => {}, 1000)"],
+        timeoutMs: 1000,
+      }),
+    );
+    const before = reg.getProviderForRole("coder");
+
+    reg.setConfig(
+      makeConfig({
+        provider: "cli",
+        cli: ["node", "-e", "setTimeout(() => {}, 1000)"],
+        timeoutMs: 10,
+      }),
+    );
+
+    const after = reg.getProviderForRole("coder");
+    expect(after).toBeInstanceOf(CLIProvider);
+    expect(after).not.toBe(before);
+  });
+});
+
 describe("ProviderRegistry — openai_compatible (still YAGNI)", () => {
   it("throws ProviderNotImplementedError", () => {
     const reg = new ProviderRegistry(

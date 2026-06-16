@@ -28,6 +28,7 @@ export function registerResearchTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, context, handoffPath }, extra) => {
+      ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("researcher");
       const result = await withProgress(extra, COMPOSER_RESEARCH, () =>
         provider.execute({

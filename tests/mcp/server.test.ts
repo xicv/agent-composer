@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -471,6 +471,52 @@ describe("composer MCP server", () => {
       const provider = registry.getProviderForRole("coderCli");
       expect(provider).toBeInstanceOf(MockProvider);
       expect((provider as MockProvider).calls[0]?.cwd).toBe(resolve(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_code_cli reloads changed config before resolving its provider", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const configPath = join(root, "composer.config.json");
+    const configFor = (model: string) =>
+      parseConfig({
+        roles: {
+          researcher: { provider: "mock" },
+          coder: { provider: "mock" },
+          reviewer: { provider: "mock" },
+          coderCli: { provider: "mock", model },
+        },
+      });
+    const writeConfig = (model: string, seconds: number) => {
+      const config = configFor(model);
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      const when = new Date(seconds * 1000);
+      utimesSync(configPath, when, when);
+      return config;
+    };
+    try {
+      const initialConfig = writeConfig("before-reload", 100);
+      const { client, registry } = await bootClient(root, initialConfig, configPath);
+
+      await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "first dispatch" },
+      });
+      const before = registry.getProviderForRole("coderCli");
+      expect(before).toBeInstanceOf(MockProvider);
+      expect((before as MockProvider).modelLabel).toBe("before-reload");
+
+      writeConfig("after-reload", 200);
+      await client.callTool({
+        name: "composer_code_cli",
+        arguments: { prompt: "second dispatch" },
+      });
+
+      const after = registry.getProviderForRole("coderCli");
+      expect(after).toBeInstanceOf(MockProvider);
+      expect(after).not.toBe(before);
+      expect((after as MockProvider).modelLabel).toBe("after-reload");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

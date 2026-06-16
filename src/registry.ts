@@ -44,7 +44,13 @@ export class ProviderRegistry {
   private readonly cache = new Map<RoleName, IProvider>();
   private readonly spendLedger = new SpendLedger();
 
-  constructor(private readonly config: ComposerConfig) {}
+  constructor(private config: ComposerConfig) {}
+
+  setConfig(config: ComposerConfig): void {
+    if (config === this.config) return;
+    this.config = config;
+    this.cache.clear();
+  }
 
   getProviderForRole(role: RoleName): IProvider {
     const cached = this.cache.get(role);

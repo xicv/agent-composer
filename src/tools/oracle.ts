@@ -54,6 +54,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, mode, context, handoffPath }, extra) => {
+      ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("oraclePlanner");
       const cfgOracle = ctx.getActiveConfig()?.oracle;
       const sessOracle = ctx.getSession().oracle;
@@ -117,6 +118,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, mode, context, handoffPath }) => {
+      ctx.refreshConfigIfChanged();
       const cfgOracle = ctx.getActiveConfig()?.oracle;
       const sessOracle = ctx.getSession().oracle;
       const oracleCfg = {

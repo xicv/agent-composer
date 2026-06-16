@@ -126,6 +126,7 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
       { event, prompt, context, handoffPath, objective, execution, confirmed, projectDir, signals },
       extra,
     ) => {
+      ctx.refreshConfigIfChanged();
       const policyDecision = decideCodexLifecycle(
         ctx.getActiveConfig()?.codexLifecycle,
         event,

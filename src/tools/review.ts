@@ -47,6 +47,7 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base }, extra) => {
+      ctx.refreshConfigIfChanged();
       const effectiveDiff = resolveReviewDiff(root, {
         diff,
         reviewScope,
@@ -88,6 +89,7 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base }, extra) => {
+      ctx.refreshConfigIfChanged();
       const effectiveDiff = resolveReviewDiff(root, {
         diff,
         reviewScope,
@@ -131,6 +133,7 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base, claude }) => {
+      ctx.refreshConfigIfChanged();
       const effectiveDiff = resolveReviewDiff(root, {
         diff,
         reviewScope,

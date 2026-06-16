@@ -26,6 +26,7 @@ export interface ServerToolContext {
   options: ComposerServerOptions;
   getActiveConfig: () => ComposerConfig | undefined;
   setActiveConfig: (config: ComposerConfig | undefined) => void;
+  refreshConfigIfChanged: () => void;
   getSession: () => SessionOverrides;
   setSession: (patch: Partial<SessionOverrides>) => SessionOverrides;
   resetSession: () => void;

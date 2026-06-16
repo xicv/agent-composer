@@ -33,6 +33,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, context, handoffPath }, extra) => {
+      ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("coder");
       const result = await withProgress(extra, COMPOSER_CODE, () =>
         provider.execute({
@@ -65,6 +66,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, context, handoffPath, projectDir }, extra) => {
+      ctx.refreshConfigIfChanged();
       const targetRoot = resolveProjectDir(projectDir, root);
       // Stage 1: GLM authors the code off-CC (returns full file contents).
       const gen = registry.getProviderForRole("coder");
@@ -124,6 +126,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
       },
     },
     async ({ prompt, context, handoffPath, projectDir, profile }, extra) => {
+      ctx.refreshConfigIfChanged();
       const targetRoot = resolveProjectDir(projectDir, root);
       const profiles = ctx.getActiveConfig()?.codexProfiles;
       const effectiveProfile = profile ?? ctx.getSession().profile;
