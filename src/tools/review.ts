@@ -19,9 +19,11 @@ import {
   updateReviewJob,
   writeReviewJob,
 } from "../util/reviewJob.js";
+import { DEFAULT_ANTHROPIC_TIMEOUT_MS } from "../providers/AnthropicCompatibleProvider.js";
 import type { ServerToolContext } from "./context.js";
 
 const REVIEW_SCOPE_SCHEMA = z.enum(["staged", "unstaged", "working-tree", "branch"]);
+const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = DEFAULT_ANTHROPIC_TIMEOUT_MS;
 
 export function registerReviewTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
@@ -56,15 +58,24 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         toolName: COMPOSER_REVIEW,
       });
       const provider = registry.getProviderForRole("reviewer");
-      const result = await withProgress(extra, COMPOSER_REVIEW, () =>
-        provider.execute({
-          prompt,
-          context: contextWithHandoff(root, effectiveDiff, handoffPath),
-          signal: extra.signal,
-        }),
-        { tracker: ctx.activeRuns },
+      const toolSignal = createBoundedSignal(
+        COMPOSER_REVIEW,
+        resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.reviewer?.timeoutMs),
+        extra.signal,
       );
-      return { content: [{ type: "text", text: result.text }] };
+      try {
+        const result = await withProgress(extra, COMPOSER_REVIEW, () =>
+          provider.execute({
+            prompt,
+            context: contextWithHandoff(root, effectiveDiff, handoffPath),
+            signal: toolSignal.signal,
+          }),
+          { tracker: ctx.activeRuns },
+        );
+        return { content: [{ type: "text", text: result.text }] };
+      } finally {
+        toolSignal.cleanup();
+      }
     },
   );
 
@@ -98,16 +109,25 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         toolName: COMPOSER_REVIEW_CLAUDE,
       });
       const provider = registry.getProviderForRole("reviewerClaude");
-      const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, () =>
-        provider.execute({
-          prompt,
-          context: contextWithHandoff(root, effectiveDiff, handoffPath),
-          cwd: root,
-          signal: extra.signal,
-        }),
-        { tracker: ctx.activeRuns },
+      const toolSignal = createBoundedSignal(
+        COMPOSER_REVIEW_CLAUDE,
+        resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.reviewerClaude?.timeoutMs),
+        extra.signal,
       );
-      return { content: [{ type: "text", text: result.text }] };
+      try {
+        const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, () =>
+          provider.execute({
+            prompt,
+            context: contextWithHandoff(root, effectiveDiff, handoffPath),
+            cwd: root,
+            signal: toolSignal.signal,
+          }),
+          { tracker: ctx.activeRuns },
+        );
+        return { content: [{ type: "text", text: result.text }] };
+      } finally {
+        toolSignal.cleanup();
+      }
     },
   );
 
@@ -141,7 +161,11 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         base,
         toolName: COMPOSER_REVIEW_JOB_START,
       });
-      const provider = registry.getProviderForRole(claude ? "reviewerClaude" : "reviewer");
+      const reviewRole = claude ? "reviewerClaude" : "reviewer";
+      const provider = registry.getProviderForRole(reviewRole);
+      const jobTimeoutMs = resolveRoleTimeoutMs(
+        ctx.getActiveConfig()?.roles[reviewRole]?.timeoutMs,
+      );
       let job = writeReviewJob(
         root,
         newReviewJob({
@@ -154,27 +178,36 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       );
       const context = contextWithHandoff(root, effectiveDiff, handoffPath);
       const runner = async () => {
-        const running = updateReviewJob(root, job, {
-          status: "running",
-          startedAt: new Date().toISOString(),
-        });
+        const jobSignal = createBoundedSignal(
+          "composer_review_job_start",
+          jobTimeoutMs,
+        );
         try {
-          const result = await provider.execute({
-            prompt,
-            context,
-            cwd: root,
+          const running = updateReviewJob(root, job, {
+            status: "running",
+            startedAt: new Date().toISOString(),
           });
-          updateReviewJob(root, running, {
-            status: "succeeded",
-            completedAt: new Date().toISOString(),
-            result: parseReviewResult(result.text),
-          });
-        } catch (error) {
-          updateReviewJob(root, running, {
-            status: "failed",
-            completedAt: new Date().toISOString(),
-            error: error instanceof Error ? error.message : String(error),
-          });
+          try {
+            const result = await provider.execute({
+              prompt,
+              context,
+              cwd: root,
+              signal: jobSignal.signal,
+            });
+            updateReviewJob(root, running, {
+              status: "succeeded",
+              completedAt: new Date().toISOString(),
+              result: parseReviewResult(result.text),
+            });
+          } catch (error) {
+            updateReviewJob(root, running, {
+              status: "failed",
+              completedAt: new Date().toISOString(),
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        } finally {
+          jobSignal.cleanup();
         }
       };
       void runner().catch(() => {
@@ -256,4 +289,61 @@ function parseReviewResult(text: string): { verdict?: string; summary?: string; 
 function firstMarkerValue(text: string, marker: string): string | undefined {
   const match = text.match(new RegExp(`^\\s*${marker}:\\s*(.+?)\\s*$`, "im"));
   return match?.[1]?.trim();
+}
+
+function resolveRoleTimeoutMs(configuredTimeoutMs: unknown): number {
+  return typeof configuredTimeoutMs === "number" &&
+    Number.isFinite(configuredTimeoutMs) &&
+    configuredTimeoutMs > 0
+    ? configuredTimeoutMs
+    : DEFAULT_BACKGROUND_JOB_TIMEOUT_MS;
+}
+
+function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: AbortSignal): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const combinedController = new AbortController();
+  const controller = new AbortController();
+  const timeoutError = new Error(`${label}: timed out after ${timeoutMs}ms`);
+  timeoutError.name = "TimeoutError";
+  const timer = setTimeout(() => {
+    controller.abort(timeoutError);
+  }, timeoutMs);
+  timer.unref?.();
+
+  const abortFrom = (source: AbortSignal) => {
+    if (combinedController.signal.aborted) return;
+    combinedController.abort(abortReason(source, label));
+  };
+  const onTimeoutAbort = () => abortFrom(controller.signal);
+  const onCallerAbort = () => {
+    if (callerSignal) abortFrom(callerSignal);
+  };
+
+  if (callerSignal?.aborted) {
+    abortFrom(callerSignal);
+  } else {
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  controller.signal.addEventListener("abort", onTimeoutAbort, { once: true });
+
+  return {
+    signal: combinedController.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+      controller.signal.removeEventListener("abort", onTimeoutAbort);
+    },
+  };
+}
+
+function abortReason(signal: AbortSignal, label: string): Error {
+  const reason = signal.reason as unknown;
+  if (reason instanceof Error) return reason;
+  const error = new Error(
+    typeof reason === "string" && reason.length > 0 ? reason : `${label}: aborted`,
+  );
+  error.name = "AbortError";
+  return error;
 }

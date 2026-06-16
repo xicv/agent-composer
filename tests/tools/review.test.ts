@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -39,6 +39,27 @@ async function bootClient(root: string, providers: Record<string, IProvider>) {
   return { client };
 }
 
+async function bootClientWithConfig(
+  root: string,
+  providers: Record<string, IProvider>,
+  activeConfig: ComposerConfig,
+) {
+  const fallback = new MockProvider();
+  const registry = {
+    getProviderForRole(role: string): IProvider {
+      return providers[role] ?? fallback;
+    },
+  } as unknown as ProviderRegistry;
+  const server = createComposerServer(registry, { root, config: activeConfig });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "composer-review-test", version: "0.0.0" });
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  return { client };
+}
+
 function delayedProvider(ms: number, text: string): IProvider & { calls: IProviderExecuteInput[] } {
   const calls: IProviderExecuteInput[] = [];
   return {
@@ -56,10 +77,41 @@ function delayedProvider(ms: number, text: string): IProvider & { calls: IProvid
   };
 }
 
+function abortAwareNeverProvider(): IProvider & { calls: IProviderExecuteInput[] } {
+  const calls: IProviderExecuteInput[] = [];
+  return {
+    id: "mock",
+    modelLabel: "abort-aware-reviewer",
+    calls,
+    async healthCheck() {
+      return true;
+    },
+    execute(input: IProviderExecuteInput): Promise<IProviderExecuteOutput> {
+      calls.push(input);
+      if (!input.signal) {
+        return Promise.reject(new Error("missing signal"));
+      }
+      const signal = input.signal;
+      return new Promise((_resolve, reject) => {
+        const rejectFromSignal = () => {
+          const reason = signal.reason;
+          reject(reason instanceof Error ? reason : new Error("aborted"));
+        };
+        if (signal.aborted) {
+          rejectFromSignal();
+          return;
+        }
+        signal.addEventListener("abort", rejectFromSignal, { once: true });
+      });
+    },
+  };
+}
+
 describe("review tools", () => {
   const roots: string[] = [];
 
   afterEach(() => {
+    vi.useRealTimers();
     for (const root of roots.splice(0)) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -111,6 +163,45 @@ describe("review tools", () => {
     expect(job.result?.text).toContain("Full review text.");
     expect(reviewer.calls[0]?.context).toContain("console.log()");
     expect(reviewer.calls[0]?.cwd).toBe(resolve(root));
+    expect(reviewer.calls[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("composer_review_job_start bounds a never-resolving provider with the role timeout signal", async () => {
+    vi.useFakeTimers();
+    const root = tempRoot();
+    const reviewer = abortAwareNeverProvider();
+    const boundedConfig: ComposerConfig = parseConfig({
+      roles: {
+        researcher: { provider: "mock", model: "researcher-mock" },
+        coder: { provider: "mock", model: "coder-mock" },
+        reviewer: { provider: "mock", model: "reviewer-mock", timeoutMs: 25 },
+        reviewerClaude: { provider: "mock", model: "reviewer-claude-mock" },
+      },
+    });
+    const { client } = await bootClientWithConfig(root, { reviewer }, boundedConfig);
+
+    const started = await client.callTool({
+      name: "composer_review_job_start",
+      arguments: {
+        prompt: "scan forever",
+        diff: "--- a/x\n+++ b/x\n+change",
+      },
+    });
+    const startJob = JSON.parse(textBlock(started)) as { jobId: string };
+    expect(reviewer.calls[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(reviewer.calls[0]?.signal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    const result = await client.callTool({
+      name: "composer_review_job_result",
+      arguments: { jobId: startJob.jobId },
+    });
+    const job = JSON.parse(textBlock(result)) as { status: string; error?: string };
+
+    expect(job.status).toBe("failed");
+    expect(job.error).toContain("composer_review_job_start: timed out after 25ms");
+    expect(reviewer.calls[0]?.signal?.aborted).toBe(true);
   });
 
   it("composer_review_job_result waitMs waits for completion of the latest job", async () => {
@@ -159,6 +250,7 @@ describe("review tools", () => {
     expect(job.result?.verdict).toBe("CLAUDE");
     expect(reviewer.calls).toHaveLength(0);
     expect(reviewerClaude.calls).toHaveLength(1);
+    expect(reviewerClaude.calls[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("unknown review jobId returns a clear not-found shape", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -42,11 +42,19 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     fakeClient = f.client;
   });
 
-  function buildProvider(model = "glm-4.6"): AnthropicCompatibleProvider {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function buildProvider(
+    model = "glm-4.6",
+    opts: { timeoutMs?: number } = {},
+  ): AnthropicCompatibleProvider {
     return new AnthropicCompatibleProvider({
       baseUrl: "https://test.example/api/anthropic",
       apiKey: "test-key-abc",
       model,
+      ...opts,
       clientFactory: (opts) => {
         factoryCalls.push(opts);
         return fakeClient;
@@ -101,6 +109,19 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
           clientFactory: () => fakeClient,
         }),
     ).toThrow(/model required/);
+  });
+
+  it("throws when timeoutMs is not positive", () => {
+    expect(
+      () =>
+        new AnthropicCompatibleProvider({
+          baseUrl: "https://x",
+          apiKey: "k",
+          model: "m",
+          timeoutMs: 0,
+          clientFactory: () => fakeClient,
+        }),
+    ).toThrow(/timeoutMs must be a positive finite number/);
   });
 
   it("healthCheck returns true after construction", async () => {
@@ -223,7 +244,7 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     ).toThrow(/must be less than max_tokens/);
   });
 
-  it("execute() passes AbortSignal as 2nd arg to stream when provided", async () => {
+  it("execute() passes a composed AbortSignal as 2nd arg to stream when caller provides one", async () => {
     setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -233,10 +254,13 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     const p = buildProvider();
     await p.execute({ prompt: "p", signal });
     expect(stream).toHaveBeenCalledTimes(1);
-    expect(stream.mock.calls[0]?.[1]).toEqual({ signal });
+    const forwardedSignal = stream.mock.calls[0]?.[1]?.signal;
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal);
+    expect(forwardedSignal).not.toBe(signal);
+    expect(forwardedSignal?.aborted).toBe(false);
   });
 
-  it("execute() passes undefined as 2nd arg to stream when no signal", async () => {
+  it("execute() passes an internally managed AbortSignal when caller provides no signal", async () => {
     setStreamResult(stream, {
       content: [{ type: "text", text: "ok" }],
       usage: { input_tokens: 1, output_tokens: 1 },
@@ -244,7 +268,54 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     const p = buildProvider();
     await p.execute({ prompt: "p" });
     expect(stream).toHaveBeenCalledTimes(1);
-    expect(stream.mock.calls[0]?.[1]).toBeUndefined();
+    const forwardedSignal = stream.mock.calls[0]?.[1]?.signal;
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal);
+    expect(forwardedSignal?.aborted).toBe(false);
+  });
+
+  it("execute() rejects a never-resolving finalMessage after timeoutMs and aborts the stream", async () => {
+    vi.useFakeTimers();
+    const abort = vi.fn();
+    let forwardedSignal: AbortSignal | undefined;
+    stream.mockImplementation((_params, options) => {
+      forwardedSignal = options?.signal;
+      return {
+        abort,
+        finalMessage: () => new Promise<never>(() => {}),
+      };
+    });
+
+    const p = buildProvider("glm-4.6", { timeoutMs: 50 });
+    const pending = p.execute({ prompt: "hang" });
+    const assertion = expect(pending).rejects.toThrow(/timed out after 50ms/i);
+
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal);
+    expect(forwardedSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(abort).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await assertion;
+    expect(forwardedSignal?.aborted).toBe(true);
+    expect(abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("execute() rejects promptly when caller signal aborts before the internal timeout", async () => {
+    vi.useFakeTimers();
+    const abort = vi.fn();
+    stream.mockReturnValue({
+      abort,
+      finalMessage: () => new Promise<never>(() => {}),
+    });
+    const controller = new AbortController();
+    const p = buildProvider("glm-4.6", { timeoutMs: 10_000 });
+    const pending = p.execute({ prompt: "x", signal: controller.signal });
+    const assertion = expect(pending).rejects.toThrow(/caller stopped/);
+
+    controller.abort(new Error("caller stopped"));
+
+    await assertion;
+    expect(abort).toHaveBeenCalledTimes(1);
   });
 
   it("propagates a timeout error from finalMessage()", async () => {
@@ -260,7 +331,7 @@ describe("AnthropicCompatibleProvider (DI client mocked)", () => {
     controller.abort();
     const p = buildProvider();
     await expect(p.execute({ prompt: "x", signal: controller.signal })).rejects.toThrow(/abort/i);
-    expect(stream.mock.calls[0]?.[1]).toEqual({ signal: controller.signal });
+    expect(stream.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("propagates a generic provider error", async () => {

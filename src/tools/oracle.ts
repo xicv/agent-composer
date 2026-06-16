@@ -19,7 +19,10 @@ import {
   writeOracleJob,
 } from "../util/oracleJob.js";
 import { acquireOracleLock } from "../util/oracleLock.js";
+import { DEFAULT_ANTHROPIC_TIMEOUT_MS } from "../providers/AnthropicCompatibleProvider.js";
 import type { ServerToolContext } from "./context.js";
+
+const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = DEFAULT_ANTHROPIC_TIMEOUT_MS;
 
 export function registerOracleTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
@@ -82,18 +85,24 @@ export function registerOracleTools(ctx: ServerToolContext): void {
             `Retry shortly, or use composer_oracle_job_start for a queued async run.`,
         );
       }
+      const toolSignal = createBoundedSignal(
+        COMPOSER_ORACLE_PLAN,
+        resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.oraclePlanner?.timeoutMs),
+        extra.signal,
+      );
       try {
         const result = await withProgress(extra, COMPOSER_ORACLE_PLAN, () =>
           provider.execute({
             prompt: effectivePrompt,
             context: contextWithHandoff(root, context, handoffPath),
             cwd: root,
-            signal: extra.signal,
+            signal: toolSignal.signal,
           }),
           { tracker: ctx.activeRuns },
         );
         return { content: [{ type: "text", text: result.text }] };
       } finally {
+        toolSignal.cleanup();
         lock.handle.release();
       }
     },
@@ -136,6 +145,9 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         );
       }
       const provider = registry.getProviderForRole("oraclePlanner");
+      const jobTimeoutMs = resolveRoleTimeoutMs(
+        ctx.getActiveConfig()?.roles.oraclePlanner?.timeoutMs,
+      );
       let job = newOracleJob(root, {
         mode: resolvedMode,
         promptPreview: prompt.slice(0, 200),
@@ -171,6 +183,10 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       const effectivePrompt =
         resolvedMode !== "auto" ? `[oracle:${resolvedMode}] ${prompt}` : prompt;
       const runner = async () => {
+        const jobSignal = createBoundedSignal(
+          "composer_oracle_job_start",
+          jobTimeoutMs,
+        );
         try {
           const running = updateOracleJob(root, job, {
             status: "running",
@@ -181,6 +197,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
               prompt: effectivePrompt,
               context: contextWithHandoff(root, context, handoffPath),
               cwd: root,
+              signal: jobSignal.signal,
             });
             let answerMeta: { answerPath?: string; oracleSlug?: string } = {};
             try {
@@ -210,6 +227,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
             });
           }
         } finally {
+          jobSignal.cleanup();
           lock.handle.release();
         }
       };
@@ -257,4 +275,61 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     },
   );
+}
+
+function resolveRoleTimeoutMs(configuredTimeoutMs: unknown): number {
+  return typeof configuredTimeoutMs === "number" &&
+    Number.isFinite(configuredTimeoutMs) &&
+    configuredTimeoutMs > 0
+    ? configuredTimeoutMs
+    : DEFAULT_BACKGROUND_JOB_TIMEOUT_MS;
+}
+
+function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: AbortSignal): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const combinedController = new AbortController();
+  const controller = new AbortController();
+  const timeoutError = new Error(`${label}: timed out after ${timeoutMs}ms`);
+  timeoutError.name = "TimeoutError";
+  const timer = setTimeout(() => {
+    controller.abort(timeoutError);
+  }, timeoutMs);
+  timer.unref?.();
+
+  const abortFrom = (source: AbortSignal) => {
+    if (combinedController.signal.aborted) return;
+    combinedController.abort(abortReason(source, label));
+  };
+  const onTimeoutAbort = () => abortFrom(controller.signal);
+  const onCallerAbort = () => {
+    if (callerSignal) abortFrom(callerSignal);
+  };
+
+  if (callerSignal?.aborted) {
+    abortFrom(callerSignal);
+  } else {
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+  }
+  controller.signal.addEventListener("abort", onTimeoutAbort, { once: true });
+
+  return {
+    signal: combinedController.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+      controller.signal.removeEventListener("abort", onTimeoutAbort);
+    },
+  };
+}
+
+function abortReason(signal: AbortSignal, label: string): Error {
+  const reason = signal.reason as unknown;
+  if (reason instanceof Error) return reason;
+  const error = new Error(
+    typeof reason === "string" && reason.length > 0 ? reason : `${label}: aborted`,
+  );
+  error.name = "AbortError";
+  return error;
 }

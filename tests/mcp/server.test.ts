@@ -300,7 +300,7 @@ describe("composer MCP server", () => {
   });
 
   it("composer_oracle_job_result returns the answer once the job completes", async () => {
-    const { client } = await bootClient();
+    const { client, registry } = await bootClient();
     const started = await client.callTool({
       name: "composer_oracle_job_start",
       arguments: { prompt: "plan the billing adapter" },
@@ -315,6 +315,9 @@ describe("composer MCP server", () => {
     const job = JSON.parse(block!.text);
     expect(job.status).toBe("succeeded");
     expect(job.answerText).toContain("mock:plan the billing adapter");
+    const provider = registry.getProviderForRole("oraclePlanner");
+    expect(provider).toBeInstanceOf(MockProvider);
+    expect((provider as MockProvider).calls[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("composer_code routes to the coder MockProvider", async () => {

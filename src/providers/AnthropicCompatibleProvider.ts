@@ -16,6 +16,9 @@ import type {
 /** Minimal shape we need from the Anthropic client — eases DI in tests. */
 export interface AnthropicMessageStream {
   finalMessage: () => Promise<AnthropicCreateResult>;
+  abort?: () => void;
+  cancel?: () => void | Promise<void>;
+  destroy?: () => void;
 }
 export interface AnthropicLike {
   messages: {
@@ -55,6 +58,8 @@ export interface AnthropicCompatibleProviderOptions {
   apiKey: string;
   model: string;
   defaultMaxTokens?: number;
+  /** Hard per-request deadline. Defaults to 180s so compatible streaming calls are always bounded. */
+  timeoutMs?: number;
   /** Extended-thinking knob; omit to disable. When type=enabled, budgetTokens is required. */
   thinking?: { type: "enabled"; budgetTokens: number } | { type: "disabled" };
   /** Override Anthropic SDK construction. Used by tests. */
@@ -65,6 +70,7 @@ const DEFAULT_FACTORY = ({ baseURL, apiKey }: { baseURL: string; apiKey: string 
   new Anthropic({ baseURL, apiKey }) as unknown as AnthropicLike;
 
 const DEFAULT_MAX_TOKENS = 4096;
+export const DEFAULT_ANTHROPIC_TIMEOUT_MS = 180_000;
 
 export class AnthropicCompatibleProvider implements IProvider {
   readonly id: ProviderId = "anthropic";
@@ -72,6 +78,7 @@ export class AnthropicCompatibleProvider implements IProvider {
 
   private readonly client: AnthropicLike;
   private readonly defaultMaxTokens: number;
+  private readonly timeoutMs: number;
   private readonly thinking?: ThinkingParam;
 
   constructor(opts: AnthropicCompatibleProviderOptions) {
@@ -80,6 +87,10 @@ export class AnthropicCompatibleProvider implements IProvider {
     if (!opts.model) throw new Error("AnthropicCompatibleProvider: model required");
     this.modelLabel = opts.model;
     this.defaultMaxTokens = opts.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_ANTHROPIC_TIMEOUT_MS;
+    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+      throw new Error("AnthropicCompatibleProvider: timeoutMs must be a positive finite number");
+    }
     if (opts.thinking) {
       if (opts.thinking.type === "enabled") {
         if (typeof opts.thinking.budgetTokens !== "number" || opts.thinking.budgetTokens < 1024) {
@@ -124,12 +135,20 @@ export class AnthropicCompatibleProvider implements IProvider {
     if (this.thinking) params.thinking = this.thinking;
 
     const startedAt = Date.now();
-    const stream = this.client.messages.stream(
-      params,
-      input.signal ? { signal: input.signal } : undefined,
-    );
-    const msg = await stream.finalMessage();
-    const durationMs = Date.now() - startedAt;
+    const executionSignal = createTimeoutBoundSignal({
+      callerSignal: input.signal,
+      timeoutMs: this.timeoutMs,
+      timeoutMessage: `AnthropicCompatibleProvider: request timed out after ${this.timeoutMs}ms`,
+    });
+    let durationMs = 0;
+    let msg: AnthropicCreateResult;
+    try {
+      const stream = this.client.messages.stream(params, { signal: executionSignal.signal });
+      msg = await finalMessageWithAbort(stream, executionSignal.signal);
+      durationMs = Date.now() - startedAt;
+    } finally {
+      executionSignal.cleanup();
+    }
 
     // Best-effort GLM cache-hit telemetry
     if (!process.env["VITEST"]) {
@@ -160,4 +179,106 @@ export class AnthropicCompatibleProvider implements IProvider {
       tokensOut: msg.usage.output_tokens,
     };
   }
+}
+
+function createTimeoutBoundSignal(input: {
+  callerSignal?: AbortSignal;
+  timeoutMs: number;
+  timeoutMessage: string;
+}): { signal: AbortSignal; cleanup: () => void } {
+  const timeoutController = new AbortController();
+  const combinedController = new AbortController();
+  const timeoutError = new Error(input.timeoutMessage);
+  timeoutError.name = "TimeoutError";
+
+  const timer = setTimeout(() => {
+    timeoutController.abort(timeoutError);
+  }, input.timeoutMs);
+  timer.unref?.();
+
+  const abortFrom = (source: AbortSignal) => {
+    if (combinedController.signal.aborted) return;
+    combinedController.abort(abortReason(source));
+  };
+  const onCallerAbort = () => {
+    if (input.callerSignal) abortFrom(input.callerSignal);
+  };
+  const onTimeoutAbort = () => abortFrom(timeoutController.signal);
+
+  if (input.callerSignal?.aborted) {
+    abortFrom(input.callerSignal);
+  } else {
+    input.callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+  }
+
+  timeoutController.signal.addEventListener("abort", onTimeoutAbort, { once: true });
+
+  return {
+    signal: combinedController.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      input.callerSignal?.removeEventListener("abort", onCallerAbort);
+      timeoutController.signal.removeEventListener("abort", onTimeoutAbort);
+    },
+  };
+}
+
+async function finalMessageWithAbort(
+  stream: AnthropicMessageStream,
+  signal: AbortSignal,
+): Promise<AnthropicCreateResult> {
+  const cleanupStream = () => {
+    try {
+      stream.abort?.();
+    } catch {
+      // best-effort cancellation; the abort promise below still rejects the call
+    }
+    try {
+      const cancelResult = stream.cancel?.();
+      if (cancelResult && typeof cancelResult.catch === "function") {
+        void cancelResult.catch(() => {
+          // best-effort cancellation; the abort promise below still rejects the call
+        });
+      }
+    } catch {
+      // best-effort cancellation; the abort promise below still rejects the call
+    }
+    try {
+      stream.destroy?.();
+    } catch {
+      // best-effort cancellation; the abort promise below still rejects the call
+    }
+  };
+
+  if (signal.aborted) {
+    cleanupStream();
+    throw abortReason(signal);
+  }
+
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      cleanupStream();
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+  try {
+    return await Promise.race([stream.finalMessage(), abortPromise]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+function abortReason(signal: AbortSignal): Error {
+  const reason = signal.reason as unknown;
+  if (reason instanceof Error) return reason;
+  const message =
+    typeof reason === "string" && reason.length > 0
+      ? reason
+      : "AnthropicCompatibleProvider: request aborted";
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
