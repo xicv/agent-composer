@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MAX_AGE_SECONDS="${MAX_AGE_SECONDS:-300}"
+BROKER_ORPHAN_GRACE_SECONDS="${BROKER_ORPHAN_GRACE_SECONDS:-60}"
 LOG_DIR="$HOME/.claude/logs"
 LOG_FILE="$LOG_DIR/codex-cua-reaper.log"
 
@@ -9,6 +10,10 @@ patterns=(
   "SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient mcp"
   "cua_node/bin/node_repl"
   "codex app-server"
+)
+
+orphan_only_patterns=(
+  "scripts/app-server-broker.mjs"
 )
 
 mkdir -p "$LOG_DIR"
@@ -27,6 +32,22 @@ for pattern in "${patterns[@]}"; do
     [[ -n "$ppid" && -n "$etimes" ]] || continue
 
     if [[ "$ppid" == "1" || "$etimes" -gt "$MAX_AGE_SECONDS" ]]; then
+      killed_pids+=("$pid")
+    fi
+  done < <(pgrep -f "$pattern" 2>/dev/null || true)
+done
+
+for pattern in "${orphan_only_patterns[@]}"; do
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    scanned=$((scanned + 1))
+
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    etimes="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+
+    [[ -n "$ppid" && -n "$etimes" ]] || continue
+
+    if [[ "$ppid" == "1" && "$etimes" -gt "$BROKER_ORPHAN_GRACE_SECONDS" ]]; then
       killed_pids+=("$pid")
     fi
   done < <(pgrep -f "$pattern" 2>/dev/null || true)
