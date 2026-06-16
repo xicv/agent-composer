@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -48,6 +48,66 @@ describe("oracle lock files", () => {
     const second = acquireOracleLock(root, { label: "second" });
     expect(second.acquired).toBe(false);
     if (first.acquired) first.handle.release();
+  });
+
+  it("recovers a live stale lock after the TTL", () => {
+    const root = process.cwd();
+    const lockPath = expectedLockPath(root);
+    const nowMs = Date.parse("2026-06-16T00:00:00Z");
+    mkdirSync(join(composerStateDir!, ORACLE_LOCK_DIR), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        token: "stale-token",
+        label: "stale",
+        startedAt: new Date(nowMs - 2_000).toISOString(),
+      }),
+      { encoding: "utf8", mode: 0o600, flag: "wx" },
+    );
+
+    const lock = acquireOracleLock(
+      root,
+      { label: "replacement" },
+      { ttlMs: 1_000, nowMs: () => nowMs },
+    );
+
+    expect(lock.acquired).toBe(true);
+    if (!lock.acquired) throw new Error("expected stale lock to be stolen");
+    expect(lock.recovery?.reasonCode).toBe("stale_lock_recovery");
+    expect(lock.recovery?.lockAgeMs).toBeGreaterThanOrEqual(2_000);
+    lock.handle.release();
+  });
+
+  it("uses lock mtime as a stale fallback when startedAt is clock-skewed into the future", () => {
+    const root = process.cwd();
+    const lockPath = expectedLockPath(root);
+    const nowMs = Date.parse("2026-06-16T00:00:00Z");
+    mkdirSync(join(composerStateDir!, ORACLE_LOCK_DIR), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        token: "future-token",
+        label: "future-skew",
+        startedAt: new Date(nowMs + 60_000).toISOString(),
+      }),
+      { encoding: "utf8", mode: 0o600, flag: "wx" },
+    );
+    const old = new Date(nowMs - 2_000);
+    utimesSync(lockPath, old, old);
+
+    const lock = acquireOracleLock(
+      root,
+      { label: "replacement" },
+      { ttlMs: 1_000, nowMs: () => nowMs },
+    );
+
+    expect(lock.acquired).toBe(true);
+    if (!lock.acquired) throw new Error("expected skewed stale lock to be stolen");
+    expect(lock.recovery?.reasonCode).toBe("stale_lock_recovery");
+    expect(lock.recovery?.lockAgeMs).toBeGreaterThanOrEqual(2_000);
+    lock.handle.release();
   });
 
   it("steals a stale lock with a dead pid", () => {

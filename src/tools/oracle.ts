@@ -18,7 +18,7 @@ import {
   updateOracleJob,
   writeOracleJob,
 } from "../util/oracleJob.js";
-import { acquireOracleLock } from "../util/oracleLock.js";
+import { acquireOracleLock, type OracleLockRecovery } from "../util/oracleLock.js";
 import { DEFAULT_ANTHROPIC_TIMEOUT_MS } from "../providers/AnthropicCompatibleProvider.js";
 import { createDeadlineSignal } from "../util/asyncControl.js";
 import { pollJobResult } from "../util/jobPolling.js";
@@ -80,6 +80,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       const effectivePrompt =
         resolvedMode !== "auto" ? `[oracle:${resolvedMode}] ${prompt}` : prompt;
       const lock = acquireOracleLock(root, { label: "oracle_plan" });
+      emitOracleLockRecovery(lock.recovery);
       if (!lock.acquired) {
         throw new Error(
           `Oracle is busy: a run is already in progress (pid ${lock.holder.pid}` +
@@ -156,6 +157,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         handoffPath,
       });
       const lock = acquireOracleLock(root, { jobId: job.jobId, label: "oracle_job_start" });
+      emitOracleLockRecovery(lock.recovery);
       if (!lock.acquired) {
         return {
           content: [
@@ -272,6 +274,20 @@ export function registerOracleTools(ctx: ServerToolContext): void {
       return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     },
   );
+}
+
+function emitOracleLockRecovery(recovery: OracleLockRecovery | undefined): void {
+  if (!recovery) return;
+  const payload = {
+    reason_code: recovery.reasonCode,
+    stage: recovery.stage,
+    elapsed_wall_ms: recovery.elapsedWallMs,
+    lock_age_ms: recovery.lockAgeMs,
+    holder_pid: recovery.holder.pid,
+    holder_job_id: recovery.holder.jobId ?? null,
+    holder_label: recovery.holder.label ?? null,
+  };
+  console.error(JSON.stringify(payload));
 }
 
 function resolveRoleTimeoutMs(configuredTimeoutMs: unknown): number {

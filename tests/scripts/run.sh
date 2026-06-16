@@ -93,6 +93,17 @@ else
     printf '  FAIL  %-45s expected SOURCE\n' "precommit_guard_library_mode"
   fi
 
+  if [[ "$(normalize_precommit_timeout_ms 900000)" == "180000" ]] \
+    && [[ "$(COMPOSER_PRECOMMIT_HOOK_MAX_TIMEOUT_MS=900000 normalize_precommit_timeout_ms 900000)" == "180000" ]] \
+    && [[ "$(normalize_precommit_timeout_ms 2000)" == "2000" ]]; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s CLAMP\n' "precommit_timeout_hard_cap"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("precommit_timeout_hard_cap: expected 900000ms to clamp at 180000ms while shorter test timeout remains unchanged")
+    printf '  FAIL  %-45s expected CLAMP\n' "precommit_timeout_hard_cap"
+  fi
+
   REPO_REAL="$(cd "$REPO" && pwd -P)"
   HASH_A="$(compute_diff_hash "$REPO_REAL" "review" "working-tree" "main" "gpt-5.4-mini")"
   HASH_B="$(compute_diff_hash "$REPO_REAL" "review" "working-tree" "main" "gpt-5.4-mini")"
@@ -263,6 +274,44 @@ SH
     FAIL=$((FAIL+1))
     FAILED+=("precommit_oscillation_cap_approve_resets: expected statuses 1,1,0,1; got $RESET_STATUS_1,$RESET_STATUS_2,$RESET_STATUS_3,$RESET_STATUS_4")
     printf '  FAIL  %-45s expected RESET\n' "precommit_oscillation_cap_approve_resets"
+  fi
+fi
+
+echo
+echo "=== codex-cua-reaper.sh watchdog harness ==="
+
+REAPER="${CODEX_CUA_REAPER:-$REPO_ROOT/scripts/codex-cua-reaper.sh}"
+if [[ ! -x "$REAPER" ]]; then
+  FAIL=$((FAIL+1))
+  FAILED+=("codex-cua-reaper.sh missing or not executable at $REAPER")
+  printf '  FAIL  %-45s missing executable\n' "reaper_exists"
+else
+  REAPER_TMP="$(mktemp -d -t composer_reaper.XXXXXX)"
+  REAPER_REGISTRY="$REAPER_TMP/registry"
+  REAPER_HOME="$REAPER_TMP/home"
+  mkdir -p "$REAPER_HOME"
+  sleep 30 &
+  REAPER_CHILD=$!
+  COMPOSER_REAPER_REGISTRY_DIR="$REAPER_REGISTRY" HOME="$REAPER_HOME" "$REAPER" --register "$REAPER_CHILD" "test-spawn" 0 >/dev/null 2>&1 || true
+  COMPOSER_REAPER_REGISTRY_DIR="$REAPER_REGISTRY" HOME="$REAPER_HOME" MAX_AGE_SECONDS=99999 BROKER_ORPHAN_GRACE_SECONDS=99999 "$REAPER" --spawn-cycle >/dev/null 2>&1 || true
+  reaped=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    child_stat="$(ps -o stat= -p "$REAPER_CHILD" 2>/dev/null | tr -d '[:space:]' || true)"
+    if ! kill -0 "$REAPER_CHILD" 2>/dev/null || [[ "$child_stat" == *Z* ]]; then
+      reaped=1
+      break
+    fi
+    sleep 0.2
+  done
+  kill -KILL "$REAPER_CHILD" 2>/dev/null || true
+  wait "$REAPER_CHILD" 2>/dev/null || true
+  if [[ "$reaped" -eq 1 ]] && grep -Fq "registered_max_age:test-spawn" "$REAPER_HOME/.claude/logs/codex-cua-reaper.log"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-45s REAP\n' "reaper_registered_spawn_killed"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("reaper_registered_spawn_killed: expected registered process to be killed and logged")
+    printf '  FAIL  %-45s expected REAP\n' "reaper_registered_spawn_killed"
   fi
 fi
 

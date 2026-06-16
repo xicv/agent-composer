@@ -14,7 +14,9 @@ import path from "node:path";
 import { COMPOSER_STATE_DIR_ENV } from "./codexLifecycleJob.js";
 
 export const ORACLE_LOCK_DIR = "oracle-locks";
-const ORACLE_LOCK_TTL_MS = 30 * 60 * 1000; // generous: longer than any Oracle run
+export const COMPOSER_ORACLE_LOCK_TTL_MS_ENV = "COMPOSER_ORACLE_LOCK_TTL_MS";
+export const DEFAULT_ORACLE_LOCK_TTL_MS = 30 * 60 * 1000; // generous: longer than any Oracle run
+const ORACLE_LOCK_CLOCK_SKEW_GRACE_MS = 5 * 60 * 1000;
 
 type OracleLockHolder = {
   pid: number;
@@ -28,14 +30,30 @@ export interface OracleLockHandle {
   release(): void;
 }
 
+export type OracleLockRecovery = {
+  reasonCode: "stale_lock_recovery";
+  stage: "oracle_lock_acquire";
+  elapsedWallMs: number;
+  lockAgeMs: number;
+  holder: OracleLockHolder;
+};
+
+export type OracleLockAcquireOptions = {
+  ttlMs?: number;
+  nowMs?: () => number;
+};
+
 export type OracleLockResult =
-  | { acquired: true; handle: OracleLockHandle }
-  | { acquired: false; holder: OracleLockHolder };
+  | { acquired: true; handle: OracleLockHandle; recovery?: OracleLockRecovery }
+  | { acquired: false; holder: OracleLockHolder; recovery?: undefined };
 
 export function acquireOracleLock(
   root: string,
   info: { jobId?: string; label?: string },
+  opts: OracleLockAcquireOptions = {},
 ): OracleLockResult {
+  const startedMs = (opts.nowMs ?? Date.now)();
+  const ttlMs = resolveOracleLockTtlMs(opts.ttlMs);
   const lockPath = oracleLockPath(root);
   const token = randomUUID();
   const holder: OracleLockHolder = {
@@ -53,12 +71,15 @@ export function acquireOracleLock(
   }
 
   const existing = readLockHolder(lockPath);
+  const staleRecovery = existing
+    ? staleLockRecovery(lockPath, existing, ttlMs, (opts.nowMs ?? Date.now)(), startedMs)
+    : null;
   // Steal ONLY a malformed lock, a dead-process lock, or a stale lock.
   // A live holder (including the SAME process) is a real concurrent holder.
-  if (!existing || !isProcessAlive(existing.pid) || isStaleLock(existing.startedAt)) {
+  if (!existing || !isProcessAlive(existing.pid) || staleRecovery) {
     rmSync(lockPath, { force: true });
     try {
-      return writeLock(lockPath, holder, token);
+      return writeLock(lockPath, holder, token, staleRecovery ?? undefined);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         const racer = readLockHolder(lockPath);
@@ -80,7 +101,12 @@ function oracleLockPath(root: string): string {
   return path.join(lockRoot, `${projectStateKey(rootReal)}.lock`);
 }
 
-function writeLock(lockPath: string, holder: OracleLockHolder, token: string): OracleLockResult {
+function writeLock(
+  lockPath: string,
+  holder: OracleLockHolder,
+  token: string,
+  recovery?: OracleLockRecovery,
+): OracleLockResult {
   writeFileSync(lockPath, JSON.stringify(holder), {
     encoding: "utf8",
     mode: 0o600,
@@ -100,6 +126,7 @@ function writeLock(lockPath: string, holder: OracleLockHolder, token: string): O
         }
       },
     },
+    ...(recovery ? { recovery } : {}),
   };
 }
 
@@ -143,10 +170,61 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function isStaleLock(startedAt: string): boolean {
-  const t = Date.parse(startedAt);
-  if (Number.isNaN(t)) return true;
-  return Date.now() - t > ORACLE_LOCK_TTL_MS;
+function resolveOracleLockTtlMs(override?: number): number {
+  if (override !== undefined && Number.isFinite(override) && override > 0) {
+    return Math.floor(override);
+  }
+  const raw = process.env[COMPOSER_ORACLE_LOCK_TTL_MS_ENV]?.trim();
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return DEFAULT_ORACLE_LOCK_TTL_MS;
+}
+
+function staleLockRecovery(
+  lockPath: string,
+  holder: OracleLockHolder,
+  ttlMs: number,
+  nowMs: number,
+  acquiredStartedMs: number,
+): OracleLockRecovery | null {
+  const startedAtMs = Date.parse(holder.startedAt);
+  const fileAgeMs = lockFileAgeMs(lockPath, nowMs);
+
+  if (Number.isNaN(startedAtMs)) {
+    return {
+      reasonCode: "stale_lock_recovery",
+      stage: "oracle_lock_acquire",
+      elapsedWallMs: Math.max(0, nowMs - acquiredStartedMs),
+      lockAgeMs: Math.max(0, fileAgeMs ?? 0),
+      holder,
+    };
+  }
+
+  const startedAgeMs = nowMs - startedAtMs;
+  const effectiveAgeMs = Math.max(0, startedAgeMs, fileAgeMs ?? 0);
+  const clockSkewedFuture = startedAgeMs < -ORACLE_LOCK_CLOCK_SKEW_GRACE_MS;
+  const staleByStartedAt = startedAgeMs > ttlMs;
+  const staleByMtime = fileAgeMs !== null && fileAgeMs > ttlMs;
+
+  if (!staleByStartedAt && !staleByMtime) return null;
+
+  return {
+    reasonCode: "stale_lock_recovery",
+    stage: "oracle_lock_acquire",
+    elapsedWallMs: Math.max(0, nowMs - acquiredStartedMs),
+    lockAgeMs: clockSkewedFuture ? Math.max(0, fileAgeMs ?? 0) : effectiveAgeMs,
+    holder,
+  };
+}
+
+function lockFileAgeMs(lockPath: string, nowMs: number): number | null {
+  try {
+    return Math.max(0, nowMs - lstatSync(lockPath).mtimeMs);
+  } catch {
+    return null;
+  }
 }
 
 function ensureDirectory(dir: string, label: string): void {

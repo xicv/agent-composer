@@ -380,17 +380,19 @@ JSON
   }
 
   assert_precommit_bash_watchdog_timeout() {
-    local name="$1" payload="$2" config="$3" start end elapsed out
+    local name="$1" payload="$2" config="$3" start end elapsed out log_file
+    log_file="$PRECOMMIT_TMP/${name}.jsonl"
     start="$(date +%s)"
-    out="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$PRECOMMIT_GIT_ROOT" COMPOSER_CONFIG="$config" COMPOSER_CODEX_REVIEW_CMD="sleep 30" COMPOSER_FORCE_BASH_TIMEOUT=1 "$GUARD2" 2>/dev/null)"
+    out="$(printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$PRECOMMIT_GIT_ROOT" COMPOSER_CONFIG="$config" COMPOSER_CODEX_REVIEW_CMD="sleep 30" COMPOSER_FORCE_BASH_TIMEOUT=1 RUN_LOG="$log_file" "$GUARD2" 2>/dev/null)"
     end="$(date +%s)"
     elapsed=$((end - start))
-    if ! is_deny <<<"$out" && grep -Eq '"systemMessage"[[:space:]]*:' <<<"$out" && grep -Fq "timed out" <<<"$out" && [[ "$elapsed" -le 10 ]]; then
+    if is_deny <<<"$out" && grep -Fq "timed out" <<<"$out" && [[ "$elapsed" -le 10 ]] \
+       && jq -e 'select(.reason_code == "hook_timeout" and .stage == "precommit_codex_review" and (.elapsed_wall_ms | type) == "number")' "$log_file" >/dev/null 2>&1; then
       PASS=$((PASS+1))
       printf '  ok    %-40s WATCHDOG\n' "$name"
     else
       FAIL=$((FAIL+1))
-      FAILED+=("$name: expected fail-open timeout systemMessage within 10s, elapsed=${elapsed}s, got: ${out:-<empty>}")
+      FAILED+=("$name: expected timeout DENY with hook_timeout log within 10s, elapsed=${elapsed}s, got: ${out:-<empty>}")
       printf '  FAIL  %-40s expected WATCHDOG\n' "$name"
     fi
   }
@@ -451,10 +453,10 @@ SH
   start="$(date +%s)"
   out="$(printf '%s' "$PAYLOAD_COMMIT" | CLAUDE_PROJECT_DIR="$PRECOMMIT_GIT_ROOT" COMPOSER_CONFIG="$CONFIG_TIMEOUT" COMPOSER_CODEX_REVIEW_CMD="$GRANDCHILD_CMD" COMPOSER_FORCE_BASH_TIMEOUT=1 "$GUARD2" 2>/dev/null)"
   end="$(date +%s)"; elapsed=$((end - start))
-  if ! is_deny <<<"$out" && grep -Eq '"systemMessage"[[:space:]]*:' <<<"$out" && grep -Fq "timed out" <<<"$out" && [[ "$elapsed" -le 12 ]]; then
+  if is_deny <<<"$out" && grep -Fq "timed out" <<<"$out" && [[ "$elapsed" -le 12 ]]; then
     PASS=$((PASS+1)); printf '  ok    %-40s TREEKILL\n' "precommit_grandchild_pipe_closed"
   else
-    FAIL=$((FAIL+1)); FAILED+=("precommit_grandchild_pipe_closed: expected timeout systemMessage within 12s, elapsed=${elapsed}s, got: ${out:-<empty>}"); printf '  FAIL  %-40s expected TREEKILL\n' "precommit_grandchild_pipe_closed"
+    FAIL=$((FAIL+1)); FAILED+=("precommit_grandchild_pipe_closed: expected timeout DENY within 12s, elapsed=${elapsed}s, got: ${out:-<empty>}"); printf '  FAIL  %-40s expected TREEKILL\n' "precommit_grandchild_pipe_closed"
   fi
 
   CACHE_HIT_CODEX_ROOT="$PRECOMMIT_TMP/cache-hit-codex"
@@ -766,6 +768,45 @@ JSON
   fi
 fi
 
+echo
+echo "=== learn.sh timeout harness ==="
+
+LEARN_SCRIPT="${LEARN_HOOK:-$REPO_ROOT/scripts/learn.sh}"
+if [[ ! -x "$LEARN_SCRIPT" ]]; then
+  FAIL=$((FAIL+1))
+  FAILED+=("learn.sh missing or not executable at $LEARN_SCRIPT")
+  printf '  FAIL  %-40s missing executable\n' "learn_hook_exists"
+else
+  LEARN_TMP="$(mktemp -d -t composer_learn_timeout.XXXXXX)"
+  mkdir -p "$LEARN_TMP/bin" "$LEARN_TMP/project" "$LEARN_TMP/project/.claude/learnings"
+  cat >"$LEARN_TMP/bin/jq" <<'SH'
+#!/usr/bin/env bash
+sleep 30
+SH
+  chmod +x "$LEARN_TMP/bin/jq"
+  LEARN_LOG="$LEARN_TMP/learn.jsonl"
+  LEARN_TRANSCRIPT="$LEARN_TMP/transcript.jsonl"
+  printf '%s\n' '{"role":"user","content":"wrong, please do not do that"}' > "$LEARN_TRANSCRIPT"
+  start="$(date +%s)"
+  if printf '{"transcript_path":"%s"}' "$LEARN_TRANSCRIPT" | PATH="$LEARN_TMP/bin:$PATH" CLAUDE_PROJECT_DIR="$LEARN_TMP/project" COMPOSER_LEARN_HOOK_TIMEOUT_MS=1000 COMPOSER_LEARN_LOG="$LEARN_LOG" "$LEARN_SCRIPT" >/dev/null 2>&1; then
+    learn_status=0
+  else
+    learn_status=$?
+  fi
+  end="$(date +%s)"
+  elapsed=$((end - start))
+  if [[ "$learn_status" -eq 0 && "$elapsed" -le 5 ]] \
+     && grep -Fq '"reason_code":"hook_timeout"' "$LEARN_LOG" \
+     && grep -Fq '"stage":"learn_stop"' "$LEARN_LOG"; then
+    PASS=$((PASS+1))
+    printf '  ok    %-40s TIMEOUT\n' "learn_jq_timeout_exits_cleanly"
+  else
+    FAIL=$((FAIL+1))
+    FAILED+=("learn_jq_timeout_exits_cleanly: expected exit 0 <=5s with hook_timeout log; status=$learn_status elapsed=${elapsed}s log=$(cat "$LEARN_LOG" 2>/dev/null || true)")
+    printf '  FAIL  %-40s expected TIMEOUT\n' "learn_jq_timeout_exits_cleanly"
+  fi
+fi
+
 
 echo
 echo "------------------------------------------"
@@ -861,6 +902,38 @@ assert_dispatch_any_hint_payload "dispatch_benign_short_passes_with_hint" \
   '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}'
 assert_dispatch_pass_payload "dispatch_non_task_passes_open" \
   '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"src/index.ts"},"session_id":"t"}'
+
+DISPATCH_TIMEOUT_TMP="$(mktemp -d -t composer_dispatch_timeout.XXXXXX)"
+mkdir -p "$DISPATCH_TIMEOUT_TMP/node_modules/.bin" "$DISPATCH_TIMEOUT_TMP/src/cli" "$DISPATCH_TIMEOUT_TMP/scripts"
+cat >"$DISPATCH_TIMEOUT_TMP/node_modules/.bin/tsx" <<'SH'
+#!/usr/bin/env bash
+sleep 30
+SH
+chmod +x "$DISPATCH_TIMEOUT_TMP/node_modules/.bin/tsx"
+touch "$DISPATCH_TIMEOUT_TMP/src/cli/dispatch-hint.ts"
+cat >"$DISPATCH_TIMEOUT_TMP/reaper-stub.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$COMPOSER_REAPER_STUB_LOG"
+exit 0
+SH
+chmod +x "$DISPATCH_TIMEOUT_TMP/reaper-stub.sh"
+DISPATCH_TIMEOUT_LOG="$DISPATCH_TIMEOUT_TMP/dispatch.jsonl"
+DISPATCH_REAPER_LOG="$DISPATCH_TIMEOUT_TMP/reaper.log"
+start="$(date +%s)"
+out="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}' | CLAUDE_PROJECT_DIR="$DISPATCH_TIMEOUT_TMP" COMPOSER_DISPATCH_GUARD_TIMEOUT_MS=1000 COMPOSER_DISPATCH_LOG="$DISPATCH_TIMEOUT_LOG" COMPOSER_CUA_REAPER="$DISPATCH_TIMEOUT_TMP/reaper-stub.sh" COMPOSER_REAPER_STUB_LOG="$DISPATCH_REAPER_LOG" "$DISPATCH_SCRIPT" 2>&1)"
+end="$(date +%s)"
+elapsed=$((end - start))
+if ! is_deny <<<"$out" && [[ "$elapsed" -le 5 ]] \
+   && jq -e 'select(.reason_code == "dispatch_timeout" and .stage == "dispatch_hint" and (.elapsed_wall_ms | type) == "number")' "$DISPATCH_TIMEOUT_LOG" >/dev/null 2>&1 \
+   && grep -Fq -- "--register" "$DISPATCH_REAPER_LOG"; then
+  DISPATCH_PASS=$((DISPATCH_PASS+1))
+  printf '  ok    %-40s TIMEOUT\n' "dispatch_hint_timeout_bounded"
+else
+  DISPATCH_FAIL=$((DISPATCH_FAIL+1))
+  DISPATCH_FAILED+=("dispatch_hint_timeout_bounded: expected fail-open timeout <=5s with dispatch_timeout log and reaper registration; elapsed=${elapsed}s out=${out:-<empty>}")
+  printf '  FAIL  %-40s expected TIMEOUT\n' "dispatch_hint_timeout_bounded"
+fi
+
 export COMPOSER_ENABLED=0
 assert_dispatch_pass_payload "dispatch_disabled_passes_destructive_task" \
   '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","prompt":"rm -rf node_modules"},"session_id":"t"}'

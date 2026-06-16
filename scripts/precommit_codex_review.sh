@@ -14,7 +14,10 @@
 
 set -u
 
-RUN_LOG="/tmp/composer-codex-review-log.jsonl"
+RUN_LOG="${RUN_LOG:-/tmp/composer-codex-review-log.jsonl}"
+PRECOMMIT_DEFAULT_TIMEOUT_MS=120000
+PRECOMMIT_MIN_HARD_CAP_MS=120000
+PRECOMMIT_MAX_HARD_CAP_MS=180000
 
 composer_disabled() {
   case "${COMPOSER_ENABLED:-}" in
@@ -76,6 +79,8 @@ append_run_log() {
   local findings="$5"
   local scope="$6"
   local diff_hash="$7"
+  local reason_code="${8:-}"
+  local stage="${9:-precommit_codex_review}"
   jq -nc \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg verdict "$verdict" \
@@ -83,9 +88,11 @@ append_run_log() {
     --arg source "$source" \
     --arg scope "$scope" \
     --arg diff_hash "$diff_hash" \
+    --arg reason_code "$reason_code" \
+    --arg stage "$stage" \
     --argjson duration_ms "${duration_ms:-0}" \
     --argjson findings "${findings:-0}" \
-    '{ts:$ts,verdict:$verdict,decision:$decision,source:$source,duration_ms:$duration_ms,findings:$findings,scope:$scope,diff_hash:$diff_hash}' \
+    '{ts:$ts,verdict:$verdict,decision:$decision,source:$source,duration_ms:$duration_ms,elapsed_wall_ms:$duration_ms,findings:$findings,scope:$scope,diff_hash:$diff_hash,stage:$stage,reason_code:(if $reason_code == "" then null else $reason_code end)}' \
     >> "$RUN_LOG" 2>/dev/null || true
 }
 
@@ -93,14 +100,39 @@ fail_review() {
   local fail_closed="$1"
   local reason="$2"
   local duration_ms="${3:-0}"
+  local reason_code="${4:-review_unavailable}"
   if [[ "$fail_closed" == "true" ]]; then
-    append_run_log "error" "deny" "sync" "$duration_ms" 0 "${SCOPE:-}" "${DIFF_HASH:-}"
+    append_run_log "error" "deny" "sync" "$duration_ms" 0 "${SCOPE:-}" "${DIFF_HASH:-}" "$reason_code"
     emit_deny "codex pre-commit review unavailable (fail-closed): $reason" "⛔ Codex review unavailable (fail-closed): $reason"
   fi
   printf 'codex pre-commit review skipped: %s\n' "$reason" >&2
-  append_run_log "skip" "allow" "sync" "$duration_ms" 0 "${SCOPE:-}" "${DIFF_HASH:-}"
+  append_run_log "skip" "allow" "sync" "$duration_ms" 0 "${SCOPE:-}" "${DIFF_HASH:-}" "$reason_code"
   emit_json "⚠️ Codex pre-commit review skipped: $reason — commit allowed (fail-open)"
   exit 0
+}
+
+resolve_precommit_hard_cap_ms() {
+  local configured="${COMPOSER_PRECOMMIT_HOOK_MAX_TIMEOUT_MS:-$PRECOMMIT_MAX_HARD_CAP_MS}"
+  case "$configured" in
+    ''|*[!0-9]*) configured="$PRECOMMIT_MAX_HARD_CAP_MS" ;;
+  esac
+  if [[ "$configured" -lt "$PRECOMMIT_MIN_HARD_CAP_MS" ]]; then
+    configured="$PRECOMMIT_MIN_HARD_CAP_MS"
+  elif [[ "$configured" -gt "$PRECOMMIT_MAX_HARD_CAP_MS" ]]; then
+    configured="$PRECOMMIT_MAX_HARD_CAP_MS"
+  fi
+  printf '%s\n' "$configured"
+}
+
+normalize_precommit_timeout_ms() {
+  local requested="$1"
+  local cap
+  cap="$(resolve_precommit_hard_cap_ms)"
+  if [[ "$requested" -gt "$cap" ]]; then
+    printf '%s\n' "$cap"
+  else
+    printf '%s\n' "$requested"
+  fi
 }
 
 rank_severity() {
@@ -264,14 +296,6 @@ teardown_reviewer() {
 run_reviewer() {
   local timeout_seconds="$1"
   shift
-  if [[ "${COMPOSER_FORCE_BASH_TIMEOUT:-}" != "1" ]] && command -v timeout >/dev/null 2>&1; then
-    timeout "$timeout_seconds" "$@"
-    return $?
-  fi
-  if [[ "${COMPOSER_FORCE_BASH_TIMEOUT:-}" != "1" ]] && command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$timeout_seconds" "$@"
-    return $?
-  fi
 
   local pid watchdog status marker pgid_mode
   marker="${TMPDIR:-/tmp}/composer-timeout.$$.$RANDOM"
@@ -772,7 +796,7 @@ SCOPE="$(jq -r '.codexReview.scope // "working-tree"' <<<"$CONFIG_JSON" 2>/dev/n
 BASE="$(jq -r '.codexReview.base // "main"' <<<"$CONFIG_JSON" 2>/dev/null || printf 'main')"
 CODEX_MODEL="$(jq -r '.codexReview.model // empty' <<<"$CONFIG_JSON" 2>/dev/null || true)"
 BLOCK_ON_SEVERITY="$(jq -r '.codexReview.preCommitHook.blockOnSeverity // "high"' <<<"$CONFIG_JSON" 2>/dev/null || printf 'high')"
-TIMEOUT_MS="$(jq -r '.codexReview.preCommitHook.timeoutMs // 900000' <<<"$CONFIG_JSON" 2>/dev/null || printf '900000')"
+TIMEOUT_MS="$(jq -r ".codexReview.preCommitHook.timeoutMs // $PRECOMMIT_DEFAULT_TIMEOUT_MS" <<<"$CONFIG_JSON" 2>/dev/null || printf '%s' "$PRECOMMIT_DEFAULT_TIMEOUT_MS")"
 FAIL_CLOSED="$(jq -r '.codexReview.preCommitHook.failClosed // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
 MAX_CONSECUTIVE_BLOCKS="$(jq -r '(.codexReview.preCommitHook.maxConsecutiveBlocks // 0) | if type == "number" and . >= 0 and . == floor then . else 0 end' <<<"$CONFIG_JSON" 2>/dev/null || printf '0')"
 WARM_CACHE_ENABLED="$(jq -r '.codexReview.warmCache.enabled // false' <<<"$CONFIG_JSON" 2>/dev/null || printf 'false')"
@@ -790,6 +814,7 @@ esac
 case "$TIMEOUT_MS" in
   ''|*[!0-9]*) fail_review "$FAIL_CLOSED" "invalid timeoutMs: $TIMEOUT_MS" ;;
 esac
+TIMEOUT_MS="$(normalize_precommit_timeout_ms "$TIMEOUT_MS")"
 case "$MAX_CONSECUTIVE_BLOCKS" in
   ''|*[!0-9]*) MAX_CONSECUTIVE_BLOCKS=0 ;;
 esac
@@ -863,7 +888,7 @@ END_SECONDS="$(date +%s)"
 DURATION_MS=$(( (END_SECONDS - START_SECONDS) * 1000 ))
 
 if [[ "$REVIEW_STATUS" -eq 124 ]]; then
-  fail_review "$FAIL_CLOSED" "review timed out after ${TIMEOUT_SECONDS}s" "$DURATION_MS"
+  fail_review "true" "review timed out after ${TIMEOUT_SECONDS}s" "$DURATION_MS" "hook_timeout"
 fi
 if [[ "$REVIEW_STATUS" -ne 0 ]]; then
   if [[ -n "$REVIEW_OUTPUT" ]] && jq -e . >/dev/null 2>&1 <<<"$REVIEW_OUTPUT"; then

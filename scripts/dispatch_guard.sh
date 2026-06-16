@@ -19,6 +19,14 @@
 
 set -u
 
+DISPATCH_GUARD_DEFAULT_TIMEOUT_MS=5000
+DISPATCH_GUARD_MAX_TIMEOUT_MS=30000
+DISPATCH_GUARD_DEFAULT_MAX_CONCURRENCY=4
+LOG="${COMPOSER_DISPATCH_LOG:-/tmp/composer-dispatch-log.jsonl}"
+DISPATCH_SLOT_DIR="${TMPDIR:-/tmp}/composer-dispatch-guard-slots"
+DISPATCH_SLOT=""
+DISPATCH_INPUT_FILE=""
+
 composer_disabled() {
   case "${COMPOSER_ENABLED:-}" in
     0|false|FALSE|off|OFF|no|NO) return 0 ;;
@@ -58,8 +66,214 @@ emit_hint() {
   exit 0
 }
 
+resolve_dispatch_timeout_ms() {
+  local configured="${COMPOSER_DISPATCH_GUARD_TIMEOUT_MS:-$DISPATCH_GUARD_DEFAULT_TIMEOUT_MS}"
+  case "$configured" in
+    ''|*[!0-9]*) configured="$DISPATCH_GUARD_DEFAULT_TIMEOUT_MS" ;;
+  esac
+  if [[ "$configured" -lt 1 ]]; then
+    configured="$DISPATCH_GUARD_DEFAULT_TIMEOUT_MS"
+  elif [[ "$configured" -gt "$DISPATCH_GUARD_MAX_TIMEOUT_MS" ]]; then
+    configured="$DISPATCH_GUARD_MAX_TIMEOUT_MS"
+  fi
+  printf '%s\n' "$configured"
+}
+
+timeout_ms_to_seconds() {
+  local timeout_ms="$1"
+  local seconds=$(( (timeout_ms + 999) / 1000 ))
+  [[ "$seconds" -gt 0 ]] || seconds=1
+  printf '%s\n' "$seconds"
+}
+
+resolve_dispatch_max_concurrency() {
+  local configured="${COMPOSER_DISPATCH_GUARD_MAX_CONCURRENCY:-$DISPATCH_GUARD_DEFAULT_MAX_CONCURRENCY}"
+  case "$configured" in
+    ''|*[!0-9]*) configured="$DISPATCH_GUARD_DEFAULT_MAX_CONCURRENCY" ;;
+  esac
+  if [[ "$configured" -lt 1 ]]; then
+    configured=1
+  elif [[ "$configured" -gt 32 ]]; then
+    configured=32
+  fi
+  printf '%s\n' "$configured"
+}
+
+log_dispatch_reason() {
+  local reason_code="$1"
+  local stage="$2"
+  local elapsed_ms="${3:-0}"
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg reason_code "$reason_code" \
+    --arg stage "$stage" \
+    --argjson elapsed_wall_ms "$elapsed_ms" \
+    '{ts:$ts,kind:"guard_event",reason_code:$reason_code,stage:$stage,elapsed_wall_ms:$elapsed_wall_ms}' \
+    >> "$LOG" 2>/dev/null \
+    || printf '{"ts":"%s","kind":"guard_event","reason_code":"%s","stage":"%s","elapsed_wall_ms":%s}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$reason_code" "$stage" "$elapsed_ms" >> "$LOG" 2>/dev/null || true
+}
+
+cleanup_dispatch_slots() {
+  local timeout_ms="$1"
+  local max_age_seconds=$(( (timeout_ms + 999) / 1000 + 10 ))
+  local slot pid started now age
+  mkdir -p "$DISPATCH_SLOT_DIR" 2>/dev/null || return 0
+  now="$(date +%s)"
+  for slot in "$DISPATCH_SLOT_DIR"/*.lock; do
+    [[ -d "$slot" ]] || continue
+    pid="$(cat "$slot/pid" 2>/dev/null || true)"
+    started="$(cat "$slot/started" 2>/dev/null || true)"
+    case "$pid" in ''|*[!0-9]*) pid="" ;; esac
+    case "$started" in ''|*[!0-9]*) started=0 ;; esac
+    age=$(( now - started ))
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null || [[ "$age" -gt "$max_age_seconds" ]]; then
+      rm -rf "$slot" 2>/dev/null || true
+    fi
+  done
+}
+
+acquire_dispatch_slot() {
+  local timeout_ms="$1"
+  local max_slots i slot
+  max_slots="$(resolve_dispatch_max_concurrency)"
+  cleanup_dispatch_slots "$timeout_ms"
+  i=1
+  while [[ "$i" -le "$max_slots" ]]; do
+    slot="$DISPATCH_SLOT_DIR/$i.lock"
+    if mkdir "$slot" 2>/dev/null; then
+      printf '%s\n' "$$" > "$slot/pid" 2>/dev/null || true
+      date +%s > "$slot/started" 2>/dev/null || true
+      DISPATCH_SLOT="$slot"
+      return 0
+    fi
+    i=$((i + 1))
+  done
+  log_dispatch_reason "dispatch_concurrency_limit" "dispatch_hint" 0
+  return 1
+}
+
+release_dispatch_slot() {
+  [[ -n "$DISPATCH_SLOT" ]] || return 0
+  rm -rf "$DISPATCH_SLOT" 2>/dev/null || true
+  DISPATCH_SLOT=""
+}
+
+cleanup_dispatch_guard() {
+  release_dispatch_slot
+  [[ -n "$DISPATCH_INPUT_FILE" ]] && rm -f "$DISPATCH_INPUT_FILE" 2>/dev/null || true
+}
+
+kill_tree() {
+  local sig="$1" root="$2" child
+  kill -STOP "$root" 2>/dev/null || true
+  for child in $(pgrep -P "$root" 2>/dev/null); do
+    kill_tree "$sig" "$child"
+  done
+  kill -"$sig" "$root" 2>/dev/null || true
+  kill -CONT "$root" 2>/dev/null || true
+}
+
+teardown_spawn() {
+  local sig="$1" pid="$2" pgid_mode="$3"
+  if [[ "$pgid_mode" == "1" ]] && kill -"$sig" "-$pid" 2>/dev/null; then
+    return 0
+  fi
+  kill_tree "$sig" "$pid"
+}
+
+register_reaper_watchdog() {
+  local pid="$1"
+  local max_age_seconds="$2"
+  local reaper="${COMPOSER_CUA_REAPER:-}"
+  if [[ -z "$reaper" && -n "${PROJECT_DIR:-}" ]]; then
+    reaper="$PROJECT_DIR/scripts/codex-cua-reaper.sh"
+  fi
+  [[ -x "$reaper" ]] || return 0
+  "$reaper" --register "$pid" "dispatch_hint" "$max_age_seconds" >/dev/null 2>&1 || true
+}
+
+run_bounded_capture() {
+  local timeout_seconds="$1"
+  shift
+  local pid watchdog status marker pgid_mode out_file
+  out_file="$(mktemp -t composer_dispatch_hint_out.XXXXXX)" || return 1
+  marker="${TMPDIR:-/tmp}/composer-dispatch-timeout.$$.$RANDOM"
+  pgid_mode=0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" < "$DISPATCH_INPUT_FILE" > "$out_file" 2>/dev/null &
+    pid=$!
+    pgid_mode=1
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'setpgrp(0,0); exec @ARGV or die "exec failed: $!"' "$@" < "$DISPATCH_INPUT_FILE" > "$out_file" 2>/dev/null &
+    pid=$!
+    pgid_mode=1
+  else
+    "$@" < "$DISPATCH_INPUT_FILE" > "$out_file" 2>/dev/null &
+    pid=$!
+  fi
+  register_reaper_watchdog "$pid" "$timeout_seconds"
+  (
+    sleeper=""
+    trap '[[ -n "$sleeper" ]] && kill "$sleeper" 2>/dev/null || true; exit 0' TERM INT
+    sleep "$timeout_seconds" &
+    sleeper=$!
+    wait "$sleeper" 2>/dev/null || exit 0
+    printf '1' >"$marker" 2>/dev/null || true
+    teardown_spawn TERM "$pid" "$pgid_mode"
+    sleep 1
+    teardown_spawn KILL "$pid" "$pgid_mode"
+  ) &
+  watchdog=$!
+  wait "$pid"
+  status=$?
+  kill "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+  cat "$out_file" 2>/dev/null || true
+  rm -f "$out_file" 2>/dev/null || true
+  if [[ -f "$marker" ]]; then
+    rm -f "$marker" 2>/dev/null || true
+    return 124
+  fi
+  rm -f "$marker" 2>/dev/null || true
+  return "$status"
+}
+
+run_hint_attempt() {
+  local timeout_seconds="$1"
+  shift
+  local start end output status
+  start="$(date +%s)"
+  output="$(run_bounded_capture "$timeout_seconds" "$@")"
+  status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf '%s' "$output"
+    return 0
+  fi
+  end="$(date +%s)"
+  if [[ "$status" -eq 124 ]]; then
+    log_dispatch_reason "dispatch_timeout" "dispatch_hint" "$(( (end - start) * 1000 ))"
+  fi
+  return "$status"
+}
+
+remaining_hint_seconds() {
+  local started="$1"
+  local total="$2"
+  local now elapsed remaining
+  now="$(date +%s)"
+  elapsed=$(( now - started ))
+  remaining=$(( total - elapsed ))
+  if [[ "$remaining" -le 0 ]]; then
+    printf '0\n'
+  else
+    printf '%s\n' "$remaining"
+  fi
+}
+
 INPUT="$(cat || true)"
 [[ -z "$INPUT" ]] && exit 0
+trap cleanup_dispatch_guard EXIT
 
 # Hard dependency on jq for safe JSON parsing. Fail-open with a stderr
 # breadcrumb if it is missing — phase-1 observability is best-effort.
@@ -94,7 +308,6 @@ fi
 
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 EPOCH_SECOND="$(date +%s)"
-LOG="/tmp/composer-dispatch-log.jsonl"
 DEDUP_SENTINEL="/tmp/composer-dispatch-guard-last"
 DEDUP_HASH="$(
   { printf '%s\n' "$DESCRIPTION"; printf '%s' "$PROMPT"; } \
@@ -139,17 +352,38 @@ if [[ -z "$PROJECT_DIR" ]]; then
 fi
 
 HINT_JSON=""
-if [[ -n "$PROJECT_DIR" && -x "$PROJECT_DIR/node_modules/.bin/tsx" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]]; then
-  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && "$PROJECT_DIR/node_modules/.bin/tsx" "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
+DISPATCH_TIMEOUT_MS="$(resolve_dispatch_timeout_ms)"
+DISPATCH_TIMEOUT_SECONDS="$(timeout_ms_to_seconds "$DISPATCH_TIMEOUT_MS")"
+if [[ -n "$PROJECT_DIR" ]]; then
+  DISPATCH_INPUT_FILE="$(mktemp -t composer_dispatch_input.XXXXXX)" || DISPATCH_INPUT_FILE=""
+  [[ -n "$DISPATCH_INPUT_FILE" ]] && printf '%s' "$INPUT" > "$DISPATCH_INPUT_FILE" 2>/dev/null || true
 fi
-if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v npx >/dev/null 2>&1; then
-  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && npx --no-install --package tsx tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
-fi
-if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v node >/dev/null 2>&1; then
-  HINT_JSON="$(printf '%s' "$INPUT" | (cd "$PROJECT_DIR" 2>/dev/null && node --import tsx "$PROJECT_DIR/src/cli/dispatch-hint.ts") 2>/dev/null || true)"
-fi
-if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/dist/cli/dispatch-hint.js" ]]; then
-  HINT_JSON="$(printf '%s' "$INPUT" | node "$PROJECT_DIR/dist/cli/dispatch-hint.js" 2>/dev/null || true)"
+if [[ -n "$DISPATCH_INPUT_FILE" ]] && acquire_dispatch_slot "$DISPATCH_TIMEOUT_MS"; then
+  DISPATCH_HINT_STARTED="$(date +%s)"
+  if [[ -n "$PROJECT_DIR" && -x "$PROJECT_DIR/node_modules/.bin/tsx" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]]; then
+    REMAINING_SECONDS="$(remaining_hint_seconds "$DISPATCH_HINT_STARTED" "$DISPATCH_TIMEOUT_SECONDS")"
+    if [[ "$REMAINING_SECONDS" -gt 0 ]]; then
+      HINT_JSON="$(run_hint_attempt "$REMAINING_SECONDS" bash -c 'cd "$1" && exec "$2" "$3"' _ "$PROJECT_DIR" "$PROJECT_DIR/node_modules/.bin/tsx" "$PROJECT_DIR/src/cli/dispatch-hint.ts" || true)"
+    fi
+  fi
+  if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v npx >/dev/null 2>&1; then
+    REMAINING_SECONDS="$(remaining_hint_seconds "$DISPATCH_HINT_STARTED" "$DISPATCH_TIMEOUT_SECONDS")"
+    if [[ "$REMAINING_SECONDS" -gt 0 ]]; then
+      HINT_JSON="$(run_hint_attempt "$REMAINING_SECONDS" bash -c 'cd "$1" && exec npx --no-install --package tsx tsx "$2"' _ "$PROJECT_DIR" "$PROJECT_DIR/src/cli/dispatch-hint.ts" || true)"
+    fi
+  fi
+  if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/src/cli/dispatch-hint.ts" ]] && command -v node >/dev/null 2>&1; then
+    REMAINING_SECONDS="$(remaining_hint_seconds "$DISPATCH_HINT_STARTED" "$DISPATCH_TIMEOUT_SECONDS")"
+    if [[ "$REMAINING_SECONDS" -gt 0 ]]; then
+      HINT_JSON="$(run_hint_attempt "$REMAINING_SECONDS" bash -c 'cd "$1" && exec node --import tsx "$2"' _ "$PROJECT_DIR" "$PROJECT_DIR/src/cli/dispatch-hint.ts" || true)"
+    fi
+  fi
+  if [[ -z "$HINT_JSON" && -n "$PROJECT_DIR" && -f "$PROJECT_DIR/dist/cli/dispatch-hint.js" ]]; then
+    REMAINING_SECONDS="$(remaining_hint_seconds "$DISPATCH_HINT_STARTED" "$DISPATCH_TIMEOUT_SECONDS")"
+    if [[ "$REMAINING_SECONDS" -gt 0 ]]; then
+      HINT_JSON="$(run_hint_attempt "$REMAINING_SECONDS" node "$PROJECT_DIR/dist/cli/dispatch-hint.js" || true)"
+    fi
+  fi
 fi
 
 HINT_VALID="false"
