@@ -191,6 +191,12 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
           signal: selectedExecution === "foreground" ? extra.signal : undefined,
           fallback: resolvedLifecycle.fallback,
           maxTotalMs: resolvedLifecycle.totalWallClockMs,
+          roleTimeoutMs: Object.fromEntries(
+            Object.entries(ctx.getActiveConfig()?.roles ?? {}).map(([role, config]) => [
+              role,
+              config.timeoutMs,
+            ]),
+          ),
           onProgress,
         });
 

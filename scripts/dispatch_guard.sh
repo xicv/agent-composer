@@ -271,7 +271,11 @@ remaining_hint_seconds() {
   fi
 }
 
-INPUT="$(cat || true)"
+if command -v timeout >/dev/null 2>&1; then
+  INPUT="$(timeout 5 cat 2>/dev/null || true)"
+else
+  INPUT="$(cat || true)"
+fi
 [[ -z "$INPUT" ]] && exit 0
 trap cleanup_dispatch_guard EXIT
 

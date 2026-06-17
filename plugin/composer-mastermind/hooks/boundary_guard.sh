@@ -54,7 +54,11 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # 2. Read tool-call JSON from stdin.
-INPUT="$(cat || true)"
+if command -v timeout >/dev/null 2>&1; then
+  INPUT="$(timeout 5 cat 2>/dev/null || true)"
+else
+  INPUT="$(cat || true)"
+fi
 if [[ -z "$INPUT" ]]; then
   emit_deny "boundary_guard: empty stdin, failing closed"
 fi

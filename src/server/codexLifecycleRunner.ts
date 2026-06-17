@@ -30,8 +30,14 @@ export interface RunCodexLifecycleJobInput {
   signal?: AbortSignal;
   fallback?: CodexLifecycleFallback;
   maxTotalMs?: number;
+  roleTimeoutMs?: Partial<Record<RoleName, number>>;
   onProgress?: (update: { phase?: string; detail?: string }) => void;
 }
+
+const DEFAULT_RESEARCHER_TIMEOUT_MS = 180_000;
+const DEFAULT_CODER_TIMEOUT_MS = 300_000;
+const DEFAULT_REVIEWER_TIMEOUT_MS = 300_000;
+const DEFAULT_CODER_CLI_TIMEOUT_MS = 240_000;
 
 export async function runCodexLifecycleJob(
   input: RunCodexLifecycleJobInput,
@@ -45,9 +51,13 @@ export async function runCodexLifecycleJob(
   const roles = lifecycleProviderRoles(input.fallback);
   let lastError: unknown;
   let lastReason: ReturnType<typeof classifyCodexLifecycleUnavailable> = "unknown";
+  const maxTotalMs = resolvePositiveMs(
+    input.maxTotalMs,
+    DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS,
+  );
   const deadline = createDeadlineSignal(
     "composer_codex_lifecycle_run total_wall_clock_ms",
-    input.maxTotalMs ?? DEFAULT_CODEX_LIFECYCLE_TOTAL_WALL_CLOCK_MS,
+    maxTotalMs,
     input.signal,
   );
 
@@ -61,6 +71,18 @@ export async function runCodexLifecycleJob(
 
       const attemptStartedAt = new Date().toISOString();
       const executionTarget = lifecycleExecutionTarget(role, targetRoot);
+      const attemptTimeoutMs = Math.max(
+        1,
+        Math.min(
+          resolveRoleTimeoutMs(input.roleTimeoutMs?.[role], defaultRoleTimeoutMs(role)),
+          deadline.remainingMs(),
+        ),
+      );
+      const attemptSignal = createDeadlineSignal(
+        `composer_codex_lifecycle_run ${role}`,
+        attemptTimeoutMs,
+        deadline.signal,
+      );
       try {
         const provider = input.registry.getProviderForRole(role);
         const result = await provider.execute({
@@ -71,8 +93,9 @@ export async function runCodexLifecycleJob(
           readOnly: executionTarget.readOnly,
           model: input.job.model,
           onProgress: input.onProgress,
-          signal: deadline.signal,
+          signal: attemptSignal.signal,
         });
+        attemptSignal.throwIfAborted();
         deadline.throwIfAborted();
         job = updateCodexLifecycleJob(input.root, job, {
           status: "succeeded",
@@ -116,6 +139,7 @@ export async function runCodexLifecycleJob(
           return finishStoppedLifecycleJob(input.root, job, deadlineError);
         }
       } finally {
+        attemptSignal.cleanup();
         executionTarget.cleanup();
       }
     }
@@ -133,6 +157,31 @@ export async function runCodexLifecycleJob(
     return job;
   } finally {
     deadline.cleanup();
+  }
+}
+
+function resolvePositiveMs(value: unknown, fallbackMs: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : fallbackMs;
+}
+
+function resolveRoleTimeoutMs(configuredTimeoutMs: unknown, fallbackMs: number): number {
+  return resolvePositiveMs(configuredTimeoutMs, fallbackMs);
+}
+
+function defaultRoleTimeoutMs(role: RoleName): number {
+  switch (role) {
+    case "researcher":
+      return DEFAULT_RESEARCHER_TIMEOUT_MS;
+    case "coderCli":
+      return DEFAULT_CODER_CLI_TIMEOUT_MS;
+    case "coder":
+      return DEFAULT_CODER_TIMEOUT_MS;
+    case "reviewer":
+    case "reviewerClaude":
+    case "oraclePlanner":
+      return DEFAULT_REVIEWER_TIMEOUT_MS;
   }
 }
 

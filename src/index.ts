@@ -20,6 +20,9 @@ import { isModeName, MODE_NAMES } from "./config/modes.js";
 import { runStatus } from "./cli/status.js";
 import { runInstallGitHook } from "./cli/installGitHook.js";
 import { runGoal } from "./cli/goal.js";
+import { failInFlightCodexLifecycleJobs } from "./util/codexLifecycleJob.js";
+import { failInFlightOracleJobs } from "./util/oracleJob.js";
+import { failInFlightReviewJobs } from "./util/reviewJob.js";
 
 const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // Pass undefined when COMPOSER_ENV is unset so loadEnvJson uses the lookup
@@ -40,6 +43,7 @@ const CLI_SUBCOMMANDS = new Set([
   "goal",
   "mode",
 ]);
+const DEFAULT_SIGTERM_JOB_FLUSH_MS = 1_000;
 
 async function main(): Promise<void> {
   const subcommand = process.argv[2];
@@ -121,11 +125,33 @@ async function main(): Promise<void> {
   const server = createComposerServer(registry, { config, configPath: CONFIG_PATH });
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  installSigtermJobCleanup(process.cwd());
   // Connection success message goes to stderr — stdio MCP requires stdout
   // for the protocol itself.
   process.stderr.write(
     `composer MCP server connected (stdio) — config: ${CONFIG_PATH}\n`,
   );
+}
+
+function installSigtermJobCleanup(root: string): void {
+  let shuttingDown = false;
+  process.on("SIGTERM", () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const timeout = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, DEFAULT_SIGTERM_JOB_FLUSH_MS);
+      timer.unref?.();
+    });
+    const flush = Promise.resolve().then(() => {
+      const error = "Composer MCP server received SIGTERM before the background job completed.";
+      failInFlightOracleJobs(root, error);
+      failInFlightReviewJobs(root, error);
+      failInFlightCodexLifecycleJobs(root, error);
+    });
+    void Promise.race([flush, timeout]).finally(() => {
+      process.exit(143);
+    });
+  });
 }
 
 main().catch((err: unknown) => {

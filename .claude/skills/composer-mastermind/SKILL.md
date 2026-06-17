@@ -402,9 +402,11 @@ Rules:
 `Edit/Update/Write/NotebookEdit` in EVERY repo unless Composer is disabled.
 A headless `claude -p` worker you spawn to AUTHOR files (multi-file
 scaffolding, byte-exact reproduction) runs as its own main thread and will be
-blocked. When you spawn such an authorized worker, set
-`COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=1` in its environment so its writes
-are allowed, e.g. `COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=1 claude -p ...`.
+blocked. When you spawn such an authorized worker, set the
+`COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS` env var to `1` in its environment
+so its writes are allowed — prefix the variable on the worker's command line,
+ahead of `claude -p ...` (the boundary_guard deny message prints the exact
+form to use).
 Do NOT export that variable in your own interactive shell — set it only on the
 spawned worker, so the interactive Brain stays gated and routes through
 `composer_code_cli`.

@@ -169,6 +169,14 @@ hash_stdin_16() {
   fi
 }
 
+git_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 git "$@"
+  else
+    git "$@"
+  fi
+}
+
 compute_repo_hash() {
   printf '%s' "$1" | hash_stdin_16
 }
@@ -215,12 +223,12 @@ compute_diff_hash() {
   local base_ref merge_base branch_diff
   # blockOnSeverity is excluded because threshold is re-applied at gate-read time from the cached findings array.
   {
-    git -C "$root" diff HEAD 2>/dev/null
-    git -C "$root" diff --cached 2>/dev/null
+    git_timeout -C "$root" diff HEAD 2>/dev/null
+    git_timeout -C "$root" diff --cached 2>/dev/null
     if [[ "$scope" == "branch" ]]; then
-      if base_ref="$(git -C "$root" rev-parse --verify "${base}^{commit}" 2>/dev/null)" \
-        && merge_base="$(git -C "$root" merge-base "$base" HEAD 2>/dev/null)" \
-        && branch_diff="$(git -C "$root" diff "$base...HEAD" 2>/dev/null)"; then
+      if base_ref="$(git_timeout -C "$root" rev-parse --verify "${base}^{commit}" 2>/dev/null)" \
+        && merge_base="$(git_timeout -C "$root" merge-base "$base" HEAD 2>/dev/null)" \
+        && branch_diff="$(git_timeout -C "$root" diff "$base...HEAD" 2>/dev/null)"; then
         printf '\ncomposer-codex-review-branch\nbaseRef=%s\nmergeBase=%s\n' "$base_ref" "$merge_base"
         printf '%s' "$branch_diff"
         printf '\n'
@@ -232,7 +240,7 @@ compute_diff_hash() {
 
 find_git_root() {
   local start="${CLAUDE_PROJECT_DIR:-.}"
-  git -C "$start" rev-parse --show-toplevel 2>/dev/null || git rev-parse --show-toplevel 2>/dev/null
+  git_timeout -C "$start" rev-parse --show-toplevel 2>/dev/null || git_timeout rev-parse --show-toplevel 2>/dev/null
 }
 
 find_codex_plugin_root() {

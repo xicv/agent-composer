@@ -157,6 +157,34 @@ export function readLatestOracleJob(root: string): OracleJob | null {
   return null;
 }
 
+export function failInFlightOracleJobs(root: string, error: string): number {
+  const dir = existingOracleJobDir(root);
+  if (!dir) return 0;
+  let failed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const filePath = path.join(dir, name);
+    try {
+      if (lstatSync(filePath).isSymbolicLink() || !statSync(filePath).isFile()) continue;
+      const job = OracleJobSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+      if (job.status !== "queued" && job.status !== "running") continue;
+      if (typeof job.pid === "number" && job.pid !== process.pid) continue;
+      const next = OracleJobSchema.parse({
+        ...job,
+        status: "failed",
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        error,
+      });
+      writeJobFileAtomically(filePath, `${JSON.stringify(next, null, 2)}\n`);
+      failed++;
+    } catch {
+      continue;
+    }
+  }
+  return failed;
+}
+
 function readLatestOracleJobPointer(root: string, dir: string): OracleJob | null {
   const pointerPath = path.join(dir, LATEST_ORACLE_JOB_POINTER);
   try {

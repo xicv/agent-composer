@@ -223,6 +223,35 @@ export function readLatestCodexLifecycleJob(root: string): CodexLifecycleJob | n
   return null;
 }
 
+export function failInFlightCodexLifecycleJobs(root: string, error: string): number {
+  const dir = existingCodexLifecycleJobDir(root);
+  if (!dir) return 0;
+  let failed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const filePath = path.join(dir, name);
+    try {
+      if (lstatSync(filePath).isSymbolicLink() || !statSync(filePath).isFile()) continue;
+      const job = CodexLifecycleJobSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+      if (job.status !== "queued" && job.status !== "running") continue;
+      if (typeof job.pid === "number" && job.pid !== process.pid) continue;
+      const now = new Date().toISOString();
+      const next = CodexLifecycleJobSchema.parse({
+        ...job,
+        status: "failed",
+        updatedAt: now,
+        completedAt: now,
+        error,
+      });
+      writeJobFileAtomically(filePath, `${JSON.stringify(next, null, 2)}\n`);
+      failed++;
+    } catch {
+      continue;
+    }
+  }
+  return failed;
+}
+
 function readLatestCodexLifecycleJobPointer(root: string, dir: string): CodexLifecycleJob | null {
   const pointerPath = path.join(dir, LATEST_CODEX_LIFECYCLE_JOB_POINTER);
   try {

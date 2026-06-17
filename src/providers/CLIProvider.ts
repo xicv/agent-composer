@@ -45,6 +45,8 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
   new Promise((resolve, reject) => {
     const maxBuffer = options.maxBuffer ?? 32 * 1024 * 1024;
     const timeoutMs = options.timeout;
+    let killed = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
     const child = spawn(file, [...args], {
       cwd: options.cwd,
@@ -72,6 +74,8 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
     };
 
     const killChildTree = () => {
+      if (killed) return;
+      killed = true;
       if (typeof child.pid === "number" && process.platform !== "win32") {
         try {
           process.kill(-child.pid, "SIGTERM");
@@ -92,7 +96,6 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
     let stderr = "";
     let timedOut = false;
     let bufferExceeded = false;
-    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
     const timer =
       typeof timeoutMs === "number" && timeoutMs > 0
@@ -156,6 +159,9 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
         return reject(
           new Error(`CLIProvider: '${file}' exceeded maxBuffer ${maxBuffer}`),
         );
+      }
+      if (options.signal?.aborted && options.signal.reason instanceof Error) {
+        return reject(options.signal.reason);
       }
       if (code !== 0) {
         return reject(

@@ -20,6 +20,7 @@ orphan_only_patterns=(
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$REGISTRY_DIR"
+shopt -s nullglob
 
 scanned=0
 killed_pids=()

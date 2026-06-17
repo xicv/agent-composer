@@ -141,6 +141,32 @@ export function readLatestReviewJob(root: string): ReviewJob | null {
   return null;
 }
 
+export function failInFlightReviewJobs(root: string, error: string): number {
+  const dir = existingReviewJobDir(root);
+  if (!dir) return 0;
+  let failed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const filePath = path.join(dir, name);
+    try {
+      if (lstatSync(filePath).isSymbolicLink() || !statSync(filePath).isFile()) continue;
+      const job = ReviewJobSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+      if (job.status !== "queued" && job.status !== "running") continue;
+      const next = ReviewJobSchema.parse({
+        ...job,
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        error,
+      });
+      writeFileAtomically(filePath, `${JSON.stringify(next, null, 2)}\n`);
+      failed++;
+    } catch {
+      continue;
+    }
+  }
+  return failed;
+}
+
 function readLatestReviewJobPointer(root: string, dir: string): ReviewJob | null {
   const pointerPath = path.join(dir, LATEST_REVIEW_JOB_POINTER);
   try {

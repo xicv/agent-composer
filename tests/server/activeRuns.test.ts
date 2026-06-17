@@ -93,7 +93,7 @@ describe("createActiveRunTracker", () => {
     expect(runs[0]!.providerRole).toBeUndefined();
   });
 
-  it("writes active-runs.json on start and finish", () => {
+  it("writes active-runs.json on start and finish", async () => {
     const tracker = createActiveRunTracker();
     const id = tracker.start({
       tool: "composer_code_cli",
@@ -101,6 +101,9 @@ describe("createActiveRunTracker", () => {
       providerLabel: "codex",
     });
     const filePath = path.join(tmpStateDir, "active-runs.json");
+    await vi.waitFor(() => {
+      expect(fs.existsSync(filePath)).toBe(true);
+    });
     const started = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(started).toEqual([
       {
@@ -112,8 +115,10 @@ describe("createActiveRunTracker", () => {
     ]);
 
     tracker.finish(id);
-    const finished = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(finished).toEqual([]);
+    await vi.waitFor(() => {
+      const finished = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      expect(finished).toEqual([]);
+    });
   });
 });
 

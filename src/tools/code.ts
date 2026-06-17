@@ -2,6 +2,7 @@ import { z } from "zod";
 import { withProgress } from "../server/progress.js";
 import { contextWithHandoff } from "../server/handoffContext.js";
 import { applyFileBlocks, resolveProjectDir } from "../util/applyFileBlocks.js";
+import { createDeadlineSignal } from "../util/asyncControl.js";
 import {
   COMPOSER_CODE,
   COMPOSER_CODE_CHAIN,
@@ -11,6 +12,9 @@ import {
   CODE_CLI_DESCRIPTION,
 } from "../server/toolDescriptions.js";
 import type { ServerToolContext } from "./context.js";
+
+const DEFAULT_CODER_TIMEOUT_MS = 300_000;
+const DEFAULT_CODER_CLI_TIMEOUT_MS = 240_000;
 
 export function registerCodeTools(ctx: ServerToolContext): void {
   const { server, registry, root } = ctx;
@@ -35,16 +39,25 @@ export function registerCodeTools(ctx: ServerToolContext): void {
     async ({ prompt, context, handoffPath }, extra) => {
       ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("coder");
-      const result = await withProgress(extra, COMPOSER_CODE, (onProgress) =>
-        provider.execute({
-          prompt,
-          context: contextWithHandoff(root, context, handoffPath),
-          onProgress,
-          signal: extra.signal,
-        }),
-        { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coder" },
+      const toolSignal = createBoundedSignal(
+        COMPOSER_CODE,
+        resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.coder?.timeoutMs, DEFAULT_CODER_TIMEOUT_MS),
+        extra.signal,
       );
-      return { content: [{ type: "text", text: result.text }] };
+      try {
+        const result = await withProgress(extra, COMPOSER_CODE, (onProgress) =>
+          provider.execute({
+            prompt,
+            context: contextWithHandoff(root, context, handoffPath),
+            onProgress,
+            signal: toolSignal.signal,
+          }),
+          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coder" },
+        );
+        return { content: [{ type: "text", text: result.text }] };
+      } finally {
+        toolSignal.cleanup();
+      }
     },
   );
 
@@ -80,16 +93,26 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         "four-backtick fences when file content may contain triple-backtick " +
         "blocks. No " +
         "abbreviations, no placeholders, no commentary outside the blocks.";
-      const authored = await withProgress(extra, COMPOSER_CODE_CHAIN, (onProgress) =>
-        gen.execute({
-          prompt: genPrompt,
-          context: contextWithHandoff(root, context, handoffPath),
-          cwd: targetRoot,
-          onProgress,
-          signal: extra.signal,
-        }),
-        { tracker: ctx.activeRuns, providerLabel: gen.modelLabel, providerRole: "coder" },
+      const genSignal = createBoundedSignal(
+        COMPOSER_CODE_CHAIN,
+        resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.coder?.timeoutMs, DEFAULT_CODER_TIMEOUT_MS),
+        extra.signal,
       );
+      let authored: Awaited<ReturnType<typeof gen.execute>>;
+      try {
+        authored = await withProgress(extra, COMPOSER_CODE_CHAIN, (onProgress) =>
+          gen.execute({
+            prompt: genPrompt,
+            context: contextWithHandoff(root, context, handoffPath),
+            cwd: targetRoot,
+            onProgress,
+            signal: genSignal.signal,
+          }),
+          { tracker: ctx.activeRuns, providerLabel: gen.modelLabel, providerRole: "coder" },
+        );
+      } finally {
+        genSignal.cleanup();
+      }
 
       // Stage 2: server applies GLM's FILE: blocks deterministically (off-CC,
       // no LLM transcription step — an executor cannot fabricate the apply).
@@ -147,21 +170,48 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         profileSandbox = prof.sandbox;
       }
       const provider = registry.getProviderForRole("coderCli");
-      const result = await withProgress(extra, COMPOSER_CODE_CLI, (onProgress) =>
-        provider.execute({
-          prompt,
-          context: contextWithHandoff(root, context, handoffPath),
-          cwd: root,
-          projectDir: projectDir === undefined ? undefined : targetRoot,
-          model: profileModel,
-          reasoningEffort: profileReasoning,
-          sandbox: profileSandbox,
-          onProgress,
-          signal: extra.signal,
-        }),
-        { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coderCli" },
+      const toolSignal = createBoundedSignal(
+        COMPOSER_CODE_CLI,
+        resolveRoleTimeoutMs(
+          ctx.getActiveConfig()?.roles.coderCli?.timeoutMs,
+          DEFAULT_CODER_CLI_TIMEOUT_MS,
+        ),
+        extra.signal,
       );
-      return { content: [{ type: "text", text: result.text }] };
+      try {
+        const result = await withProgress(extra, COMPOSER_CODE_CLI, (onProgress) =>
+          provider.execute({
+            prompt,
+            context: contextWithHandoff(root, context, handoffPath),
+            cwd: root,
+            projectDir: projectDir === undefined ? undefined : targetRoot,
+            model: profileModel,
+            reasoningEffort: profileReasoning,
+            sandbox: profileSandbox,
+            onProgress,
+            signal: toolSignal.signal,
+          }),
+          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coderCli" },
+        );
+        return { content: [{ type: "text", text: result.text }] };
+      } finally {
+        toolSignal.cleanup();
+      }
     },
   );
+}
+
+function resolveRoleTimeoutMs(configuredTimeoutMs: unknown, fallbackMs: number): number {
+  return typeof configuredTimeoutMs === "number" &&
+    Number.isFinite(configuredTimeoutMs) &&
+    configuredTimeoutMs > 0
+    ? configuredTimeoutMs
+    : fallbackMs;
+}
+
+function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: AbortSignal): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  return createDeadlineSignal(label, timeoutMs, callerSignal);
 }

@@ -156,7 +156,7 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         idempotentHint: false,
       },
     },
-    async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base, claude }) => {
+    async ({ prompt, diff, handoffPath, reviewScope, reviewFiles, base, claude }, extra) => {
       ctx.refreshConfigIfChanged();
       const effectiveDiff = resolveReviewDiff(root, {
         diff,
@@ -185,6 +185,7 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         const jobSignal = createBoundedSignal(
           "composer_review_job_start",
           jobTimeoutMs,
+          extra.signal,
         );
         try {
           const running = updateReviewJob(root, job, {

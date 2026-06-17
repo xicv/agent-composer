@@ -130,7 +130,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         idempotentHint: false,
       },
     },
-    async ({ prompt, mode, context, handoffPath }) => {
+    async ({ prompt, mode, context, handoffPath }, extra) => {
       ctx.refreshConfigIfChanged();
       const cfgOracle = ctx.getActiveConfig()?.oracle;
       const sessOracle = ctx.getSession().oracle;
@@ -191,6 +191,7 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         const jobSignal = createBoundedSignal(
           "composer_oracle_job_start",
           jobTimeoutMs,
+          extra.signal,
         );
         try {
           const running = updateOracleJob(root, job, {

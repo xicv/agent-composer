@@ -153,7 +153,11 @@ MONTH="$(date +%Y-%m)"
 OUT="$LEARN_DIR/${MONTH}.md"
 
 # Read JSON envelope from stdin (Anthropic Stop hook contract).
-INPUT="$(cat || true)"
+if command -v timeout >/dev/null 2>&1; then
+  INPUT="$(timeout 5 cat 2>/dev/null || true)"
+else
+  INPUT="$(cat || true)"
+fi
 if [[ -z "$INPUT" ]]; then
   exit 0
 fi
