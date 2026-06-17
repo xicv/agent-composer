@@ -268,6 +268,18 @@ That means:
 - Oracle is advisory only; it never edits files.
 - Background jobs are persisted as state records, but Oracle async jobs are server-lifetime, not OS-detached workers.
 
+### Bounded execution
+
+Every dispatch the main Claude session awaits has a hard deadline and is cancellable; no lane can block the brain indefinitely.
+
+| Surface | Bound |
+| ------- | ----- |
+| Providers | Internal default timeout plus the caller's `AbortSignal`. CLI providers bound total wall-clock across retries and kill the child process tree on timeout. |
+| Background jobs | Oracle, review, and Codex lifecycle jobs run under wall-clock deadlines, propagate brain cancellation, and flush to a terminal state on server `SIGTERM`. |
+| Status | Persistence is async and best-effort, off the event loop. Startup prunes stale in-flight entries after `COMPOSER_ACTIVE_RUN_TTL_MS` (default 2h). |
+| Hooks | `boundary_guard`, `dispatch_guard`, precommit, and `learn` run with bounded timeouts and fail closed. |
+| Config | Role `timeoutMs` values in `composer.config.json` override sane defaults. |
+
 ### Live status
 
 Active Composer runs are tracked in `~/.composer/state/active-runs.json`, enriched with the tool, provider label/role, phase, detail, and start time. Two surfaces consume it:
