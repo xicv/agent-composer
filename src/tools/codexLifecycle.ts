@@ -179,7 +179,7 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
           content: [{ type: "text", text: JSON.stringify(job, null, 2) }],
         };
       }
-      const runner = () =>
+      const runner = (onProgress?: (update: { phase?: string; detail?: string }) => void) =>
         runCodexLifecycleJob({
           root,
           registry,
@@ -191,6 +191,7 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
           signal: selectedExecution === "foreground" ? extra.signal : undefined,
           fallback: resolvedLifecycle.fallback,
           maxTotalMs: resolvedLifecycle.totalWallClockMs,
+          onProgress,
         });
 
       if (selectedExecution === "background") {
@@ -203,7 +204,12 @@ export function registerCodexLifecycleTools(ctx: ServerToolContext): void {
         };
       }
 
-      const completed = await withProgress(extra, COMPOSER_CODEX_LIFECYCLE_RUN, runner, { tracker: ctx.activeRuns });
+      const provider = registry.getProviderForRole("coderCli");
+      const completed = await withProgress(extra, COMPOSER_CODEX_LIFECYCLE_RUN, runner, {
+        tracker: ctx.activeRuns,
+        providerLabel: provider.modelLabel,
+        providerRole: "coderCli",
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(completed, null, 2) }],
       };

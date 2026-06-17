@@ -66,13 +66,14 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         extra.signal,
       );
       try {
-        const result = await withProgress(extra, COMPOSER_REVIEW, () =>
+        const result = await withProgress(extra, COMPOSER_REVIEW, (onProgress) =>
           provider.execute({
             prompt,
             context: contextWithHandoff(root, effectiveDiff, handoffPath),
+            onProgress,
             signal: toolSignal.signal,
           }),
-          { tracker: ctx.activeRuns },
+          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "reviewer" },
         );
         return { content: [{ type: "text", text: result.text }] };
       } finally {
@@ -117,14 +118,15 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         extra.signal,
       );
       try {
-        const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, () =>
+        const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, (onProgress) =>
           provider.execute({
             prompt,
             context: contextWithHandoff(root, effectiveDiff, handoffPath),
             cwd: root,
+            onProgress,
             signal: toolSignal.signal,
           }),
-          { tracker: ctx.activeRuns },
+          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "reviewerClaude" },
         );
         return { content: [{ type: "text", text: result.text }] };
       } finally {

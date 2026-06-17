@@ -30,6 +30,7 @@ export interface RunCodexLifecycleJobInput {
   signal?: AbortSignal;
   fallback?: CodexLifecycleFallback;
   maxTotalMs?: number;
+  onProgress?: (update: { phase?: string; detail?: string }) => void;
 }
 
 export async function runCodexLifecycleJob(
@@ -69,6 +70,7 @@ export async function runCodexLifecycleJob(
           projectDir: executionTarget.projectDir,
           readOnly: executionTarget.readOnly,
           model: input.job.model,
+          onProgress: input.onProgress,
           signal: deadline.signal,
         });
         deadline.throwIfAborted();

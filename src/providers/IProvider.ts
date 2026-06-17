@@ -16,6 +16,8 @@ export interface IProviderExecuteInput {
   reasoningEffort?: "low" | "medium" | "high";
   /** Optional Codex sandbox policy, forwarded as `-s <mode>` (unless a read-only run forces read-only). Ignored by non-codex providers. */
   sandbox?: "read-only" | "workspace-write";
+  /** Advisory live progress callback for providers that can stream sub-action status. */
+  onProgress?: (update: { phase?: string; detail?: string }) => void;
   signal?: AbortSignal;
 }
 

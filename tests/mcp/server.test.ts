@@ -778,8 +778,12 @@ describe("composer MCP server", () => {
     );
 
     expect(progress.length).toBeGreaterThanOrEqual(2);
-    expect(progress.map((event) => event.message)).toContain("composer_code_cli started");
-    expect(progress.map((event) => event.message)).toContain("composer_code_cli completed");
+    expect(progress.map((event) => event.message)).toContain(
+      "composer_code_cli · coder-cli-mock · 0s · started",
+    );
+    expect(progress.map((event) => event.message)).toContain(
+      "composer_code_cli · coder-cli-mock · 0s · completed",
+    );
     expect(progress.map((event) => event.progress)).toEqual([1, 2]);
   });
 

@@ -34,6 +34,7 @@ export type ExecFileFn = (
     maxBuffer?: number;
     timeout?: number;
     signal?: AbortSignal;
+    onStdout?: (stdout: string) => void;
   },
 ) => Promise<ExecFileResult>;
 
@@ -127,7 +128,9 @@ const DEFAULT_EXEC: ExecFileFn = (file, args, options) =>
     };
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
-      checkBuffer("stdout", stdout + chunk.toString());
+      const nextStdout = stdout + chunk.toString();
+      checkBuffer("stdout", nextStdout);
+      options.onStdout?.(nextStdout);
     });
     child.stderr?.on("data", (chunk: Buffer | string) => {
       checkBuffer("stderr", stderr + chunk.toString());
@@ -263,13 +266,15 @@ export class CLIProvider implements IProvider {
           sandbox: input.sandbox,
         });
         const startedAt = Date.now();
-        try {
-          const { stdout } = await this.exec(bin, execution.args, {
-            cwd: execution.cwd ?? baseCwd,
-            maxBuffer: this.maxBuffer,
-            timeout: Math.max(1, Math.min(this.timeoutMs, remainingMs)),
-            signal: deadline.signal,
-          });
+      try {
+        const stdoutProgress = CLIProvider.createStdoutProgressReporter(input.onProgress);
+        const { stdout } = await this.exec(bin, execution.args, {
+          cwd: execution.cwd ?? baseCwd,
+          maxBuffer: this.maxBuffer,
+          timeout: Math.max(1, Math.min(this.timeoutMs, remainingMs)),
+          signal: deadline.signal,
+          onStdout: stdoutProgress,
+        });
           deadline.throwIfAborted();
           const durationMs = Date.now() - startedAt;
           const text = execution.finalMessagePath
@@ -567,5 +572,43 @@ export class CLIProvider implements IProvider {
     } catch {
       return undefined;
     }
+  }
+
+  private static createStdoutProgressReporter(
+    onProgress: IProviderExecuteInput["onProgress"],
+  ): ((stdout: string) => void) | undefined {
+    if (!onProgress) return undefined;
+    let lastDetail = "";
+    let lastEmittedAt = 0;
+    return (stdout: string) => {
+      const detail = CLIProvider.lastProgressLine(stdout);
+      if (!detail || detail === lastDetail) return;
+      const now = Date.now();
+      if (now - lastEmittedAt < 1000) return;
+      lastDetail = detail;
+      lastEmittedAt = now;
+      try {
+        onProgress({ phase: "working", detail });
+      } catch {
+        // Provider progress is advisory and must not break execution.
+      }
+    };
+  }
+
+  private static lastProgressLine(stdout: string): string | undefined {
+    const line = stdout
+      .split(/\r?\n/)
+      .map((part) => CLIProvider.sanitizeProgressLine(part))
+      .filter((part) => part.length > 0)
+      .at(-1);
+    if (!line) return undefined;
+    return line.length > 60 ? `${line.slice(0, 57)}...` : line;
+  }
+
+  private static sanitizeProgressLine(line: string): string {
+    return line
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 }

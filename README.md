@@ -131,7 +131,7 @@ The first real Oracle run may open a browser for login. Complete the ChatGPT log
 | Stuck debugging                    | “Use Oracle debug after the failed attempts.”                |
 | Do not block while Oracle thinks   | “Start an async Oracle job and poll it later.”               |
 | Premium Claude review              | “Escalate to `composer_review_claude`.”                      |
-| Disable Composer hooks temporarily | `COMPOSER_ENABLED=0 claude` or `touch .composer-disabled`    |
+| Toggle Composer enforcement        | `/composer disable` (this session) · `/composer enable` · `/composer status` |
 
 ### MCP tools
 
@@ -268,9 +268,18 @@ That means:
 - Oracle is advisory only; it never edits files.
 - Background jobs are persisted as state records, but Oracle async jobs are server-lifetime, not OS-detached workers.
 
+### Live status
+
+Active Composer runs are tracked in `~/.composer/state/active-runs.json`, enriched with the tool, provider label/role, phase, detail, and start time. Two surfaces consume it:
+
+- `composer_status` reports in-flight runs with elapsed time, provider, and phase.
+- `scripts/composer-statusline-segment.mjs` renders a compact statusline segment (e.g. `⚡composer: review(glm) 2m`) for the terminal status bar.
+
 ## Configuration
 
 Composer reads config from the active project first, then from the global Composer config when no project config exists.
+
+`composer.config.json` is hot-reloaded on every provider dispatch, so role, lifecycle, and review-gate edits take effect without restarting the MCP server.
 
 | File                    | Purpose                                                                    |
 | ----------------------- | -------------------------------------------------------------------------- |
@@ -436,13 +445,26 @@ composer_config_set(scope="project", codexReview={...})
 
 Composer is designed for supervised local development.
 
+### Global enforcement
+
+The boundary_guard hook is installed once at the user level and applies in every repository. The main Claude session cannot call `Edit`/`Write`/`Update`/`NotebookEdit` directly anywhere — those route through `composer_code_cli` / `composer_code_chain`. Enforcement defaults to ON and is gated only by kill switches, read fresh on every tool call (no restart needed):
+
+| Switch | Scope | Effect |
+| ------ | ----- | ------ |
+| `~/.claude/composer.disabled` | Global | Suspends enforcement in all repos. Toggle with `/composer disable` / `/composer enable`. |
+| `$CLAUDE_PROJECT_DIR/.composer-disabled` | Per-repo | Opts a single repo out of enforcement. |
+| `COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=1` | Process env | Lets authorized headless jobs/workers author files directly. Dev-only escape hatch. |
+
+The `/composer` slash command (`enable` / `disable` / `status`) flips `~/.claude/composer.disabled` live. It affects hook enforcement only — it does not stop or reconfigure the MCP server.
+
 ### What is mechanically enforced
 
-- `boundary_guard.sh` denies main-thread file mutation tools and MCP write/edit/exec wrappers.
+- `boundary_guard.sh` denies main-thread file mutation tools and MCP write/edit/exec wrappers in every repo (global user-level hook), fails closed on malformed input, and canonicalizes paths via the nearest existing ancestor so new-directory writes are not false-gated.
 - `composer_code_chain` rejects path traversal and symlink escapes before applying files.
 - `CLIProvider` uses argv arrays, not shell interpolation, and refuses dangerous Codex sandbox configs by default.
 - Codex pre-commit gates can fail closed in Claude Code hook mode and terminal git-hook mode.
 - Oracle browser runs are protected by a single-holder lock and stored under local Composer state / `.composer/oracle/` artefacts.
+- Provider execution, polling loops, CLI retries, the Codex lifecycle chain, Oracle jobs, and hook/reaper/lock runtimes are all time-bounded with cancellation propagated, so a stuck worker cannot hang the main session.
 
 ### What still needs project discipline
 

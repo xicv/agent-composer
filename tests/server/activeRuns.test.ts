@@ -1,7 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createActiveRunTracker } from "../../src/server/activeRuns.js";
 import type { ToolProgressExtra } from "../../src/server/progress.js";
 import { withProgress } from "../../src/server/progress.js";
+
+let tmpStateDir: string;
+let previousStateDir: string | undefined;
+
+beforeEach(() => {
+  previousStateDir = process.env["COMPOSER_STATE_DIR"];
+  tmpStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "composer-active-runs-test-"));
+  process.env["COMPOSER_STATE_DIR"] = tmpStateDir;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  if (previousStateDir === undefined) delete process.env["COMPOSER_STATE_DIR"];
+  else process.env["COMPOSER_STATE_DIR"] = previousStateDir;
+  fs.rmSync(tmpStateDir, { recursive: true, force: true });
+});
 
 describe("createActiveRunTracker", () => {
   it("start returns increasing ids", () => {
@@ -56,11 +75,45 @@ describe("createActiveRunTracker", () => {
     expect(runs[0]!.providerRole).toBe("reviewer");
   });
 
+  it("providerLabel is stored when provided", () => {
+    const tracker = createActiveRunTracker();
+    tracker.start({
+      tool: "composer_code_cli",
+      providerRole: "coderCli",
+      providerLabel: "codex",
+    });
+    const runs = tracker.list();
+    expect(runs[0]!.providerLabel).toBe("codex");
+  });
+
   it("providerRole is undefined when not provided", () => {
     const tracker = createActiveRunTracker();
     tracker.start({ tool: "composer_research" });
     const runs = tracker.list();
     expect(runs[0]!.providerRole).toBeUndefined();
+  });
+
+  it("writes active-runs.json on start and finish", () => {
+    const tracker = createActiveRunTracker();
+    const id = tracker.start({
+      tool: "composer_code_cli",
+      providerRole: "coderCli",
+      providerLabel: "codex",
+    });
+    const filePath = path.join(tmpStateDir, "active-runs.json");
+    const started = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(started).toEqual([
+      {
+        tool: "composer_code_cli",
+        providerLabel: "codex",
+        providerRole: "coderCli",
+        startedAt: expect.any(String),
+      },
+    ]);
+
+    tracker.finish(id);
+    const finished = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(finished).toEqual([]);
   });
 });
 
@@ -105,5 +158,61 @@ describe("withProgress + tracker integration", () => {
     ).rejects.toThrow("test error");
 
     expect(tracker.list()).toHaveLength(0);
+  });
+
+  it("emits provider label, elapsed time, and phase in progress messages", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T00:00:00.000Z"));
+    const messages: string[] = [];
+    const fakeExtra: ToolProgressExtra = {
+      _meta: { progressToken: "token-1" },
+      sendNotification: async (notification) => {
+        messages.push(notification.params.message ?? "");
+      },
+    };
+
+    await withProgress(
+      fakeExtra,
+      "composer_code_cli",
+      async () => {
+        vi.advanceTimersByTime(45_000);
+        return "ok";
+      },
+      { providerLabel: "codex" },
+    );
+
+    expect(messages).toEqual([
+      "composer_code_cli · codex · 0s · started",
+      "composer_code_cli · codex · 30s · working",
+      "composer_code_cli · codex · 45s · completed",
+    ]);
+  });
+
+  it("emits throttled detail updates from the progress hook", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T00:00:00.000Z"));
+    const messages: string[] = [];
+    const fakeExtra: ToolProgressExtra = {
+      _meta: { progressToken: "token-2" },
+      sendNotification: async (notification) => {
+        messages.push(notification.params.message ?? "");
+      },
+    };
+
+    await withProgress(
+      fakeExtra,
+      "composer_code_cli",
+      async (onProgress) => {
+        vi.advanceTimersByTime(1000);
+        onProgress({ phase: "working", detail: "editing src/server/progress.ts" });
+        await Promise.resolve();
+        return "ok";
+      },
+      { providerLabel: "codex" },
+    );
+
+    expect(messages).toContain(
+      "composer_code_cli · codex · 1s · working · editing src/server/progress.ts",
+    );
   });
 });

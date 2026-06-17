@@ -94,14 +94,15 @@ export function registerOracleTools(ctx: ServerToolContext): void {
         extra.signal,
       );
       try {
-        const result = await withProgress(extra, COMPOSER_ORACLE_PLAN, () =>
+        const result = await withProgress(extra, COMPOSER_ORACLE_PLAN, (onProgress) =>
           provider.execute({
             prompt: effectivePrompt,
             context: contextWithHandoff(root, context, handoffPath),
             cwd: root,
+            onProgress,
             signal: toolSignal.signal,
           }),
-          { tracker: ctx.activeRuns },
+          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "oraclePlanner" },
         );
         return { content: [{ type: "text", text: result.text }] };
       } finally {

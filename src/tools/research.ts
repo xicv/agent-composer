@@ -30,13 +30,14 @@ export function registerResearchTools(ctx: ServerToolContext): void {
     async ({ prompt, context, handoffPath }, extra) => {
       ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("researcher");
-      const result = await withProgress(extra, COMPOSER_RESEARCH, () =>
+      const result = await withProgress(extra, COMPOSER_RESEARCH, (onProgress) =>
         provider.execute({
           prompt,
           context: contextWithHandoff(root, context, handoffPath),
+          onProgress,
           signal: extra.signal,
         }),
-        { tracker: ctx.activeRuns },
+        { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "researcher" },
       );
       return { content: [{ type: "text", text: result.text }] };
     },

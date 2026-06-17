@@ -21,6 +21,7 @@ export function registerStatusTools(ctx: ServerToolContext): void {
       const nowMs = Date.now();
       status.active.foreground = ctx.activeRuns.list().map((r) => ({
         tool: r.tool,
+        providerLabel: r.providerLabel,
         providerRole: r.providerRole,
         ageSeconds: Math.max(0, Math.floor((nowMs - Date.parse(r.startedAt)) / 1000)),
       }));

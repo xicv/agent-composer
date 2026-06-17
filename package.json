@@ -13,6 +13,7 @@
     "scripts/oracle-plan-mcp.sh",
     "scripts/composer-oracle-router-safe.sh",
     "scripts/oracle-codex-handoff-safe.sh",
+    "scripts/composer-statusline-segment.mjs",
     "composer.config.schema.json",
     "README.md"
   ],

@@ -6,6 +6,9 @@
 #   exit:   always 0; semantics carried by JSON
 # Fail-closed: any unexpected condition (missing jq / empty stdin /
 # malformed JSON / absent tool_name) MUST emit a deny payload.
+# Scope: GLOBAL. When Composer is enabled, this hook denies main-thread
+# file-mutation tools in every repo and every path. Enforcement is controlled
+# only by kill switches such as ~/.claude/composer.disabled or /composer disable.
 
 set -u
 
@@ -29,37 +32,6 @@ composer_disabled() {
 }
 
 if composer_disabled; then
-  exit 0
-fi
-
-# Scope to the Composer project only. The hook is wired globally
-# (~/.claude/settings.json) and fires in every project; without this,
-# main-thread Edit/Write is blocked everywhere — even unrelated repos and
-# ~/.claude config. Enforce the brain/executor boundary ONLY when the active
-# project is the Composer repo, detected by its unique root marker.
-#
-# Walk ancestors from the active dir so the guard still fires when invoked
-# from a SUBDIRECTORY of the repo with CLAUDE_PROJECT_DIR unset — checking
-# the marker on $PWD alone fails OPEN inside the repo. Sets COMPOSER_ROOT to
-# the canonical (physical) repo root, reused by the outside-repo check below.
-COMPOSER_ROOT=""
-composer_project() {
-  local dir="${CLAUDE_PROJECT_DIR:-$PWD}"
-  dir="$(cd "$dir" 2>/dev/null && pwd -P)" || return 1
-  while [[ -n "$dir" && "$dir" != "/" ]]; do
-    if [[ -e "$dir/composer.config.schema.json" ]]; then
-      COMPOSER_ROOT="$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  if [[ -e "/composer.config.schema.json" ]]; then
-    COMPOSER_ROOT="/"
-    return 0
-  fi
-  return 1
-}
-if ! composer_project; then
   exit 0
 fi
 
@@ -132,52 +104,38 @@ if [[ "$TRANSCRIPT" == */subagents/* ]] \
   exit 0
 fi
 
-# Allow when the target file is CONFIDENTLY OUTSIDE the Composer repo. The
-# boundary exists to keep main Claude from mutating Composer's own code; a
-# file outside the repo root is not Composer code. Canonicalize both the
-# repo root (COMPOSER_ROOT, already physical) and the target path before
-# comparing, so symlinks, `..` traversal, and macOS /tmp->/private/tmp
-# cannot smuggle an in-repo path past a naive string prefix. FAIL SAFE: only
-# exit-allow when the path canonicalizes AND lands outside the root; on any
-# uncertainty fall through to the block list and stay gated. Tools without a
-# file path (Bash, mcp__*__bash/exec) also fall through and stay gated.
-canonicalize_path() {
-  # Canonicalize a path that may not exist yet. Walk up to the nearest
-  # EXISTING ancestor directory, resolve it physically (pwd -P follows
-  # symlinks), then apply the remaining (non-existent) components logically:
-  # "." is skipped and ".." pops a segment. No symlink can exist inside a
-  # non-existent path segment, so logical resolution of the tail is sound
-  # and matches how the filesystem would resolve it once created. Returns 0
-  # with a normalized absolute path; returns 1 only if even the root is not
-  # resolvable (then the caller fails safe = gate).
-  local p="$1" base tail="" comp canon
-  [[ "$p" != /* ]] && p="$PWD/$p"
-  base="$p"
-  while [[ -n "$base" && "$base" != "/" && ! -d "$base" ]]; do
-    tail="${base##*/}/$tail"
-    base="${base%/*}"
-    [[ -z "$base" ]] && base="/"
-  done
-  canon="$(cd "$base" 2>/dev/null && pwd -P)" || return 1
-  local IFS=/
-  for comp in $tail; do
-    case "$comp" in
-      ""|".") ;;
-      "..") canon="${canon%/*}"; [[ -z "$canon" ]] && canon="/" ;;
-      *) canon="$canon/$comp" ;;
+# 3.8. Brain housekeeping carve-out.
+#   Claude (the orchestrator / "brain") must persist its OWN state — e.g.
+#   cross-session memory — even while enforcement is ON. These paths are NOT
+#   project code, so routing them through the executor adds no safety. Allow a
+#   main-thread mutation whose target path is under an approved brain-state
+#   root. Default: the Claude memory store. Extra roots may be added via
+#   COMPOSER_GUARD_ALLOW_GLOBS (colon-separated case globs). Paths containing a
+#   ".." traversal segment are NEVER allow-listed, so an allowed prefix cannot
+#   be used to escape into ~/.claude/hooks or similar. Tools without a file
+#   path (Bash, mcp exec/bash) have no FILE and fall through to the block list.
+FILE="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // empty' <<<"$INPUT" 2>/dev/null)"
+if [[ -n "$FILE" && "$FILE" != *"/../"* && "$FILE" != *"/.." ]]; then
+  brain_globs="$HOME/.claude/projects/*/memory/*"
+  if [[ -n "${COMPOSER_GUARD_ALLOW_GLOBS:-}" ]]; then
+    brain_globs="$brain_globs:$COMPOSER_GUARD_ALLOW_GLOBS"
+  fi
+  set -f
+  brain_old_ifs="$IFS"
+  IFS=':'
+  for glob in $brain_globs; do
+    [[ -z "$glob" ]] && continue
+    # shellcheck disable=SC2254
+    case "$FILE" in
+      $glob)
+        IFS="$brain_old_ifs"
+        set +f
+        exit 0
+        ;;
     esac
   done
-  printf '%s' "$canon"
-  return 0
-}
-FILE="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // empty' <<<"$INPUT" 2>/dev/null)"
-if [[ -n "$FILE" ]]; then
-  if FILE_CANON="$(canonicalize_path "$FILE")"; then
-    if [[ "$FILE_CANON" != "$COMPOSER_ROOT" && "$FILE_CANON" != "$COMPOSER_ROOT"/* ]]; then
-      exit 0
-    fi
-  fi
-  # Inside the repo, or path could not be canonicalized -> gate (fall through).
+  IFS="$brain_old_ifs"
+  set +f
 fi
 
 # 4. Block list — native dangerous file-mutating tools + MCP-prefixed variants.
@@ -189,7 +147,7 @@ case "$TOOL" in
   Edit|Update|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "DENY (main thread): route Edit/Update/Write via Task(subagent_type=\"coder\"). Native Bash is allowed for inspection and verification."
+    emit_deny "Composer is handling file edits. Route this change through composer_code_cli (or composer_code_chain), or run /composer disable to edit directly. Bash inspection stays available."
     ;;
 esac
 

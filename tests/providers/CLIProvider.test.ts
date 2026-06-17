@@ -401,6 +401,30 @@ describe("CLIProvider (execFile injected)", () => {
     expect(out.text).toBe("line1\nline2\n");
   });
 
+  it("emits sanitized progress from the last streamed stdout line", async () => {
+    const progress: Array<{ phase?: string; detail?: string }> = [];
+    const exec: ExecFileFn = async (_bin, _args, options) => {
+      options.onStdout?.("first line\n\u001b[32mediting   src/server/progress.ts\u001b[0m\n");
+      return {
+        stdout: "first line\n\u001b[32mediting   src/server/progress.ts\u001b[0m\n",
+        stderr: "",
+      };
+    };
+    const p = new CLIProvider({
+      cli: ["agy", "-p"],
+      execFn: exec,
+    });
+
+    await p.execute({
+      prompt: "x",
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(progress).toEqual([
+      { phase: "working", detail: "editing src/server/progress.ts" },
+    ]);
+  });
+
   it("execute() leaves small stdout unchanged when result bounding is enabled by default", async () => {
     const stdout = "small worker result\n";
     const p = new CLIProvider({

@@ -35,13 +35,14 @@ export function registerCodeTools(ctx: ServerToolContext): void {
     async ({ prompt, context, handoffPath }, extra) => {
       ctx.refreshConfigIfChanged();
       const provider = registry.getProviderForRole("coder");
-      const result = await withProgress(extra, COMPOSER_CODE, () =>
+      const result = await withProgress(extra, COMPOSER_CODE, (onProgress) =>
         provider.execute({
           prompt,
           context: contextWithHandoff(root, context, handoffPath),
+          onProgress,
           signal: extra.signal,
         }),
-        { tracker: ctx.activeRuns },
+        { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coder" },
       );
       return { content: [{ type: "text", text: result.text }] };
     },
@@ -79,14 +80,15 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         "four-backtick fences when file content may contain triple-backtick " +
         "blocks. No " +
         "abbreviations, no placeholders, no commentary outside the blocks.";
-      const authored = await withProgress(extra, COMPOSER_CODE_CHAIN, () =>
+      const authored = await withProgress(extra, COMPOSER_CODE_CHAIN, (onProgress) =>
         gen.execute({
           prompt: genPrompt,
           context: contextWithHandoff(root, context, handoffPath),
           cwd: targetRoot,
+          onProgress,
           signal: extra.signal,
         }),
-        { tracker: ctx.activeRuns },
+        { tracker: ctx.activeRuns, providerLabel: gen.modelLabel, providerRole: "coder" },
       );
 
       // Stage 2: server applies GLM's FILE: blocks deterministically (off-CC,
@@ -145,7 +147,7 @@ export function registerCodeTools(ctx: ServerToolContext): void {
         profileSandbox = prof.sandbox;
       }
       const provider = registry.getProviderForRole("coderCli");
-      const result = await withProgress(extra, COMPOSER_CODE_CLI, () =>
+      const result = await withProgress(extra, COMPOSER_CODE_CLI, (onProgress) =>
         provider.execute({
           prompt,
           context: contextWithHandoff(root, context, handoffPath),
@@ -154,9 +156,10 @@ export function registerCodeTools(ctx: ServerToolContext): void {
           model: profileModel,
           reasoningEffort: profileReasoning,
           sandbox: profileSandbox,
+          onProgress,
           signal: extra.signal,
         }),
-        { tracker: ctx.activeRuns },
+        { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "coderCli" },
       );
       return { content: [{ type: "text", text: result.text }] };
     },

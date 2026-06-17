@@ -396,6 +396,19 @@ Rules:
 - Override when the orchestration plan itself is non-trivial (>3
   dispatches, cross-file integration). Then Opus 4.7 earns its keep.
 
+## Authorizing file-writing workers
+
+`boundary_guard.sh` enforces globally now: it denies main-thread
+`Edit/Update/Write/NotebookEdit` in EVERY repo unless Composer is disabled.
+A headless `claude -p` worker you spawn to AUTHOR files (multi-file
+scaffolding, byte-exact reproduction) runs as its own main thread and will be
+blocked. When you spawn such an authorized worker, set
+`COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=1` in its environment so its writes
+are allowed, e.g. `COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=1 claude -p ...`.
+Do NOT export that variable in your own interactive shell — set it only on the
+spawned worker, so the interactive Brain stays gated and routes through
+`composer_code_cli`.
+
 # Token discipline
 
 - You hold context, plans, and integration. Workers hold execution.

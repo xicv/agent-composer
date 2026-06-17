@@ -114,17 +114,16 @@ assert_pass_payload "subagent_agent_name_allows_bash" \
 assert_pass_payload "subagent_transcript_allows_update" \
   '{"hook_event_name":"PreToolUse","tool_name":"Update","transcript_path":"/tmp/claude/subagents/coder/transcript.jsonl","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
 
-# Path-scoped boundary (fail-safe canonicalization). REPO_ROOT IS the composer repo.
+# Global enforcement — deny main-thread mutations regardless of path or project.
 assert_deny_payload "block_edit_inside_repo_abs" \
   "$(jq -nc --arg f "$REPO_ROOT/src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
 assert_deny_payload "block_edit_inside_repo_dotdot" \
   "$(jq -nc --arg f "$REPO_ROOT/scripts/../src/index.ts" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
-assert_pass_payload "allow_edit_outside_repo_abs" \
+assert_deny_payload "block_edit_outside_repo_abs" \
   '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/composer-not-a-repo-file.ts","old_string":"a","new_string":"b"},"session_id":"t"}'
-# New-directory cases (canonicalizer walks to nearest existing ancestor).
-# Outside-repo write into a not-yet-existing dir must be ALLOWED (this is
-# the false-deny that the nearest-ancestor fix removes).
-assert_pass_payload "allow_edit_outside_repo_new_dir" \
+# New-directory cases.
+# Outside-repo write into a not-yet-existing dir must be DENIED.
+assert_deny_payload "block_edit_outside_repo_new_dir" \
   '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/composer-not-a-repo-NEWDIR/sub/deep/new.md","content":"x"},"session_id":"t"}'
 # In-repo write into a not-yet-existing dir must STILL be DENIED.
 assert_deny_payload "block_edit_inside_repo_new_dir" \
@@ -138,6 +137,25 @@ if is_deny <<<"$SUBDIR_OUT"; then
 else
   FAIL=$((FAIL+1)); FAILED+=("block_edit_subdir_project_dir: expected DENY, got: ${SUBDIR_OUT:-<empty>}"); printf '  FAIL  %-40s expected DENY\n' "block_edit_subdir_project_dir"
 fi
+
+# Brain housekeeping carve-out — Claude's own memory/state writes stay allowed.
+assert_pass_payload "allow_brain_memory_write" \
+  "$(jq -nc --arg f "$HOME/.claude/projects/-test-slug/memory/note.md" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$f,content:"x"},session_id:"t"}')"
+assert_pass_payload "allow_brain_memory_edit_nested" \
+  "$(jq -nc --arg f "$HOME/.claude/projects/-test-slug/memory/sub/note.md" '{hook_event_name:"PreToolUse",tool_name:"Edit",tool_input:{file_path:$f,old_string:"a",new_string:"b"},session_id:"t"}')"
+# Non-memory path under ~/.claude must STILL be denied (not brain state).
+assert_deny_payload "block_claude_nonmemory_write" \
+  "$(jq -nc --arg f "$HOME/.claude/hooks/evil.sh" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$f,content:"x"},session_id:"t"}')"
+# Traversal out of the memory dir must NOT be allow-listed.
+assert_deny_payload "block_brain_memory_traversal" \
+  "$(jq -nc --arg f "$HOME/.claude/projects/-test-slug/memory/../../hooks/evil.sh" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$f,content:"x"},session_id:"t"}')"
+# Extra allow root via env glob.
+EXTRA_ALLOW_TMP="$(mktemp -d -t composer_brain.XXXXXX)"
+export COMPOSER_GUARD_ALLOW_GLOBS="$EXTRA_ALLOW_TMP/*"
+assert_pass_payload "allow_brain_extra_glob" \
+  "$(jq -nc --arg f "$EXTRA_ALLOW_TMP/scratch.md" '{hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$f,content:"x"},session_id:"t"}')"
+unset COMPOSER_GUARD_ALLOW_GLOBS
+rm -rf "$EXTRA_ALLOW_TMP"
 
 # COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS (Wave 3 Step 1)
 export COMPOSER_DANGEROUSLY_BYPASS_PERMISSIONS=true
