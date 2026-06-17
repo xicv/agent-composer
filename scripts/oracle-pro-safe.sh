@@ -22,6 +22,7 @@ Options:
   --no-manual-login              Do not pass --browser-manual-login even if supported
   --model <model>                Override selected Oracle model
   --thinking <level>             Override browser thinking level: light|standard|extended|heavy
+  --base <ref>                   Override branch-diff base ref for review-class modes
   --research deep|off            Override browser research mode
   -p, --prompt <prompt>          Prompt text
   -h, --help
@@ -42,6 +43,9 @@ Environment overrides:
   ORACLE_PRO_REATTACH_INTERVAL   default: 2m
   ORACLE_PRO_REATTACH_TIMEOUT    default: 2m
   ORACLE_PRO_ATTACHMENTS         default: never (inline files; set to auto/bundle for large files)
+  ORACLE_PRO_DIFF_BASE           default: auto-detect main/master/develop/origin HEAD
+  ORACLE_PRO_MAX_CHANGED_FILES   default: 40
+  ORACLE_PRO_MAX_CHANGED_FILE_BYTES default: 120000
 
 Secret file protection:
   --file paths matching known secret patterns (.env, *.pem, *.key, id_rsa, .aws/credentials,
@@ -113,6 +117,7 @@ MODEL_OVERRIDE=""
 THINKING_OVERRIDE=""
 RESEARCH_OVERRIDE=""
 FILES=()
+DIFF_BASE="${ORACLE_PRO_DIFF_BASE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -130,6 +135,8 @@ while [[ $# -gt 0 ]]; do
     --model=*) MODEL_OVERRIDE="${1#*=}"; shift ;;
     --thinking) THINKING_OVERRIDE="${2:-}"; shift 2 ;;
     --thinking=*) THINKING_OVERRIDE="${1#*=}"; shift ;;
+    --base) DIFF_BASE="${2:-}"; shift 2 ;;
+    --base=*) DIFF_BASE="${1#*=}"; shift ;;
     --research) RESEARCH_OVERRIDE="${2:-}"; shift 2 ;;
     --research=*) RESEARCH_OVERRIDE="${1#*=}"; shift ;;
     -p|--prompt) PROMPT="${2:-}"; shift 2 ;;
@@ -185,7 +192,6 @@ STANDARD_THINKING="${ORACLE_PRO_STANDARD_THINKING:-standard}"
 DEEP_THINKING="${ORACLE_PRO_DEEP_THINKING:-extended}"
 RESEARCH_MODE="off"
 DEFAULT_STRATEGY="select"
-ATTACHMENTS_MODE="${ORACLE_PRO_ATTACHMENTS:-never}"
 
 case "$MODE" in
   quick) MODEL="$QUICK_MODEL"; THINKING="$QUICK_THINKING"; DEFAULT_STRATEGY="current" ;;
@@ -197,6 +203,30 @@ esac
 [[ -z "$MODEL_OVERRIDE" ]] || MODEL="$MODEL_OVERRIDE"
 [[ -z "$THINKING_OVERRIDE" ]] || THINKING="$THINKING_OVERRIDE"
 [[ -z "$RESEARCH_OVERRIDE" ]] || RESEARCH_MODE="$RESEARCH_OVERRIDE"
+
+# Delivery: quick/standard stay inline (fast, no upload-timeout risk); review-class
+# modes default to `auto` (inline up to oracle's ~60k-char limit, then upload) so large
+# branch diffs are no longer silently truncated. Override with ORACLE_PRO_ATTACHMENTS.
+ATTACHMENTS_MODE="${ORACLE_PRO_ATTACHMENTS:-}"
+if [[ -z "$ATTACHMENTS_MODE" ]]; then
+  case "$MODE" in
+    quick|standard) ATTACHMENTS_MODE="never" ;;
+    *) ATTACHMENTS_MODE="auto" ;;
+  esac
+fi
+
+# ChatGPT's Pro model auto-selects "Pro Extended"; its picker no longer exposes a
+# separate thinking-time submenu, so --browser-thinking-time errors out with
+# "Thinking time: menu not found for pro (requested ...)" and oracle exits 1.
+# The flag is redundant for the Pro model, so skip it there. Override with
+# ORACLE_PRO_FORCE_THINKING_FLAG=1 if a future oracle/UI restores the menu.
+case "$MODEL" in
+  *pro*)
+    if [[ "${ORACLE_PRO_FORCE_THINKING_FLAG:-0}" != "1" ]]; then
+      USE_THINKING_FLAG=0
+    fi
+    ;;
+esac
 
 OUT_DIR="${ORACLE_PRO_OUTPUT_DIR:-.composer/oracle/answers}"
 CTX_DIR="${ORACLE_PRO_CONTEXT_DIR:-.composer/oracle/context}"
@@ -288,6 +318,31 @@ write_context_file() {
   if [[ -s "$path" ]]; then AUTO_FILES+=("$path"); fi
 }
 
+detect_diff_base() {
+  local b
+  if [[ -n "$DIFF_BASE" ]]; then printf '%s' "$DIFF_BASE"; return; fi
+  for b in main master develop; do
+    git rev-parse --verify --quiet "refs/heads/$b" >/dev/null 2>&1 && { printf '%s' "$b"; return; }
+  done
+  for b in origin/main origin/master origin/develop; do
+    git rev-parse --verify --quiet "refs/remotes/$b" >/dev/null 2>&1 && { printf '%s' "$b"; return; }
+  done
+  git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's#refs/remotes/##' || true
+}
+
+# Populates the global SECRET_EXCLUDES array with :(exclude,literal)<path> pathspecs
+# for every changed file that is_secret_file rejects, giving git-diff patch generation
+# the SAME denylist coverage as explicit --file uploads. Args: optional git diff range.
+build_secret_excludes() {
+  SECRET_EXCLUDES=()
+  [[ "${ORACLE_PRO_ALLOW_SECRET_FILES:-0}" == "1" ]] && return 0
+  local cf
+  while IFS= read -r cf; do
+    [[ -n "$cf" ]] || continue
+    if is_secret_file "$cf"; then SECRET_EXCLUDES+=(":(exclude,literal)$cf"); fi
+  done < <(git diff --name-only "$@" 2>/dev/null)
+}
+
 if [[ "$AUTO_CONTEXT" -eq 1 ]]; then
   # Authority class B — current policy/context (safe as source-of-truth).
   policy_files=(CLAUDE.md composer.config.json docs/STATUS.md)
@@ -318,11 +373,51 @@ if [[ "$AUTO_CONTEXT" -eq 1 ]]; then
     write_context_file "git-status.txt" "git status --short"
     write_context_file "git-diff-stat.txt" "git diff --stat"
     if [[ "$MODE" != "quick" && "$MODE" != "standard" ]]; then
-      write_context_file "git-diff.patch" "git diff -- . ':(exclude).env' ':(exclude).env.*' ':(exclude)*.pem' ':(exclude)*.key' ':(exclude)*.p12' | sed -E -e '/(api[_-]?key|secret|token|passwd|password|credential|authorization|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key)[^a-z0-9]{0,4}[:=]/Id' -e '/bearer[[:space:]]+[a-z0-9._-]{6,}/Id' | head -c 200000"
+      build_secret_excludes
+      wt_patch="$CTX_DIR/$SLUG.git-diff.patch"
+      git diff -- . ':(exclude).env' ':(exclude).env.*' ':(exclude)*.pem' ':(exclude)*.key' ':(exclude)*.p12' \
+        ${SECRET_EXCLUDES[@]+"${SECRET_EXCLUDES[@]}"} 2>/dev/null \
+        | sed -E -e '/(api[_-]?key|secret|token|passwd|password|credential|authorization|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key)[^a-z0-9]{0,4}[:=]/Id' -e '/bearer[[:space:]]+[a-z0-9._-]{6,}/Id' \
+        | head -c 200000 > "$wt_patch" 2>/dev/null || true
+      [[ -s "$wt_patch" ]] && AUTO_FILES+=("$wt_patch")
     fi
     # Exact installed top-level deps (package.json shows ranges, not the installed tree).
     if [[ "$MODE" != "quick" && "$MODE" != "standard" ]] && [[ -f package.json ]]; then
       write_context_file "deps.txt" "npm ls --depth=0 2>/dev/null || true"
+    fi
+    if [[ "$MODE" != "quick" && "$MODE" != "standard" ]]; then
+      DIFF_BASE_RESOLVED="$(detect_diff_base)"
+      # Defense-in-depth: a git ref can legally contain shell metacharacters
+      # (`;`, `$()`, backticks). Since the ref is later interpolated into commands,
+      # reject anything outside a safe charset and forbid a leading dash (git option
+      # injection) before use.
+      if [[ -n "$DIFF_BASE_RESOLVED" && ! "$DIFF_BASE_RESOLVED" =~ ^[A-Za-z0-9._/][A-Za-z0-9._/-]*$ ]]; then
+        warn "ignoring unsafe diff-base ref (disallowed characters): $DIFF_BASE_RESOLVED"
+        DIFF_BASE_RESOLVED=""
+      fi
+      CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+      if [[ -n "$DIFF_BASE_RESOLVED" && "$CUR_BRANCH" != "$DIFF_BASE_RESOLVED" ]] \
+         && git rev-parse --verify --quiet "$DIFF_BASE_RESOLVED" >/dev/null 2>&1; then
+        # The committed branch diff vs its base is the REAL review target (working-tree diff
+        # is empty once work is committed). This is the primary accuracy fix.
+        build_secret_excludes "$DIFF_BASE_RESOLVED...HEAD"
+        base_patch="$CTX_DIR/$SLUG.branch-diff.patch"
+        git diff "$DIFF_BASE_RESOLVED...HEAD" -- . ':(exclude).env' ':(exclude).env.*' ':(exclude)*.pem' ':(exclude)*.key' ':(exclude)*.p12' \
+          ${SECRET_EXCLUDES[@]+"${SECRET_EXCLUDES[@]}"} 2>/dev/null \
+          | sed -E -e '/(api[_-]?key|secret|token|passwd|password|credential|authorization|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key)[^a-z0-9]{0,4}[:=]/Id' -e '/bearer[[:space:]]+[a-z0-9._-]{6,}/Id' \
+          | head -c 400000 > "$base_patch" 2>/dev/null || true
+        [[ -s "$base_patch" ]] && AUTO_FILES+=("$base_patch")
+        write_context_file "branch-diff-stat.txt" "git diff ${DIFF_BASE_RESOLVED}...HEAD --stat"
+        # Attach the full content of changed files (enclosing scope for the diff hunks),
+        # capped by count and per-file size, secret-filtered.
+        while IFS= read -r changed; do
+          [[ -n "$changed" && -f "$changed" ]] || continue
+          if is_secret_file "$changed" && [[ "${ORACLE_PRO_ALLOW_SECRET_FILES:-0}" != "1" ]]; then continue; fi
+          csz="$(wc -c < "$changed" 2>/dev/null | tr -d ' ')"
+          [[ -n "$csz" && "$csz" -le "${ORACLE_PRO_MAX_CHANGED_FILE_BYTES:-120000}" ]] || continue
+          AUTO_FILES+=("$changed")
+        done < <(git diff --name-only "${DIFF_BASE_RESOLVED}...HEAD" -- . ':(exclude).env' ':(exclude).env.*' 2>/dev/null | head -n "${ORACLE_PRO_MAX_CHANGED_FILES:-40}")
+      fi
     fi
   fi
 fi
@@ -351,6 +446,9 @@ fi
 add_supported_flag ARGS --browser-timeout "${ORACLE_PRO_TIMEOUT:-20m}"
 add_supported_flag ARGS --browser-input-timeout "${ORACLE_PRO_INPUT_TIMEOUT:-60s}"
 add_supported_flag ARGS --browser-attachments "$ATTACHMENTS_MODE"
+if [[ "$ATTACHMENTS_MODE" != "never" ]]; then
+  add_supported_flag ARGS --browser-bundle-format "${ORACLE_PRO_BUNDLE_FORMAT:-text}"
+fi
 add_supported_flag ARGS --browser-auto-reattach-delay "${ORACLE_PRO_REATTACH_DELAY:-30s}"
 add_supported_flag ARGS --browser-auto-reattach-interval "${ORACLE_PRO_REATTACH_INTERVAL:-2m}"
 add_supported_flag ARGS --browser-auto-reattach-timeout "${ORACLE_PRO_REATTACH_TIMEOUT:-2m}"
@@ -437,14 +535,17 @@ Repo-state hash: ${repo_state_hash}
 Runtime: node=${node_ver} npm=${npm_ver} os=${os_ver} arch=${arch_ver}
 Task: ${MODE}
 Authority order:
-  A. Live source-of-truth: ${SLUG}.manifest.json, ${SLUG}.git-status.txt, ${SLUG}.git-diff.patch, ${SLUG}.deps.txt, targeted source/tests
+  A. Live source-of-truth: ${SLUG}.manifest.json, ${SLUG}.git-status.txt, ${SLUG}.git-diff.patch, ${SLUG}.branch-diff.patch, ${SLUG}.deps.txt, changed source files, targeted source/tests
   B. Current policy/context: CLAUDE.md, composer.config.json, docs/STATUS.md, relevant ADRs
   C. Background/history: README.md, AGENTS.md
 Rules:
 - Treat class A as authoritative for the local repo. If A conflicts with B or C, A wins.
+- The attached files are the ONLY authoritative source for any code-level claim. Any description of the code in the TASK below is a hint about what to review, NOT source of truth — never treat prose as code.
 - Ignore prior chat memory, project memory, and earlier attachments if they conflict with this snapshot.
 - For each substantive claim, tag it [attached], [runtime], [web], or [inference].
 - Cite attached claims with file path and line span.
+- For EACH finding: first quote the exact supporting line(s) verbatim from an attached file as `path:line`, THEN state the finding. If you cannot quote supporting lines from the attached files, label it "INSUFFICIENT EVIDENCE — not in provided context" and do not raise it as a blocker.
+- Do not infer a bug from an absent detail; absence of code in the attachments means unknown, not broken.
 - For current API/library claims not proven by attached files, verify on the web against primary docs.
 - If evidence is insufficient, say: "unknown from provided context".
 EOF

@@ -84,6 +84,12 @@ lookups fast and cheap.
   Research. Omit (`auto`) to let the script classify.
 - It is ADVISORY: the tool never edits files. Hand its plan to
   `composer_code_cli` for implementation, then `composer_review`.
+- **Ground it in real code, never a paraphrase.** When asking Oracle to review
+  committed branch work, do NOT describe the diff in prose —
+  `scripts/oracle-pro-safe.sh` auto-attaches the real branch diff (`base...HEAD`)
+  plus changed-file contents. Pass `--base <branch>` (or set
+  `ORACLE_PRO_DIFF_BASE`) when auto-detection (main/master/develop) would pick
+  the wrong base. Reviewing from a summary yields `[inference]` false positives.
 - Requires a one-time Oracle browser login and the `oraclePlanner` role in the
   active config. Full answers persist under `.composer/oracle/answers/`
   (gitignored); the tool returns a bounded summary.
