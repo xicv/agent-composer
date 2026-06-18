@@ -4,8 +4,10 @@
 # codexReview.preCommitHook.enabled are true, and the Codex review verdict
 # reaches the configured blockOnSeverity threshold.
 #
-# Fail-open by default: reviewer/JQ/plugin/timeout failures warn to stderr and
-# allow the commit unless codexReview.preCommitHook.failClosed is true.
+# Fail-open by default: reviewer/JQ/plugin failures warn to stderr and allow the
+# commit unless codexReview.preCommitHook.failClosed is true. EXCEPTION: a review
+# timeout/hang ALWAYS fails closed (blocks the commit) so a slow or hung reviewer
+# cannot bypass the gate; raise preCommitHook.timeoutMs if reviews need more time.
 # Config keys:
 #   codexReview.preCommitCommand, scope, base, model
 #   codexReview.preCommitHook.enabled, blockOnSeverity, timeoutMs, failClosed, maxConsecutiveBlocks
@@ -896,6 +898,10 @@ END_SECONDS="$(date +%s)"
 DURATION_MS=$(( (END_SECONDS - START_SECONDS) * 1000 ))
 
 if [[ "$REVIEW_STATUS" -eq 124 ]]; then
+  # A reviewer timeout/hang must NOT silently open the gate — otherwise a slow or
+  # hung reviewer could bypass review entirely. The timeout path always fails
+  # closed, regardless of the configured failClosed. If legitimate reviews need
+  # more time, raise codexReview.preCommitHook.timeoutMs instead.
   fail_review "true" "review timed out after ${TIMEOUT_SECONDS}s" "$DURATION_MS" "hook_timeout"
 fi
 if [[ "$REVIEW_STATUS" -ne 0 ]]; then

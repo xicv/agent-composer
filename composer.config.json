@@ -19,8 +19,8 @@
     },
     "coder": {
       "provider": "anthropic",
-      "baseUrl": "https://api.z.ai/api/anthropic",
       "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN",
+      "baseUrl": "https://api.z.ai/api/anthropic",
       "model": "glm-5.2"
     },
     "reviewer": {
@@ -91,7 +91,13 @@
     },
     "oraclePlanner": {
       "provider": "cli",
-      "cli": ["bash", "scripts/oracle-plan-mcp.sh", "--mode", "auto", "--"],
+      "cli": [
+        "bash",
+        "scripts/oracle-plan-mcp.sh",
+        "--mode",
+        "auto",
+        "--"
+      ],
       "timeoutMs": 1200000,
       "retries": 0,
       "maxResultChars": 14000
@@ -99,8 +105,8 @@
   },
   "spendAuthorization": {
     "mode": "auto",
-    "maxUsdPerCall": 0.5,
-    "maxUsdPerSession": 50
+    "maxUsdPerSession": 50,
+    "maxUsdPerCall": 0.5
   },
   "codexReview": {
     "enabled": true,
@@ -118,7 +124,7 @@
     "preCommitHook": {
       "enabled": true,
       "blockOnSeverity": "high",
-      "timeoutMs": 120000,
+      "timeoutMs": 180000,
       "failClosed": false
     },
     "warmCache": {

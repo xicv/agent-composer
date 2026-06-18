@@ -151,7 +151,7 @@ case "$TOOL" in
   Edit|Update|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "Composer is handling file edits. Route this change through composer_code_cli (or composer_code_chain), or run /composer disable to edit directly. Bash inspection stays available."
+    emit_deny "Expected — not a failure. Composer is routing this edit so changes stay reviewable: apply it with composer_code_cli (or composer_code_chain), or run /composer disable to edit directly. Bash inspection stays available."
     ;;
 esac
 
