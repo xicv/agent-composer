@@ -544,7 +544,7 @@ Rules:
 - Ignore prior chat memory, project memory, and earlier attachments if they conflict with this snapshot.
 - For each substantive claim, tag it [attached], [runtime], [web], or [inference].
 - Cite attached claims with file path and line span.
-- For EACH finding: first quote the exact supporting line(s) verbatim from an attached file as `path:line`, THEN state the finding. If you cannot quote supporting lines from the attached files, label it "INSUFFICIENT EVIDENCE — not in provided context" and do not raise it as a blocker.
+- For EACH finding: first quote the exact supporting line(s) verbatim from an attached file as \`path:line\`, THEN state the finding. If you cannot quote supporting lines from the attached files, label it "INSUFFICIENT EVIDENCE — not in provided context" and do not raise it as a blocker.
 - Do not infer a bug from an absent detail; absence of code in the attachments means unknown, not broken.
 - For current API/library claims not proven by attached files, verify on the web against primary docs.
 - If evidence is insufficient, say: "unknown from provided context".
