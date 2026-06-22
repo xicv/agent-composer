@@ -63,6 +63,14 @@ describe("composer init --global", () => {
     expect(cfg.roles.reviewerClaude?.cli).toContain("claude");
     expect(cfg.roles.reviewerClaude?.timeoutMs).toBe(300000);
     expect(cfg.roles.reviewerClaude?.retries).toBe(0);
+    expect(cfg.profiles["glm-coder"].roles.coder).toEqual({
+      provider: "anthropic",
+      baseUrl: "https://api.z.ai/api/anthropic",
+      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+      model: "glm-5.2",
+    });
+    expect(cfg.profiles["glm-coder"].fallbacks).toEqual({ reviewerClaude: ["reviewer"] });
+    expect(cfg.activeProfile).toBeUndefined();
     expect(cfg.spendAuthorization.mode).toBe("interactive");
   });
 

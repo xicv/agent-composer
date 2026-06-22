@@ -118,6 +118,19 @@ const DEFAULT_COMPOSER_CONFIG = {
       retries: 0,
     },
   },
+  profiles: {
+    "glm-coder": {
+      roles: {
+        coder: {
+          provider: "anthropic",
+          baseUrl: "https://api.z.ai/api/anthropic",
+          apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+          model: "glm-5.2",
+        },
+      },
+      fallbacks: { reviewerClaude: ["reviewer"] },
+    },
+  },
   spendAuthorization: {
     mode: "interactive",
     maxUsdPerCall: 0.5,

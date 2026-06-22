@@ -34,7 +34,7 @@ describe("composer init", () => {
     expect(r.steps.find((s) => s.name === ".claude/ directory")?.status).toBe("skipped");
   });
 
-  it("writes composer.config.json with default roles + spendAuthorization", () => {
+  it("writes composer.config.json with default roles + profiles + spendAuthorization", () => {
     runInit({ cwd, verbose: false });
     const cfg = JSON.parse(readFileSync(join(cwd, "composer.config.json"), "utf8"));
     expect(cfg.roles.coder.provider).toBe("anthropic");
@@ -79,6 +79,14 @@ describe("composer init", () => {
     expect(cfg.roles.reviewerClaude?.cli).toContain("--max-budget-usd");
     expect(cfg.roles.reviewerClaude?.timeoutMs).toBe(300000);
     expect(cfg.roles.reviewerClaude?.retries).toBe(0);
+    expect(cfg.profiles["glm-coder"].roles.coder).toEqual({
+      provider: "anthropic",
+      baseUrl: "https://api.z.ai/api/anthropic",
+      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+      model: "glm-5.2",
+    });
+    expect(cfg.profiles["glm-coder"].fallbacks).toEqual({ reviewerClaude: ["reviewer"] });
+    expect(cfg.activeProfile).toBeUndefined();
     expect(cfg.spendAuthorization.mode).toBe("interactive");
     expect(cfg.spendAuthorization.maxUsdPerCall).toBe(0.5);
     expect(cfg.codexReview.preCommitCommand).toBe("adversarial-review");

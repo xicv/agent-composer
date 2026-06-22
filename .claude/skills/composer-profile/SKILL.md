@@ -61,6 +61,26 @@ Composer config. Let the server validate the profile name and config shape.
 After switching, call `composer_status` again and confirm
 `executorProfile.active` and `executorProfile.source`.
 
+## Where Profiles Live
+
+Profiles must be defined in the config the server actually loads: the project
+`composer.config.json`, or the user-global
+`~/.config/composer/composer.config.json` when the server's `COMPOSER_CONFIG`
+env points there. A profile defined in a config the server does not read will
+not appear in `composer_status` -> `executorProfile.available`.
+
+A profile with no active selection is inert: zero behavior change, only a
+documented shape. Selecting one is `composer_config_set { scope,
+activeProfile }`; reverting is `{ scope, clearActiveProfile: true }`. Adding or
+editing a profile definition is a config-file edit.
+
+Runtime fallbacks fire only for read-only roles: researcher, reviewer,
+reviewerClaude, and oraclePlanner. Mutating roles, coder and coderCli, are
+single-attempt by design (Slice 4 deferred), so a `fallbacks` chain whose source
+is a mutating role is validated at config load but never fires at runtime. The
+shipped `glm-coder` sample therefore uses the read-only
+`reviewerClaude -> reviewer` chain.
+
 ## Notes
 
 - Profiles are executor-only: researcher, coder, reviewer, reviewerClaude,

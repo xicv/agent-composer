@@ -23,6 +23,6 @@ describe("timeout consistency", () => {
 
     expect(cfg.activeProfile).toBeUndefined();
     expect(cfg.profiles?.["glm-coder"]?.roles?.coder?.provider).toBe("anthropic");
-    expect(cfg.profiles?.["glm-coder"]?.fallbacks?.coderCli).toEqual(["coder"]);
+    expect(cfg.profiles?.["glm-coder"]?.fallbacks).toEqual({ reviewerClaude: ["reviewer"] });
   });
 });

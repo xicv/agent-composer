@@ -114,8 +114,8 @@
         }
       },
       "fallbacks": {
-        "coderCli": [
-          "coder"
+        "reviewerClaude": [
+          "reviewer"
         ]
       }
     }
