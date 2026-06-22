@@ -48,11 +48,12 @@ If the source is not `"env"`, switch with a narrow config patch:
 ```json
 {
   "scope": "project",
-  "patch": {
-    "activeProfile": "<name>"
-  }
+  "activeProfile": "<name>"
 }
 ```
+
+To revert to the default profile, call `composer_config_set` with
+`{ "scope": "project", "clearActiveProfile": true }`.
 
 Use `scope: "global"` only when the user explicitly asks for the global
 Composer config. Let the server validate the profile name and config shape.

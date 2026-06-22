@@ -15,6 +15,7 @@ import {
 } from "../server/configMutation.js";
 import { parseConfig } from "../config/loader.js";
 import { modePatch } from "../config/modes.js";
+import { resolveEffectiveConfig } from "../config/profiles.js";
 import type { ServerToolContext } from "./context.js";
 
 export function registerConfigTools(ctx: ServerToolContext): void {
@@ -61,6 +62,8 @@ export function registerConfigTools(ctx: ServerToolContext): void {
       inputSchema: {
         scope: z.enum(["active", "project", "global"]).optional(),
         dryRun: z.boolean().optional(),
+        activeProfile: z.string().min(1).optional(),
+        clearActiveProfile: z.boolean().optional(),
         codexLifecycle: z
           .object({
             enabled: z.boolean().optional(),
@@ -163,7 +166,19 @@ export function registerConfigTools(ctx: ServerToolContext): void {
         idempotentHint: true,
       },
     },
-    async ({ scope, dryRun, codexLifecycle, codexReview, oracle, mode }) => {
+    async ({
+      scope,
+      dryRun,
+      activeProfile,
+      clearActiveProfile,
+      codexLifecycle,
+      codexReview,
+      oracle,
+      mode,
+    }) => {
+      if (activeProfile !== undefined && clearActiveProfile !== undefined) {
+        throw new Error("Pass either activeProfile or clearActiveProfile, not both.");
+      }
       const requestedScope = scope ?? "active";
       const target = resolveComposerConfigTarget(root, ctx.options.configPath, requestedScope);
       if (requestedScope === "active" && isGlobalComposerConfigPath(target.path)) {
@@ -177,12 +192,26 @@ export function registerConfigTools(ctx: ServerToolContext): void {
       const beforeRaw = fs.readFileSync(target.path, "utf8");
       const before = JSON.parse(beforeRaw) as Record<string, unknown>;
       const preset = mode ? modePatch(mode) : undefined;
-      const next = applyComposerConfigPatch(before, {
+      let next = applyComposerConfigPatch(before, {
         codexLifecycle: codexLifecycle ?? preset?.codexLifecycle,
         codexReview: codexReview ?? preset?.codexReview,
         oracle,
       });
+      if (clearActiveProfile === true) {
+        next = { ...next };
+        delete next["activeProfile"];
+      } else if (activeProfile !== undefined) {
+        next = { ...next, activeProfile };
+      }
       const parsed = parseConfig(next);
+      if (activeProfile !== undefined) {
+        try {
+          resolveEffectiveConfig(parsed);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(`Cannot activate profile '${activeProfile}': ${reason}`);
+        }
+      }
       const nextRaw = `${JSON.stringify(parsed, null, 2)}\n`;
       const changed = beforeRaw !== nextRaw;
       const activeTarget = resolveComposerConfigTarget(root, ctx.options.configPath, "active");

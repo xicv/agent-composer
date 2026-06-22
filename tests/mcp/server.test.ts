@@ -1450,6 +1450,125 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("composer_config_set writes an existing activeProfile to the project config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const previousComposerProfile = process.env["COMPOSER_PROFILE"];
+    try {
+      delete process.env["COMPOSER_PROFILE"];
+      const config = parseConfig({
+        ...allMockConfig,
+        profiles: {
+          fb: {
+            roles: {
+              coder: { provider: "mock", model: "fb-coder" },
+            },
+          },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, config, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          activeProfile: "fb",
+        },
+      });
+
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean; config: ComposerConfig };
+      expect(setParsed.changed).toBe(true);
+      expect(setParsed.config.activeProfile).toBe("fb");
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as ComposerConfig;
+      expect(written.activeProfile).toBe("fb");
+    } finally {
+      if (previousComposerProfile === undefined) delete process.env["COMPOSER_PROFILE"];
+      else process.env["COMPOSER_PROFILE"] = previousComposerProfile;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set rejects an unknown activeProfile without writing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const previousComposerProfile = process.env["COMPOSER_PROFILE"];
+    try {
+      delete process.env["COMPOSER_PROFILE"];
+      const config = parseConfig({
+        ...allMockConfig,
+        profiles: {
+          fb: {
+            roles: {
+              coder: { provider: "mock", model: "fb-coder" },
+            },
+          },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      const originalContent = `${JSON.stringify(config, null, 2)}\n`;
+      writeFileSync(configPath, originalContent, "utf8");
+      const { client } = await bootClient(root, config, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          activeProfile: "missing",
+        },
+      });
+
+      expect(setResult.isError).toBe(true);
+      expect(JSON.stringify(setResult.content)).toContain("Cannot activate profile 'missing'");
+      expect(readFileSync(configPath, "utf8")).toBe(originalContent);
+    } finally {
+      if (previousComposerProfile === undefined) delete process.env["COMPOSER_PROFILE"];
+      else process.env["COMPOSER_PROFILE"] = previousComposerProfile;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_config_set clearActiveProfile removes activeProfile from the project config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    try {
+      const config = parseConfig({
+        ...allMockConfig,
+        activeProfile: "fb",
+        profiles: {
+          fb: {
+            roles: {
+              coder: { provider: "mock", model: "fb-coder" },
+            },
+          },
+        },
+      });
+      const configPath = join(root, "composer.config.json");
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      const { client } = await bootClient(root, config, configPath);
+
+      const setResult = await client.callTool({
+        name: "composer_config_set",
+        arguments: {
+          scope: "project",
+          clearActiveProfile: true,
+        },
+      });
+
+      expect(setResult.isError).not.toBe(true);
+      const setText = (setResult.content as Array<{ type: string; text: string }>)[0]?.text ?? "";
+      const setParsed = JSON.parse(setText) as { changed: boolean; config: ComposerConfig };
+      expect(setParsed.changed).toBe(true);
+      expect(setParsed.config.activeProfile).toBeUndefined();
+
+      const written = JSON.parse(readFileSync(configPath, "utf8")) as ComposerConfig;
+      expect(written.activeProfile).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("composer_config_set rejects symlink config targets", async () => {
     const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
     const outside = mkdtempSync(join(tmpdir(), "composer-config-outside-"));
