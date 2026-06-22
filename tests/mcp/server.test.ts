@@ -560,6 +560,79 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("composer_research falls back across read-only roles and reports a bounded summary", async () => {
+    const config = parseConfig({
+      ...allMockConfig,
+      activeProfile: "fallbacks",
+      profiles: {
+        fallbacks: {
+          fallbacks: {
+            researcher: ["reviewer"],
+          },
+        },
+      },
+    });
+    const researcher = new MockProvider({
+      responses: [
+        () => {
+          throw new Error("503 temporarily unavailable");
+        },
+      ],
+    });
+    const reviewer = new MockProvider({ responses: ["fallback research"] });
+    const { client } = await bootClientWithProviders(
+      { researcher, reviewer },
+      undefined,
+      config,
+    );
+
+    const result = await client.callTool({
+      name: "composer_research",
+      arguments: { prompt: "look it up" },
+    });
+
+    expect(result.isError).not.toBe(true);
+    const text = ((result.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text) ?? "";
+    expect(text).toContain("fallback research");
+    expect(text).toContain("\"fallbackUsed\":true");
+    expect(text).toContain("\"providerRole\":\"reviewer\"");
+    expect(text).not.toContain("temporarily unavailable");
+    expect(researcher.callCount).toBe(1);
+    expect(reviewer.callCount).toBe(1);
+  });
+
+  it("composer_code_cli remains single-attempt even when a mutate fallback chain is configured", async () => {
+    const config = parseConfig({
+      ...allMockConfig,
+      activeProfile: "fallbacks",
+      profiles: {
+        fallbacks: {
+          fallbacks: {
+            coderCli: ["coder"],
+          },
+        },
+      },
+    });
+    const coderCli = new MockProvider({
+      responses: [
+        () => {
+          throw new Error("503 temporarily unavailable");
+        },
+      ],
+    });
+    const coder = new MockProvider({ responses: ["must not run"] });
+    const { client } = await bootClientWithProviders({ coderCli, coder }, undefined, config);
+
+    const result = await client.callTool({
+      name: "composer_code_cli",
+      arguments: { prompt: "apply it" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(coderCli.callCount).toBe(1);
+    expect(coder.callCount).toBe(0);
+  });
+
   it("composer_code_cli rejects non-absolute projectDir", async () => {
     const { client } = await bootClient();
     const result = await client.callTool({

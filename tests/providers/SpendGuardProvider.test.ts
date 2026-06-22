@@ -77,7 +77,10 @@ describe("SpendGuardProvider — auto mode, maxUsdPerCall", () => {
       ledger,
     );
 
-    await expect(guard.execute({ prompt: "hello" })).rejects.toThrow(SpendLimitError);
+    await expect(guard.execute({ prompt: "hello" })).rejects.toMatchObject({
+      name: "SpendLimitError",
+      kind: "spend_cap_call",
+    });
     await expect(guard.execute({ prompt: "hello" })).rejects.toThrow(/maxUsdPerCall/);
     expect(inner.callCount).toBe(0);
   });
@@ -118,7 +121,10 @@ describe("SpendGuardProvider — auto mode, maxUsdPerSession", () => {
     expect(inner.callCount).toBe(1);
 
     // After first call ledger ≈ 0.009652. Second call estimate would push it > 0.01
-    await expect(guard.execute({ prompt, maxTokens: 4096 })).rejects.toThrow(SpendLimitError);
+    await expect(guard.execute({ prompt, maxTokens: 4096 })).rejects.toMatchObject({
+      name: "SpendLimitError",
+      kind: "spend_cap_session",
+    });
     await expect(guard.execute({ prompt, maxTokens: 4096 })).rejects.toThrow(/maxUsdPerSession/);
     // inner was not called again for the rejected attempts
     expect(inner.callCount).toBe(1);

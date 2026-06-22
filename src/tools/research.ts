@@ -6,6 +6,7 @@ import {
   RESEARCH_DESCRIPTION,
 } from "../server/toolDescriptions.js";
 import { createDeadlineSignal } from "../util/asyncControl.js";
+import { dispatchWithFallback, type DispatchFallbackSummary } from "../server/dispatchWithFallback.js";
 import type { ServerToolContext } from "./context.js";
 
 const DEFAULT_RESEARCHER_TIMEOUT_MS = 180_000;
@@ -32,7 +33,6 @@ export function registerResearchTools(ctx: ServerToolContext): void {
     },
     async ({ prompt, context, handoffPath }, extra) => {
       ctx.refreshConfigIfChanged();
-      const provider = registry.getProviderForRole("researcher");
       const toolSignal = createBoundedSignal(
         COMPOSER_RESEARCH,
         resolveRoleTimeoutMs(
@@ -43,15 +43,19 @@ export function registerResearchTools(ctx: ServerToolContext): void {
       );
       try {
         const result = await withProgress(extra, COMPOSER_RESEARCH, (onProgress) =>
-          provider.execute({
-            prompt,
-            context: contextWithHandoff(root, context, handoffPath),
-            onProgress,
-            signal: toolSignal.signal,
-          }),
-          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "researcher" },
+          dispatchWithFallback(
+            { registry, effectiveFallbacks: ctx.getEffectiveFallbacks() },
+            "researcher",
+            {
+              prompt,
+              context: contextWithHandoff(root, context, handoffPath),
+              onProgress,
+              signal: toolSignal.signal,
+            },
+          ),
+          { tracker: ctx.activeRuns, providerLabel: "read-only-fallback", providerRole: "researcher" },
         );
-        return { content: [{ type: "text", text: result.text }] };
+        return { content: [{ type: "text", text: withFallbackSummary(result.output.text, result.summary) }] };
       } finally {
         toolSignal.cleanup();
       }
@@ -72,4 +76,8 @@ function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: Ab
   cleanup: () => void;
 } {
   return createDeadlineSignal(label, timeoutMs, callerSignal);
+}
+
+function withFallbackSummary(text: string, summary: DispatchFallbackSummary): string {
+  return `${text}\n\nfallbackSummary: ${JSON.stringify(summary)}`;
 }

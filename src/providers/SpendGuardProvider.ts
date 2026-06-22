@@ -8,7 +8,10 @@ import type { SpendAuthorization } from "../config/schema.js";
 
 /** Thrown when a priced call is blocked by spendAuthorization (deny mode or a cap). */
 export class SpendLimitError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly kind: "spend_denied" | "spend_cap_call" | "spend_cap_session" = "spend_denied",
+  ) {
     super(message);
     this.name = "SpendLimitError";
   }
@@ -103,6 +106,7 @@ export class SpendGuardProvider implements IProvider {
     if (this.auth.maxUsdPerCall !== undefined && estCallUsd > this.auth.maxUsdPerCall) {
       throw new SpendLimitError(
         `Estimated $${estCallUsd.toFixed(4)} for this '${this.modelLabel}' call exceeds maxUsdPerCall $${this.auth.maxUsdPerCall}.`,
+        "spend_cap_call",
       );
     }
     if (
@@ -111,6 +115,7 @@ export class SpendGuardProvider implements IProvider {
     ) {
       throw new SpendLimitError(
         `Estimated session spend $${(this.ledger.spentUsd + estCallUsd).toFixed(4)} would exceed maxUsdPerSession $${this.auth.maxUsdPerSession} (already $${this.ledger.spentUsd.toFixed(4)}).`,
+        "spend_cap_session",
       );
     }
 

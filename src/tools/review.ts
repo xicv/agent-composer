@@ -22,6 +22,7 @@ import {
 import { DEFAULT_ANTHROPIC_TIMEOUT_MS } from "../providers/AnthropicCompatibleProvider.js";
 import { createDeadlineSignal } from "../util/asyncControl.js";
 import { pollJobResult } from "../util/jobPolling.js";
+import { dispatchWithFallback, type DispatchFallbackSummary } from "../server/dispatchWithFallback.js";
 import type { ServerToolContext } from "./context.js";
 
 const REVIEW_SCOPE_SCHEMA = z.enum(["staged", "unstaged", "working-tree", "branch"]);
@@ -59,7 +60,6 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         base,
         toolName: COMPOSER_REVIEW,
       });
-      const provider = registry.getProviderForRole("reviewer");
       const toolSignal = createBoundedSignal(
         COMPOSER_REVIEW,
         resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.reviewer?.timeoutMs),
@@ -67,15 +67,19 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       );
       try {
         const result = await withProgress(extra, COMPOSER_REVIEW, (onProgress) =>
-          provider.execute({
-            prompt,
-            context: contextWithHandoff(root, effectiveDiff, handoffPath),
-            onProgress,
-            signal: toolSignal.signal,
-          }),
-          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "reviewer" },
+          dispatchWithFallback(
+            { registry, effectiveFallbacks: ctx.getEffectiveFallbacks() },
+            "reviewer",
+            {
+              prompt,
+              context: contextWithHandoff(root, effectiveDiff, handoffPath),
+              onProgress,
+              signal: toolSignal.signal,
+            },
+          ),
+          { tracker: ctx.activeRuns, providerLabel: "read-only-fallback", providerRole: "reviewer" },
         );
-        return { content: [{ type: "text", text: result.text }] };
+        return { content: [{ type: "text", text: withFallbackSummary(result.output.text, result.summary) }] };
       } finally {
         toolSignal.cleanup();
       }
@@ -111,7 +115,6 @@ export function registerReviewTools(ctx: ServerToolContext): void {
         base,
         toolName: COMPOSER_REVIEW_CLAUDE,
       });
-      const provider = registry.getProviderForRole("reviewerClaude");
       const toolSignal = createBoundedSignal(
         COMPOSER_REVIEW_CLAUDE,
         resolveRoleTimeoutMs(ctx.getActiveConfig()?.roles.reviewerClaude?.timeoutMs),
@@ -119,16 +122,20 @@ export function registerReviewTools(ctx: ServerToolContext): void {
       );
       try {
         const result = await withProgress(extra, COMPOSER_REVIEW_CLAUDE, (onProgress) =>
-          provider.execute({
-            prompt,
-            context: contextWithHandoff(root, effectiveDiff, handoffPath),
-            cwd: root,
-            onProgress,
-            signal: toolSignal.signal,
-          }),
-          { tracker: ctx.activeRuns, providerLabel: provider.modelLabel, providerRole: "reviewerClaude" },
+          dispatchWithFallback(
+            { registry, effectiveFallbacks: ctx.getEffectiveFallbacks() },
+            "reviewerClaude",
+            {
+              prompt,
+              context: contextWithHandoff(root, effectiveDiff, handoffPath),
+              cwd: root,
+              onProgress,
+              signal: toolSignal.signal,
+            },
+          ),
+          { tracker: ctx.activeRuns, providerLabel: "read-only-fallback", providerRole: "reviewerClaude" },
         );
-        return { content: [{ type: "text", text: result.text }] };
+        return { content: [{ type: "text", text: withFallbackSummary(result.output.text, result.summary) }] };
       } finally {
         toolSignal.cleanup();
       }
@@ -304,4 +311,8 @@ function createBoundedSignal(label: string, timeoutMs: number, callerSignal?: Ab
   cleanup: () => void;
 } {
   return createDeadlineSignal(label, timeoutMs, callerSignal);
+}
+
+function withFallbackSummary(text: string, summary: DispatchFallbackSummary): string {
+  return `${text}\n\nfallbackSummary: ${JSON.stringify(summary)}`;
 }
