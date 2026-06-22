@@ -94,6 +94,10 @@ export function createComposerServer(
   let activeEffectiveFallbacks = activeConfig
     ? resolveEffectiveConfig(activeConfig).effectiveFallbacks
     : {};
+  const applyActiveConfig = (c: ComposerConfig | undefined) => {
+    activeConfig = c;
+    activeEffectiveFallbacks = c ? resolveEffectiveConfig(c).effectiveFallbacks : {};
+  };
   const configRefreshState: ConfigRefreshState = {};
   let session: SessionOverrides = {};
   const activeRuns = createActiveRunTracker();
@@ -112,18 +116,13 @@ export function createComposerServer(
     root,
     options,
     getActiveConfig: () => activeConfig,
-    setActiveConfig: (c: ComposerConfig | undefined) => {
-      activeConfig = c;
-      activeEffectiveFallbacks = c ? resolveEffectiveConfig(c).effectiveFallbacks : {};
-    },
+    setActiveConfig: applyActiveConfig,
     refreshConfigIfChanged: () => {
       refreshConfigIfChanged({
         configPath: options.configPath,
         registry,
         getActiveConfig: () => activeConfig,
-        setActiveConfig: (c: ComposerConfig | undefined) => {
-          activeConfig = c;
-        },
+        setActiveConfig: applyActiveConfig,
         state: configRefreshState,
       });
     },

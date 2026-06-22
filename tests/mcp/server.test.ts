@@ -525,6 +525,80 @@ describe("composer MCP server", () => {
     }
   });
 
+  it("composer_research recomputes runtime fallbacks after config hot-reload", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
+    const configPath = join(root, "composer.config.json");
+    const missingEnv = "COMPOSER_TEST_NO_SUCH_KEY_HOTRELOAD";
+    const previousMissingEnv = process.env[missingEnv];
+    const writeConfig = (config: ComposerConfig, seconds: number) => {
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      const when = new Date(seconds * 1000);
+      utimesSync(configPath, when, when);
+    };
+    const initialConfig = parseConfig({
+      roles: {
+        researcher: { provider: "mock" },
+        coder: { provider: "mock" },
+        reviewer: { provider: "mock" },
+      },
+    });
+    const reloadedConfig = parseConfig({
+      roles: {
+        researcher: { provider: "mock" },
+        coder: { provider: "mock" },
+        reviewer: { provider: "mock" },
+      },
+      activeProfile: "fb",
+      profiles: {
+        fb: {
+          roles: {
+            researcher: {
+              provider: "anthropic",
+              apiKeyEnv: missingEnv,
+              baseUrl: "https://example.invalid",
+              model: "x",
+            },
+            reviewer: { provider: "mock", model: "fb-fallback" },
+          },
+          fallbacks: { researcher: ["reviewer"] },
+        },
+      },
+    });
+    try {
+      delete process.env[missingEnv];
+      writeConfig(initialConfig, 100);
+      const { client } = await bootClient(root, initialConfig, configPath);
+
+      writeConfig(reloadedConfig, 200);
+      const result = await client.callTool({
+        name: "composer_research",
+        arguments: { prompt: "hot reload fallback" },
+      });
+
+      expect(result.isError).not.toBe(true);
+      const text = ((result.content as Array<{ type: string; text: string }> | undefined)?.[0]?.text) ?? "";
+      const marker = "fallbackSummary: ";
+      const summaryStart = text.indexOf(marker);
+      expect(summaryStart).toBeGreaterThanOrEqual(0);
+      const summary = JSON.parse(text.slice(summaryStart + marker.length)) as {
+        fallbackUsed: boolean;
+        providerRole: string;
+        attempts: Array<{ role: string; errorClass: string }>;
+      };
+      expect(summary.fallbackUsed).toBe(true);
+      expect(summary.providerRole).toBe("reviewer");
+      expect(summary.attempts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: "researcher", errorClass: "AUTH" }),
+        ]),
+      );
+    } finally {
+      if (previousMissingEnv === undefined) delete process.env[missingEnv];
+      else process.env[missingEnv] = previousMissingEnv;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("composer_oracle_plan passes the server root as provider cwd", async () => {
     const root = mkdtempSync(join(tmpdir(), "composer-mcp-"));
     try {
