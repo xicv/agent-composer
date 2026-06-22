@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ProviderRegistry } from "../registry.js";
-import type { ComposerConfig } from "../config/schema.js";
+import type { ComposerConfig, RoleName } from "../config/schema.js";
 import type { ActiveRunTracker } from "../server/activeRuns.js";
 
 export interface ComposerServerOptions {
@@ -27,6 +27,7 @@ export interface ServerToolContext {
   getActiveConfig: () => ComposerConfig | undefined;
   setActiveConfig: (config: ComposerConfig | undefined) => void;
   refreshConfigIfChanged: () => void;
+  getEffectiveFallbacks: () => Partial<Record<RoleName, RoleName[]>>;
   getSession: () => SessionOverrides;
   setSession: (patch: Partial<SessionOverrides>) => SessionOverrides;
   resetSession: () => void;

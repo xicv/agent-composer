@@ -27,6 +27,25 @@ function configJson(coderCliTimeoutMs: number): string {
   )}\n`;
 }
 
+function profiledConfigJson(activeProfile: string): string {
+  return `${JSON.stringify(
+    {
+      roles: {
+        researcher: { provider: "mock" },
+        coder: { provider: "mock", model: "base-coder" },
+        reviewer: { provider: "mock" },
+      },
+      activeProfile,
+      profiles: {
+        one: { roles: { coder: { provider: "mock", model: "profile-one" } } },
+        two: { roles: { coder: { provider: "mock", model: "profile-two" } } },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 function parsedConfig(coderCliTimeoutMs: number): ComposerConfig {
   return parseConfig(JSON.parse(configJson(coderCliTimeoutMs)));
 }
@@ -145,5 +164,55 @@ describe("refreshConfigIfChanged", () => {
     expect(activeConfig?.roles.coderCli?.timeoutMs).toBe(1000);
     expect(registry.setConfig).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledOnce();
+  });
+
+  it("passes resolved effective config to the registry on profile changes", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "composer-config-reload-"));
+    const configPath = join(tempDir, "composer.config.json");
+    bumpFile(configPath, profiledConfigJson("one"), 100);
+    let activeConfig: ComposerConfig | undefined;
+    const registry = { setConfig: vi.fn() };
+    const state = {};
+
+    refreshConfigIfChanged({
+      configPath,
+      registry,
+      getActiveConfig: () => activeConfig,
+      setActiveConfig: (config) => {
+        activeConfig = config;
+      },
+      state,
+    });
+
+    expect(activeConfig?.activeProfile).toBe("one");
+    expect(activeConfig?.roles.coder.model).toBe("base-coder");
+    expect(registry.setConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        roles: expect.objectContaining({
+          coder: expect.objectContaining({ model: "profile-one" }),
+        }),
+      }),
+    );
+
+    bumpFile(configPath, profiledConfigJson("two"), 200);
+    refreshConfigIfChanged({
+      configPath,
+      registry,
+      getActiveConfig: () => activeConfig,
+      setActiveConfig: (config) => {
+        activeConfig = config;
+      },
+      state,
+    });
+
+    expect(activeConfig?.activeProfile).toBe("two");
+    expect(activeConfig?.roles.coder.model).toBe("base-coder");
+    expect(registry.setConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        roles: expect.objectContaining({
+          coder: expect.objectContaining({ model: "profile-two" }),
+        }),
+      }),
+    );
   });
 });

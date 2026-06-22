@@ -2,6 +2,7 @@
 // If the JSON schema changes, this MUST mirror it; tests assert symmetry.
 
 import { z } from "zod";
+import { MODE_NAMES } from "./modes.js";
 
 export const ProviderIdSchema = z.enum([
   "anthropic",
@@ -53,6 +54,9 @@ export const RoleNameSchema = z.enum([
   "oraclePlanner",
 ]);
 export type RoleName = z.infer<typeof RoleNameSchema>;
+
+export const ModeNameSchema = z.enum(MODE_NAMES);
+export type ModeNameParsed = z.infer<typeof ModeNameSchema>;
 
 export const SpendAuthorizationModeSchema = z.enum([
   "interactive",
@@ -281,6 +285,37 @@ export const CodexProfileSchema = z
 export const CodexProfilesSchema = z.record(z.string().min(1), CodexProfileSchema);
 export type CodexProfiles = z.infer<typeof CodexProfilesSchema>;
 
+export const ProfileRolesSchema = z
+  .object({
+    researcher: RoleConfigSchema.optional(),
+    coder: RoleConfigSchema.optional(),
+    reviewer: RoleConfigSchema.optional(),
+    reviewerClaude: RoleConfigSchema.optional(),
+    coderCli: RoleConfigSchema.optional(),
+    oraclePlanner: RoleConfigSchema.optional(),
+  })
+  .strict();
+export const ProfileFallbacksSchema = z
+  .object({
+    researcher: z.array(RoleNameSchema).min(1).optional(),
+    coder: z.array(RoleNameSchema).min(1).optional(),
+    reviewer: z.array(RoleNameSchema).min(1).optional(),
+    reviewerClaude: z.array(RoleNameSchema).min(1).optional(),
+    coderCli: z.array(RoleNameSchema).min(1).optional(),
+    oraclePlanner: z.array(RoleNameSchema).min(1).optional(),
+  })
+  .strict();
+export const ProfileSchema = z
+  .object({
+    roles: ProfileRolesSchema.optional(),
+    fallbacks: ProfileFallbacksSchema.optional(),
+    mode: ModeNameSchema.optional(),
+  })
+  .strict();
+export const ProfilesSchema = z.record(z.string().min(1), ProfileSchema);
+export type Profile = z.infer<typeof ProfileSchema>;
+export type Profiles = z.infer<typeof ProfilesSchema>;
+
 export const ComposerConfigSchema = z
   .object({
     roles: z
@@ -299,6 +334,8 @@ export const ComposerConfigSchema = z
     codexLifecycle: CodexLifecycleSchema.optional(),
     oracle: OracleConfigSchema.optional(),
     codexProfiles: CodexProfilesSchema.optional(),
+    activeProfile: z.string().min(1).optional(),
+    profiles: ProfilesSchema.optional(),
   })
   .strict();
 export type ComposerConfig = z.infer<typeof ComposerConfigSchema>;

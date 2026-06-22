@@ -114,6 +114,44 @@ describe("parseConfig (zod mirror of composer.config.schema.json)", () => {
     expect(cfg.roles.oraclePlanner?.cli).toContain("scripts/oracle-plan-mcp.sh");
   });
 
+  it("accepts executor profiles with only roles, fallbacks, and mode", () => {
+    const cfg = parseConfig({
+      ...VALID,
+      activeProfile: "local",
+      profiles: {
+        local: {
+          roles: {
+            coder: { provider: "mock", model: "local-coder" },
+            coderCli: { provider: "cli", cli: ["codex", "exec"] },
+          },
+          fallbacks: {
+            coder: ["coderCli", "reviewer"],
+          },
+          mode: "strict",
+        },
+      },
+    });
+
+    expect(cfg.activeProfile).toBe("local");
+    expect(cfg.profiles?.local?.roles?.coder?.provider).toBe("mock");
+    expect(cfg.profiles?.local?.fallbacks?.coder).toEqual(["coderCli", "reviewer"]);
+    expect(cfg.profiles?.local?.mode).toBe("strict");
+  });
+
+  it("rejects brain or harness keys inside executor profiles", () => {
+    expect(() =>
+      parseConfig({
+        ...VALID,
+        profiles: {
+          local: {
+            roles: { coder: { provider: "mock" } },
+            brain: { provider: "mock" },
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("rejects unsupported role name", () => {
     expect(() =>
       parseConfig({

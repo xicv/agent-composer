@@ -9,6 +9,7 @@ import path from "node:path";
 import type { ProviderRegistry } from "./registry.js";
 import type { ComposerConfig } from "./config/schema.js";
 import { loadConfig as loadComposerConfig } from "./config/loader.js";
+import { resolveEffectiveConfig } from "./config/profiles.js";
 import type { ComposerServerOptions, SessionOverrides } from "./tools/context.js";
 import { registerResearchTools } from "./tools/research.js";
 import { registerCodeTools } from "./tools/code.js";
@@ -76,7 +77,7 @@ export function refreshConfigIfChanged({
       return;
     }
     setActiveConfig(nextConfig);
-    registry.setConfig(nextConfig);
+    registry.setConfig(resolveEffectiveConfig(nextConfig).config);
     state.lastConfigMtimeMs = mtimeMs;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -90,6 +91,9 @@ export function createComposerServer(
 ): McpServer {
   const root = path.resolve(options.root ?? process.cwd());
   let activeConfig: ComposerConfig | undefined = options.config;
+  let activeEffectiveFallbacks = activeConfig
+    ? resolveEffectiveConfig(activeConfig).effectiveFallbacks
+    : {};
   const configRefreshState: ConfigRefreshState = {};
   let session: SessionOverrides = {};
   const activeRuns = createActiveRunTracker();
@@ -110,6 +114,7 @@ export function createComposerServer(
     getActiveConfig: () => activeConfig,
     setActiveConfig: (c: ComposerConfig | undefined) => {
       activeConfig = c;
+      activeEffectiveFallbacks = c ? resolveEffectiveConfig(c).effectiveFallbacks : {};
     },
     refreshConfigIfChanged: () => {
       refreshConfigIfChanged({
@@ -122,6 +127,7 @@ export function createComposerServer(
         state: configRefreshState,
       });
     },
+    getEffectiveFallbacks: () => ({ ...activeEffectiveFallbacks }),
     getSession: () => ({ ...session, ...(session.oracle ? { oracle: { ...session.oracle } } : {}) }),
     setSession: (patch: Partial<SessionOverrides>) => {
       session = {

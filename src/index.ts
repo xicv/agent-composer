@@ -8,6 +8,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig } from "./config/loader.js";
 import { applyEnvJson } from "./config/env.js";
+import { resolveEffectiveConfig } from "./config/profiles.js";
 import { ProviderRegistry } from "./registry.js";
 import { createComposerServer } from "./server.js";
 import { runInit, runGlobalInit } from "./cli/init.js";
@@ -121,7 +122,7 @@ async function main(): Promise<void> {
 
   applyEnvJson(ENV_PATH);
   const config = loadConfig(CONFIG_PATH);
-  const registry = new ProviderRegistry(config);
+  const registry = new ProviderRegistry(resolveEffectiveConfig(config).config);
   const server = createComposerServer(registry, { config, configPath: CONFIG_PATH });
   const transport = new StdioServerTransport();
   await server.connect(transport);
