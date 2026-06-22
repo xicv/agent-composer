@@ -17,4 +17,12 @@ describe("timeout consistency", () => {
     const cfg = parseConfig(JSON.parse(readFileSync("composer.config.json", "utf8")));
     expect(cfg.roles.oraclePlanner?.timeoutMs).toBe(ORACLE_BROWSER_TIMEOUT_MS);
   });
+
+  it("keeps the checked-in sample executor profile valid and inert", () => {
+    const cfg = parseConfig(JSON.parse(readFileSync("composer.config.json", "utf8")));
+
+    expect(cfg.activeProfile).toBeUndefined();
+    expect(cfg.profiles?.["glm-coder"]?.roles?.coder?.provider).toBe("anthropic");
+    expect(cfg.profiles?.["glm-coder"]?.fallbacks?.coderCli).toEqual(["coder"]);
+  });
 });

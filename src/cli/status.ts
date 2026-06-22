@@ -3,6 +3,7 @@ import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../config/loader.js";
 import type { ComposerConfig } from "../config/schema.js";
+import { resolveEffectiveConfig, type ResolvedProfileSource } from "../config/profiles.js";
 import { globalConfigDir } from "../config/paths.js";
 import { readLatestOracleJob } from "../util/oracleJob.js";
 import { readLatestCodexLifecycleJob } from "../util/codexLifecycleJob.js";
@@ -18,6 +19,12 @@ export interface ComposerStatus {
     mode: "fast" | "balanced" | "strict" | null;
     oracleDefaultMode?: string;
     oracleRequireExplicitTag?: boolean;
+  };
+  executorProfile: {
+    active: string | null;
+    source: ResolvedProfileSource;
+    available: string[];
+    warnings: string[];
   };
   session?: {
     mode?: string;
@@ -76,6 +83,19 @@ function deriveMode(config: ComposerConfig | undefined): "fast" | "balanced" | "
   if (review && lc && failClosed && lcMode === "auto") return "strict";
   if (review && lc) return "balanced";
   return null;
+}
+
+function executorProfileStatus(config: ComposerConfig | undefined): ComposerStatus["executorProfile"] {
+  if (!config) {
+    return { active: null, source: "default", available: [], warnings: [] };
+  }
+  const resolved = resolveEffectiveConfig(config);
+  return {
+    active: resolved.resolvedProfile,
+    source: resolved.resolvedProfileSource,
+    available: Object.keys(config.profiles ?? {}).sort(),
+    warnings: resolved.warnings,
+  };
 }
 
 function recommend(params: {
@@ -179,6 +199,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
   };
 
   const mode = deriveMode(config);
+  const executorProfile = executorProfileStatus(config);
 
   if (opts.fast) {
     return {
@@ -190,6 +211,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
         oracleDefaultMode: config?.oracle?.defaultMode,
         oracleRequireExplicitTag: config?.oracle?.requireExplicitTag,
       },
+      executorProfile,
       integrations,
       active: {},
       latestJob: {},
@@ -290,6 +312,7 @@ export function buildStatus(cwd: string, opts: { nowMs?: number; fast?: boolean 
       oracleDefaultMode: config?.oracle?.defaultMode,
       oracleRequireExplicitTag: config?.oracle?.requireExplicitTag,
     },
+    executorProfile,
     integrations,
     active,
     latestJob,
@@ -374,6 +397,12 @@ export function renderStatusHuman(s: ComposerStatus): string {
     lines.push(`  codexReview:      ${s.integrations.codexReview ? "enabled" : "disabled"}`);
     lines.push(`  codexLifecycle:   ${s.integrations.codexLifecycle ? "enabled" : "disabled"}`);
     lines.push(`  oraclePlanner:    ${s.integrations.oraclePlanner ? "configured" : "not configured"}`);
+    lines.push(
+      `  executorProfile:  ${s.executorProfile.active ?? "default"} (${s.executorProfile.source}; available=${s.executorProfile.available.length > 0 ? s.executorProfile.available.join(",") : "none"})`,
+    );
+    for (const warning of s.executorProfile.warnings) {
+      lines.push(`  profile warning:  ${warning}`);
+    }
     if (s.config.oracleDefaultMode !== undefined) {
       lines.push(`  oracle.defaultMode: ${s.config.oracleDefaultMode}`);
     }

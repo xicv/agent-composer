@@ -24,6 +24,7 @@ const MINIMAL_CONFIG = JSON.stringify(
 describe("buildStatus", () => {
   let tmp: string;
   let previousComposerConfig: string | undefined;
+  let previousComposerProfile: string | undefined;
   let previousComposerStateDir: string | undefined;
   let previousComposerDisabled: string | undefined;
   let previousXdgConfigHome: string | undefined;
@@ -34,11 +35,13 @@ describe("buildStatus", () => {
     tmp = mkdtempSync(join(tmpdir(), "composer-status-test-"));
     stateDir = mkdtempSync(join(tmpdir(), "composer-status-state-"));
     previousComposerConfig = process.env["COMPOSER_CONFIG"];
+    previousComposerProfile = process.env["COMPOSER_PROFILE"];
     previousComposerStateDir = process.env[COMPOSER_STATE_DIR_ENV];
     previousComposerDisabled = process.env["COMPOSER_DISABLED"];
     previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
     previousHome = process.env["HOME"];
     delete process.env["COMPOSER_CONFIG"];
+    delete process.env["COMPOSER_PROFILE"];
     delete process.env["COMPOSER_DISABLED"];
     delete process.env["XDG_CONFIG_HOME"];
     process.env["HOME"] = tmp;
@@ -48,6 +51,8 @@ describe("buildStatus", () => {
   afterEach(() => {
     if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
     else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+    if (previousComposerProfile === undefined) delete process.env["COMPOSER_PROFILE"];
+    else process.env["COMPOSER_PROFILE"] = previousComposerProfile;
     if (previousComposerStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
     else process.env[COMPOSER_STATE_DIR_ENV] = previousComposerStateDir;
     if (previousComposerDisabled === undefined) delete process.env["COMPOSER_DISABLED"];
@@ -91,6 +96,75 @@ describe("buildStatus", () => {
     expect(status.integrations.oraclePlanner).toBe(false);
     expect(status.integrations.gitHook).toBe("off");
     expect(status.integrations.gitHookInstalled).toBe(false);
+    expect(status.executorProfile).toEqual({
+      active: null,
+      source: "default",
+      available: [],
+      warnings: [],
+    });
+  });
+
+  it("surfaces active executor profile selected from config", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+      },
+      activeProfile: "mock-coder",
+      profiles: {
+        "z-last": {},
+        "mock-coder": {
+          roles: {
+            coder: { provider: "mock", model: "profile-coder" },
+          },
+        },
+      },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+
+    const status = buildStatus(tmp);
+
+    expect(status.executorProfile).toEqual({
+      active: "mock-coder",
+      source: "config",
+      available: ["mock-coder", "z-last"],
+      warnings: [],
+    });
+  });
+
+  it("surfaces COMPOSER_PROFILE as the active executor profile source", () => {
+    const config = {
+      roles: {
+        researcher: { provider: "mock", model: "r" },
+        coder: { provider: "mock", model: "c" },
+        reviewer: { provider: "mock", model: "v" },
+      },
+      activeProfile: "from-config",
+      profiles: {
+        "from-config": {
+          roles: {
+            coder: { provider: "mock", model: "config-coder" },
+          },
+        },
+        "from-env": {
+          roles: {
+            coder: { provider: "mock", model: "env-coder" },
+          },
+        },
+      },
+    };
+    writeFileSync(join(tmp, "composer.config.json"), JSON.stringify(config), "utf8");
+    process.env["COMPOSER_PROFILE"] = "from-env";
+
+    const status = buildStatus(tmp);
+
+    expect(status.executorProfile).toEqual({
+      active: "from-env",
+      source: "env",
+      available: ["from-config", "from-env"],
+      warnings: [],
+    });
   });
 
   it("reflects codexReview.enabled from config", () => {
@@ -519,6 +593,36 @@ describe("buildStatus", () => {
 });
 
 describe("renderStatusLine", () => {
+  let tmpHome: string;
+  let previousComposerDisabled: string | undefined;
+  let previousComposerDisabledFile: string | undefined;
+  let previousComposerEnabled: string | undefined;
+  let previousHome: string | undefined;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "composer-renderline-home-"));
+    previousComposerDisabled = process.env["COMPOSER_DISABLED"];
+    previousComposerDisabledFile = process.env["COMPOSER_DISABLED_FILE"];
+    previousComposerEnabled = process.env["COMPOSER_ENABLED"];
+    previousHome = process.env["HOME"];
+    delete process.env["COMPOSER_DISABLED"];
+    delete process.env["COMPOSER_DISABLED_FILE"];
+    delete process.env["COMPOSER_ENABLED"];
+    process.env["HOME"] = tmpHome;
+  });
+
+  afterEach(() => {
+    if (previousComposerDisabled === undefined) delete process.env["COMPOSER_DISABLED"];
+    else process.env["COMPOSER_DISABLED"] = previousComposerDisabled;
+    if (previousComposerDisabledFile === undefined) delete process.env["COMPOSER_DISABLED_FILE"];
+    else process.env["COMPOSER_DISABLED_FILE"] = previousComposerDisabledFile;
+    if (previousComposerEnabled === undefined) delete process.env["COMPOSER_ENABLED"];
+    else process.env["COMPOSER_ENABLED"] = previousComposerEnabled;
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
   it("returns a single line starting with 'CMP ' containing R: L: O: H: and no objective text", () => {
     const tmp2 = mkdtempSync(join(tmpdir(), "composer-renderline-"));
     try {

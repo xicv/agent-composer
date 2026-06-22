@@ -103,6 +103,23 @@
       "maxResultChars": 14000
     }
   },
+  "profiles": {
+    "glm-coder": {
+      "roles": {
+        "coder": {
+          "provider": "anthropic",
+          "apiKeyEnv": "ANTHROPIC_AUTH_TOKEN",
+          "baseUrl": "https://api.z.ai/api/anthropic",
+          "model": "glm-5.2-profile"
+        }
+      },
+      "fallbacks": {
+        "coderCli": [
+          "coder"
+        ]
+      }
+    }
+  },
   "spendAuthorization": {
     "mode": "auto",
     "maxUsdPerSession": 50,
