@@ -39,7 +39,7 @@ export const NextActionToolSchema = z.enum([
   "composer_code_cli",
   "composer_codex_lifecycle_run",
   "composer_oracle_plan",
-  "composer_goal_status",
+  "composer_goal",
   "composer_goal_step",
   "composer_route_decide",
 ]);
@@ -280,7 +280,8 @@ export function stepGoal(
     if (overBudget) {
       const verdict = record.checks.some((check) => check.status === "fail") ? "failed" : "blocked";
       const nextAction: NextAction = {
-        tool: "composer_goal_status",
+        tool: "composer_goal",
+        args: { action: "status" },
         reason: verdict === "failed"
           ? "condition not met within budget - goal failed"
           : "budget/turn cap reached - extend budget (budgetExtension) or clear",
@@ -379,9 +380,10 @@ function decideNextAction(
   if (pendingChecks.length > 0) {
     const pendingNames = pendingChecks.map((check) => check.name);
     return {
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       manualChecks: pendingNames,
-      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal({action:\"status\"}) shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     };
   }
 

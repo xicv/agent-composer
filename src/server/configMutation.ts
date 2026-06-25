@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { globalConfigDir } from "../config/paths.js";
-import { isPathInside } from "../util/applyFileBlocks.js";
+import { isPathInside } from "../util/projectDir.js";
 import { ORACLE_PLANNER_ROLE } from "../config/oracleRole.js";
 
 export type ConfigScope = "active" | "project" | "global";

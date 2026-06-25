@@ -1,1 +1,1 @@
-{ "hook_event_name": "PreToolUse", "tool_name": "mcp__composer__composer_code", "tool_input": { "prompt": "add slugify" }, "session_id": "test-session" }
+{ "hook_event_name": "PreToolUse", "tool_name": "mcp__composer__composer_code_cli", "tool_input": { "prompt": "add slugify" }, "session_id": "test-session" }

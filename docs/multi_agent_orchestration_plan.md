@@ -17,10 +17,10 @@ Verified against the latest Anthropic docs (see [Skills explained](https://claud
 
 | Layer | Purpose | Where Composer uses it |
 |-------|---------|----------------------|
-| **MCP server** | Connectivity to external systems / providers | `composer-mcp` exposes `composer_research`, `composer_code`, `composer_review`, and optional escalation tools — each routed to a pluggable provider |
+| **MCP server** | Connectivity to external systems / providers | `composer-mcp` exposes `composer_research`, `composer_code_cli`, `composer_review`, and optional escalation tools — each routed to a pluggable provider |
 | **Skills** (`.claude/skills/<name>/SKILL.md`) | Reusable expertise, progressive disclosure, unbounded knowledge | `composer-mastermind` (router behavior), `composer-evolve` (self-improvement) |
 | **Agent** (main session) | Orchestration, memory, planning, thinking | Claude (Opus 4.7) — never writes code itself |
-| **Subagents** (`.claude/agents/<role>.md`) | Isolated context window, scoped tool access, separate model selection | `researcher.md`, `coder.md`, `reviewer.md`, `reviewer-claude.md` — each gets one MCP tool and nothing else |
+| **Subagents** (`.claude/agents/<role>.md`) | Isolated context window, scoped tool access, separate model selection | `researcher.md`, `reviewer.md`, `reviewer-claude.md`, `explorer.md` — scoped wrappers for high-volume isolation |
 | **Hooks** (`settings.json → hooks`) | Deterministic enforcement (cannot hallucinate) | `PreToolUse` blocks Edit/Write at the system level; native Bash remains available for inspection and verification |
 | **Agent Teams** | Experimental peer-to-peer Claude sessions | *Not used in v2* — token-expensive, session-resumption issues |
 | **Channels** | MCP push messages into session | *Not used in v2* — research preview only as of April 2026 |
@@ -35,7 +35,7 @@ The role names are deliberately provider-agnostic — Composer never says "Gemin
 |------|---------------|------------------|--------------|
 | Orchestrator | Claude (main session) | Anthropic Opus 4.7 | — (fixed; no API key needed under Max5 plan) |
 | Researcher | `composer_research` | `agy` CLI (Gemini 3.1, `--print` mode) | Kimi / Perplexity / web-search MCP |
-| Coder | `composer_code` | GLM 5.1 via Anthropic-compatible endpoint (decided 2026-05-23) | Kimi / MiniMax / DeepSeek (via OpenAI-compat adapter) |
+| Coder CLI | `composer_code_cli` | Codex/CLI executor | agy / Gemini / bounded CLI executor |
 | Reviewer | `composer_review` | `agy` CLI (Gemini 3.1, `--print` mode) | GLM / Kimi / Claude-Haiku |
 | Premium reviewer | `composer_review_claude` | bounded `claude -p` CLI | Opus / Sonnet |
 | Final integrator | Claude (main session) | Anthropic Opus 4.7 | — |
@@ -45,7 +45,7 @@ The role names are deliberately provider-agnostic — Composer never says "Gemin
 - GLM coder uses Anthropic-native base URL + API key only. OpenAI-compat path becomes a *future* swap option, not a parallel default.
 - Subagent reload latency acceptable.
 
-**Workflow**: Claude → `composer_research` → Claude (plan) → `composer_code` → `composer_review` → Claude (integrate).
+**Workflow**: Claude → `composer_research` → Claude (plan) → `composer_code_cli` → `composer_review` → Claude (integrate).
 
 ---
 
@@ -126,7 +126,7 @@ export interface IProvider {
 
 ```typescript
 server.registerTool(
-  "composer_code",
+  "composer_code_cli",
   {
     description:
       "MANDATORY for ALL code writing, refactoring, debugging. " +
@@ -157,7 +157,7 @@ Per MCP SDK 1.29 (verified via context7 query and [MCP tool annotations blog](ht
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
 | `composer_research` | **true** — returns research notes | false | false (web state may shift) | **true** — talks to web/agy |
-| `composer_code` | false — returns *new code text*, but does not modify repo state | false | false | false — LLM-only, no I/O |
+| `composer_code_cli` | false — applies code through the CLI executor | **true** | false | false |
 | `composer_review` | **true** — returns findings only | false | **true** — same diff → same findings | false |
 | `composer_review_claude` | **true** — returns findings only | false | **true** — same diff → same findings | false |
 
@@ -188,22 +188,10 @@ A `ProviderFactory` reads this file and instantiates the right adapter at startu
 
 Each subagent is a markdown file with YAML frontmatter. The `tools:` allowlist is the boundary that makes it impossible for a subagent to step outside its lane.
 
-### `.claude/agents/coder.md`
+### Code lane
 
-```markdown
----
-name: coder
-description: Use PROACTIVELY for any code writing, refactoring, or implementation. Delegates to composer_code MCP tool.
-tools: mcp__composer__composer_code, Read, Glob
-model: haiku
----
-
-You are the Composer Coder subagent. Your only job is to call the
-composer_code MCP tool with the user's implementation request and
-return its output to the orchestrator. You do not write code yourself.
-You do not edit files. Read tools are available so you can quote the
-relevant file path/context into the prompt argument.
-```
+Code work goes directly through `composer_code_cli`; the retired coder
+subagent is no longer installed.
 
 `researcher.md` and `reviewer.md` follow the same shape with their respective MCP tool. Picking `model: haiku` for the wrapper keeps subagent overhead at ~3× lower cost than Opus.
 
@@ -224,7 +212,7 @@ Anthropic's `deny` permission has had two known enforcement bugs in 2026 ([#1884
       "Read", "Glob", "Grep",
       "Task",
       "mcp__composer__composer_research",
-      "mcp__composer__composer_code",
+      "mcp__composer__composer_code_cli",
       "mcp__composer__composer_review",
       "mcp__composer__composer_review_claude"
     ]
@@ -311,7 +299,6 @@ composer/
 │   ├── settings.json             # deny list + hooks + mcpServers
 │   ├── agents/
 │   │   ├── researcher.md
-│   │   ├── coder.md
 │   │   ├── reviewer.md
 │   │   └── reviewer-claude.md
 │   └── skills/

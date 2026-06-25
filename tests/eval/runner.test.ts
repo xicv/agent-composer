@@ -94,20 +94,16 @@ describe("EvalRunner — single task", () => {
     expect(result.success).toBe(false);
   });
 
-  it("dispatchedCorrectly honors computeDispatched override", async () => {
+  it("omits dispatch accuracy because this harness has no real dispatch signal", async () => {
     const provider = new MockProvider();
-    const runner = new EvalRunner({
-      provider,
-      budget: new BudgetGuard({ maxCalls: 10, maxUsd: 10 }),
-      computeDispatched: () => false,
-    });
+    const runner = makeRunner(provider);
     const result = await runner.runTask({
       id: "t",
       class: "pure-function-add",
       prompt: "p",
       expect: {},
     });
-    expect(result.dispatchedCorrectly).toBe(false);
+    expect(result).not.toHaveProperty("dispatchedCorrectly");
   });
 });
 

@@ -41,8 +41,6 @@ describe("route-compare helpers", () => {
 
   it("builds route-specific prompt guards", () => {
     expect(routePrompt("cc-only", task)).toContain("Do not use Composer");
-    expect(routePrompt("composer-glm-chain", task)).toContain("composer_code_chain");
-    expect(routePrompt("composer-glm-chain", task)).toContain("Do not use mcp__composer__composer_code_cli");
     expect(routePrompt("composer-codex-cli", task)).toContain("composer_code_cli");
   });
 

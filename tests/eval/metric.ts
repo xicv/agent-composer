@@ -1,8 +1,8 @@
 // Wave 2 F2.2 — composite scoring per plan §7.
 //
-//   task_score = 0.5 * success(0|1)
-//              + 0.3 * (1 - main_session_tokens / baseline)
-//              + 0.2 * dispatched_correctly(0|1)
+//   task_score = success/token composite for synthetic harness results.
+//   Real eval paths may include dispatchedCorrectly, derived from observed
+//   tool-use sequence, and then receive the dispatch component.
 //
 // Weights are config-overridable (must sum to 1.0). The baseline must
 // be measured ONCE on stock Claude Max5 — see evals/SUCCESS.md.
@@ -54,18 +54,25 @@ const DEFAULTS = { success: 0.5, token: 0.3, dispatch: 0.2 };
 export interface TaskScore {
   taskId: string;
   score: number;
-  components: { success: number; token: number; dispatch: number };
+  components: { success: number; token: number; dispatch?: number };
 }
 
 export function scoreTask(
-  result: EvalResult,
+  result: EvalResult & { dispatchedCorrectly?: boolean },
   config: MetricConfig,
 ): TaskScore {
-  const w = {
-    success: config.successWeight ?? DEFAULTS.success,
-    token: config.tokenWeight ?? DEFAULTS.token,
-    dispatch: config.dispatchWeight ?? DEFAULTS.dispatch,
-  };
+  const hasDispatchSignal = typeof result.dispatchedCorrectly === "boolean";
+  const w = hasDispatchSignal
+    ? {
+        success: config.successWeight ?? DEFAULTS.success,
+        token: config.tokenWeight ?? DEFAULTS.token,
+        dispatch: config.dispatchWeight ?? DEFAULTS.dispatch,
+      }
+    : {
+        success: config.successWeight ?? DEFAULTS.success / (DEFAULTS.success + DEFAULTS.token),
+        token: config.tokenWeight ?? DEFAULTS.token / (DEFAULTS.success + DEFAULTS.token),
+        dispatch: config.dispatchWeight ?? 0,
+      };
   const sum = w.success + w.token + w.dispatch;
   if (Math.abs(sum - 1) > 1e-6) {
     throw new Error(`metric weights must sum to 1.0, got ${sum.toFixed(4)}`);
@@ -79,15 +86,17 @@ export function scoreTask(
       ? Math.max(0, 1 - result.mainSessionTokens / config.baselineMainTokens)
       : 0;
 
-  const components = {
+  const components: TaskScore["components"] = {
     success: w.success * (result.success ? 1 : 0),
     token: w.token * tokenRatio,
-    dispatch: w.dispatch * (result.dispatchedCorrectly ? 1 : 0),
   };
+  if (hasDispatchSignal) {
+    components.dispatch = w.dispatch * (result.dispatchedCorrectly ? 1 : 0);
+  }
 
   return {
     taskId: result.taskId,
-    score: components.success + components.token + components.dispatch,
+    score: components.success + components.token + (components.dispatch ?? 0),
     components,
   };
 }

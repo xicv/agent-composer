@@ -30,7 +30,7 @@ describe("release-sync script", () => {
   it("--check lists all sync pairs", () => {
     const r = runScript(["--check"]);
     expect(r.stdout).toContain(".claude/skills/composer-mastermind/SKILL.md");
-    expect(r.stdout).toContain(".claude/agents/coder.md");
+    expect(r.stdout).toContain(".claude/agents/researcher.md");
     expect(r.stdout).toContain(".claude/agents/researcher.md");
     expect(r.stdout).toContain(".claude/agents/reviewer.md");
     expect(r.stdout).toContain(".claude/agents/reviewer-claude.md");

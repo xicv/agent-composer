@@ -308,7 +308,7 @@ describe("run-evolve helpers", () => {
           expected: ["reviewer"],
         },
         {
-          blocks: [{ name: "mcp__composer__composer_code", input: {} }],
+          blocks: [{ name: "mcp__composer__composer_code_cli", input: {} }],
           expected: ["coder"],
         },
         {
@@ -325,7 +325,7 @@ describe("run-evolve helpers", () => {
         },
         {
           blocks: [
-            { name: "mcp__composer__composer_code", input: {} },
+            { name: "mcp__composer__composer_code_cli", input: {} },
             { name: "mcp__composer__composer_review", input: {} },
           ],
           expected: ["coder", "reviewer"],
@@ -490,7 +490,7 @@ describe("createRealEvaluate — worktree isolation", () => {
                     content: [
                       {
                         type: "tool_use",
-                        name: "mcp__composer__composer_code",
+                        name: "mcp__composer__composer_code_cli",
                         input: {},
                       },
                     ],

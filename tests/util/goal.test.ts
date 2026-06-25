@@ -433,9 +433,10 @@ describe("goal", () => {
     expect(result.record.state).toBe("active");
     expect(result.record.checks.map((check) => check.status)).toEqual(["pending", "pending"]);
     expect(result.nextAction).toEqual({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       manualChecks: ["unit", "typecheck"],
-      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal({action:\"status\"}) shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     });
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_UNIT_COMMAND");
     expect(JSON.stringify(result.nextAction)).not.toContain("RAW_TYPECHECK_COMMAND");
@@ -679,7 +680,8 @@ describe("goal", () => {
 
     expect(result.record.state).toBe("failed");
     expect(result.record.turns).toBe(2);
-    expect(result.nextAction.tool).toBe("composer_goal_status");
+    expect(result.nextAction.tool).toBe("composer_goal");
+    expect(result.nextAction.args).toEqual({ action: "status" });
     expect(result.nextAction.reason).toBe("condition not met within budget - goal failed");
   });
 
@@ -707,7 +709,8 @@ describe("goal", () => {
     expect(second.record.state).toBe("blocked");
     expect(second.record.spentUsd).toBe(1);
     expect(second.nextAction).toEqual({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       reason: "budget/turn cap reached - extend budget (budgetExtension) or clear",
     });
   });
@@ -805,7 +808,8 @@ describe("goal", () => {
     expect(result.record.checks[0]?.status).toBe("fail");
     expect(result.record.checks[0]?.command).toBe("true");
     expect(result.nextAction).toEqual({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       reason: "condition not met within budget - goal failed",
     });
   });
@@ -831,7 +835,8 @@ describe("goal", () => {
     expect(result.record.turns).toBe(2);
     expect(result.record.checks[0]?.status).toBe("pending");
     expect(result.nextAction).toEqual({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       reason: "budget/turn cap reached - extend budget (budgetExtension) or clear",
     });
   });

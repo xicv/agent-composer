@@ -60,8 +60,9 @@ describe("composer goal MCP tools", () => {
     const { client } = await bootClient(root);
 
     const started = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "ship goal tool",
         condition: "check passes",
         checks: [{ name: "unit", command: "true" }],
@@ -72,15 +73,15 @@ describe("composer goal MCP tools", () => {
     expect(started.nextAction).toMatchObject({ tool: "composer_route_decide", reason: "begin" });
 
     const status = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_status",
-      arguments: { goalId: started.goalId },
+      name: "composer_goal",
+      arguments: { action: "status", goalId: started.goalId },
     })));
     expect(status.state).toBe("active");
     expect(status.turns).toBe(0);
 
     const statusAgain = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_status",
-      arguments: { goalId: started.goalId },
+      name: "composer_goal",
+      arguments: { action: "status", goalId: started.goalId },
     })));
     expect(statusAgain.turns).toBe(0);
 
@@ -91,9 +92,10 @@ describe("composer goal MCP tools", () => {
     expect(pending.state).toBe("active");
     expect(pending.turns).toBe(1);
     expect(pending.nextAction).toMatchObject({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       manualChecks: ["unit"],
-      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal({action:\"status\"}) shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     });
     expect(JSON.stringify(pending.nextAction)).not.toContain("true");
 
@@ -116,16 +118,17 @@ describe("composer goal MCP tools", () => {
     const { client } = await bootClient(root);
 
     const active = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "cancel active",
         condition: "clear reports cancelled",
       },
     })));
 
     const cancelled = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_clear",
-      arguments: { goalId: active.goalId },
+      name: "composer_goal",
+      arguments: { action: "clear", goalId: active.goalId },
     })));
     expect(cancelled).toMatchObject({
       goalId: active.goalId,
@@ -134,8 +137,9 @@ describe("composer goal MCP tools", () => {
     });
 
     const achieving = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "clear achieved",
         condition: "check passes",
         checks: [{ name: "unit", command: "true" }],
@@ -151,8 +155,8 @@ describe("composer goal MCP tools", () => {
     expect(achieved.state).toBe("achieved");
 
     const unchanged = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_clear",
-      arguments: { goalId: achieving.goalId },
+      name: "composer_goal",
+      arguments: { action: "clear", goalId: achieving.goalId },
     })));
     expect(unchanged).toMatchObject({
       goalId: achieving.goalId,
@@ -165,8 +169,9 @@ describe("composer goal MCP tools", () => {
     const { client } = await bootClient(root);
 
     const started = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "watch budget",
         condition: "stay under spend cap",
         maxCost: 1,
@@ -183,7 +188,8 @@ describe("composer goal MCP tools", () => {
 
     expect(stepped.state).toBe("blocked");
     expect(stepped.nextAction).toMatchObject({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       reason: "budget/turn cap reached - extend budget (budgetExtension) or clear",
     });
   });
@@ -192,8 +198,9 @@ describe("composer goal MCP tools", () => {
     const { client } = await bootClient(root);
 
     const started = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "judge transcript",
         condition: "condition is externally satisfied",
       },
@@ -218,8 +225,9 @@ describe("composer goal MCP tools", () => {
     const { client } = await bootClient(root);
 
     const started = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "respect caller veto",
         condition: "condition is still false",
         checks: [{ name: "unit", command: "true" }],
@@ -265,8 +273,9 @@ describe("composer goal MCP tools", () => {
     appendAuditEvent(root, { kind: "tool-call", tool: "composer_code_cli" });
 
     const started = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_start",
+      name: "composer_goal",
       arguments: {
+        action: "start",
         objective: "report through mcp",
         condition: "check visible",
         checks: [{ name: "unit", command: "echo RAW_MCP_COMMAND" }],
@@ -274,8 +283,8 @@ describe("composer goal MCP tools", () => {
     })));
 
     const json = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_report",
-      arguments: { goalId: started.goalId },
+      name: "composer_goal",
+      arguments: { action: "report", goalId: started.goalId },
     })));
     expect(json.goal.checks).toEqual([{ name: "unit", status: "pending" }]);
     expect(json.audit).toBeUndefined();
@@ -283,22 +292,22 @@ describe("composer goal MCP tools", () => {
     expect(JSON.stringify(json)).not.toContain("composer_code_cli");
 
     const jsonWithAudit = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_report",
-      arguments: { goalId: started.goalId, includeAudit: true },
+      name: "composer_goal",
+      arguments: { action: "report", goalId: started.goalId, includeAudit: true },
     })));
     expect(jsonWithAudit.audit).toMatchObject({ toolCalls: 1, recent: [] });
     expect(JSON.stringify(jsonWithAudit)).not.toContain("composer_code_cli");
 
     const jsonWithEvents = JSON.parse(textResult(await client.callTool({
-      name: "composer_goal_report",
-      arguments: { goalId: started.goalId, includeAudit: true, includeAuditEvents: true },
+      name: "composer_goal",
+      arguments: { action: "report", goalId: started.goalId, includeAudit: true, includeAuditEvents: true },
     })));
     expect(jsonWithEvents.audit.recent).toHaveLength(1);
     expect(JSON.stringify(jsonWithEvents.audit.recent)).toContain("composer_code_cli");
 
     const markdown = textResult(await client.callTool({
-      name: "composer_goal_report",
-      arguments: { goalId: started.goalId, format: "markdown" },
+      name: "composer_goal",
+      arguments: { action: "report", goalId: started.goalId, format: "markdown" },
     }));
     expect(markdown).toContain("# Goal Report");
     expect(markdown).toContain("| unit | pending |");
@@ -308,30 +317,30 @@ describe("composer goal MCP tools", () => {
     expect(markdown).not.toContain("RAW_MCP_COMMAND");
 
     const markdownWithEvents = textResult(await client.callTool({
-      name: "composer_goal_report",
-      arguments: { goalId: started.goalId, format: "markdown", includeAudit: true, includeAuditEvents: true },
+      name: "composer_goal",
+      arguments: { action: "report", goalId: started.goalId, format: "markdown", includeAudit: true, includeAuditEvents: true },
     }));
     expect(markdownWithEvents).toContain("## Recent project activity (not goal-scoped)");
     expect(markdownWithEvents).toContain("- recent:");
     expect(markdownWithEvents).toContain("composer_code_cli");
   });
 
-  it("declares composer_goal_report read-only and closed-world", async () => {
+  it("declares composer_goal action tool as closed-world", async () => {
     const { client } = await bootClient(root);
 
     const listed = await client.listTools();
-    const report = listed.tools.find((tool) => tool.name === "composer_goal_report");
+    const goal = listed.tools.find((tool) => tool.name === "composer_goal");
 
-    expect(report?.annotations).toMatchObject({
-      readOnlyHint: true,
+    expect(goal?.annotations).toMatchObject({
+      readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: false,
     });
-    expect(report?.description).toContain("read-only summary");
-    expect(report?.description).toContain("excludes raw check commands by default");
-    expect(report?.description).toContain("Audit is opt-in");
-    expect(report?.description).toContain("project-wide activity rather than goal-scoped evidence");
-    expect(report?.description).toContain("raw audit events require includeAuditEvents");
+    expect(goal?.description).toContain("action:\"start\"");
+    expect(goal?.description).toContain("action:\"status\"");
+    expect(goal?.description).toContain("action:\"clear\"");
+    expect(goal?.description).toContain("action:\"report\"");
+    expect(goal?.description).toContain("substrate never runs them");
   });
 });

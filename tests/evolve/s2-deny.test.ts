@@ -20,7 +20,7 @@ describe("S2 deny-pattern prefilter (ADR 0003 S2)", () => {
   });
 
   it("accepts a typical skill text with no escalation primitives", () => {
-    const benign = "When the user asks for code, dispatch to the coder subagent via composer_code.";
+    const benign = "When the user asks for code, dispatch via composer_code_cli.";
     expect(s2DenyPrefilter(benign).allowed).toBe(true);
   });
 

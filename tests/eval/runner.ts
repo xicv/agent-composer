@@ -1,12 +1,8 @@
 // Wave 2 F2.2 — eval runner skeleton.
 //
 // Smoke version: calls the IProvider once per task and scores its output
-// against the task's `expect.outputContains` rule. Wave 3 wires real
-// subagent dispatch so dispatchedCorrectly becomes a meaningful signal.
-//
-// Until then, dispatchedCorrectly defaults to `true` — Wave 2 metric
-// values are intended to verify the metric calculator + budget guard,
-// not to compare Composer against stock Claude.
+// against the task's `expect.outputContains` rule. This harness has no real
+// dispatch trace, so its result shape intentionally omits dispatch accuracy.
 
 import fs from "node:fs";
 import type { IProvider } from "../../src/providers/IProvider.js";
@@ -16,8 +12,6 @@ import { EvalTaskSchema, type EvalTask, type EvalResult } from "./schema.js";
 export interface RunnerOptions {
   provider: IProvider;
   budget: BudgetGuard;
-  /** Override Wave-2 stub for testing. */
-  computeDispatched?: (task: EvalTask) => boolean;
 }
 
 export class EvalRunner {
@@ -45,15 +39,10 @@ export class EvalRunner {
       success = false;
     }
 
-    const dispatchedCorrectly = this.opts.computeDispatched
-      ? this.opts.computeDispatched(task)
-      : true;
-
     return {
       taskId: task.id,
       success,
       mainSessionTokens: workerOut.tokensIn ?? task.prompt.length,
-      dispatchedCorrectly,
       durationMs,
       workerCalls: 1,
       workerTextSample:

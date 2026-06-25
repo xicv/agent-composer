@@ -2,7 +2,6 @@ import { z } from "zod";
 
 export const RouteNameSchema = z.enum([
   "cc-only",
-  "composer-glm-chain",
   "composer-codex-cli",
 ]);
 export type RouteName = z.infer<typeof RouteNameSchema>;

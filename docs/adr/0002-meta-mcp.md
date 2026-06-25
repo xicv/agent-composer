@@ -68,9 +68,9 @@ composer-mastermind/
 │       └── SKILL.md          # orchestrator brain
 ├── agents/
 │   ├── researcher.md         # haiku-wrapped, C0.5 locked tools
-│   ├── coder.md
 │   ├── reviewer.md
-│   └── reviewer-claude.md
+│   ├── reviewer-claude.md
+│   └── explorer.md
 ├── commands/
 │   └── evolve.md             # /evolve slash command
 └── hooks/

@@ -26,7 +26,6 @@ import { registerSessionTools } from "./tools/session.js";
 import { registerGoalTools } from "./tools/goal.js";
 import { createActiveRunTracker } from "./server/activeRuns.js";
 
-export { applyFileBlocks } from "./util/applyFileBlocks.js";
 export * from "./server/toolDescriptions.js";
 export type { ComposerServerOptions } from "./tools/context.js";
 

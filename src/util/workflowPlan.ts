@@ -41,18 +41,18 @@ export function planWorkflow(input: WorkflowPlanInput): WorkflowPlan {
       if (includeOracle) steps.push({ tool: "composer_oracle_plan", why: "High risk / architecture uncertainty — get an extended-reasoning plan (sync).", optional: true });
       steps.push({ tool: "composer_code_cli", why: "Apply the implementation off the main session." });
       if (includeReview) steps.push({ tool: "composer_review", why: "Review the scoped diff (reviewScope: staged|branch) before commit." });
-      steps.push({ tool: "composer_audit_record", why: "Record the route + outcome for evidence.", optional: true });
+      steps.push({ tool: "composer_audit", why: "Record the route + outcome for evidence with action:\"record\".", optional: true });
       break;
     case "debug":
       if (includeOracle) steps.push({ tool: "composer_oracle_plan", why: "Hard root-cause — extended reasoning (sync).", optional: true });
       if (includeResearch) steps.push({ tool: "composer_research", why: "Look up error/API specifics.", optional: true });
       steps.push({ tool: "composer_code_cli", why: "Apply the fix off the main session." });
       if (includeReview) steps.push({ tool: "composer_review", why: "Review the fix diff." });
-      steps.push({ tool: "composer_audit_record", why: "Record the outcome.", optional: true });
+      steps.push({ tool: "composer_audit", why: "Record the outcome with action:\"record\".", optional: true });
       break;
     case "review":
       steps.push({ tool: "composer_review", why: "Review the scoped diff (use reviewScope to avoid pasting)." });
-      steps.push({ tool: "composer_audit_record", why: "Record the verdict.", optional: true });
+      steps.push({ tool: "composer_audit", why: "Record the verdict with action:\"record\".", optional: true });
       break;
     case "research":
       steps.push({ tool: "composer_research", why: "Gather external context/docs." });

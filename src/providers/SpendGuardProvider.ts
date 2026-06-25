@@ -130,5 +130,5 @@ export class SpendGuardProvider implements IProvider {
 }
 
 export function isPricedProvider(id: ProviderId): boolean {
-  return id === "anthropic" || id === "openai_compatible";
+  return id === "anthropic";
 }

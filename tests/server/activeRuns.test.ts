@@ -42,7 +42,7 @@ describe("createActiveRunTracker", () => {
 
   it("finish removes run by id", () => {
     const tracker = createActiveRunTracker();
-    const id = tracker.start({ tool: "composer_code" });
+    const id = tracker.start({ tool: "composer_code_cli" });
     expect(tracker.list()).toHaveLength(1);
     tracker.finish(id);
     expect(tracker.list()).toHaveLength(0);

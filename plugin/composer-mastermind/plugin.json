@@ -23,7 +23,6 @@
     "skills/composer-mastermind/SKILL.md"
   ],
   "agents": [
-    "agents/coder.md",
     "agents/researcher.md",
     "agents/reviewer.md",
     "agents/reviewer-claude.md",

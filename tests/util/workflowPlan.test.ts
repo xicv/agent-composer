@@ -78,11 +78,11 @@ describe("planWorkflow", () => {
     expect(tools).toContain("composer_oracle_plan");
   });
 
-  it("review workflow shape: composer_review then composer_audit_record", () => {
+  it("review workflow shape: composer_review then composer_audit", () => {
     const plan = planWorkflow({ goal: "review pr", workflow: "review" });
     const tools = plan.steps.map((s) => s.tool);
     expect(tools[0]).toBe("composer_review");
-    expect(tools).toContain("composer_audit_record");
+    expect(tools).toContain("composer_audit");
     expect(tools).not.toContain("composer_code_cli");
   });
 

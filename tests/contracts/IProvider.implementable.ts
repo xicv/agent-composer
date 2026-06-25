@@ -18,6 +18,6 @@ const mock: IProvider = {
 };
 
 // Also confirm `id` is narrowed (compile fails if union widens accidentally):
-const _idCheck: "anthropic" | "openai_compatible" | "cli" | "mock" = mock.id;
+const _idCheck: "anthropic" | "cli" | "mock" = mock.id;
 
 export { mock, _idCheck };

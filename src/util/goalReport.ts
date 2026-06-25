@@ -43,7 +43,7 @@ export function recommendNext(record: GoalRecord): { nextAction: string; reason:
   if (isTerminal(record.state)) {
     if (record.state === "achieved") return { nextAction: "none", reason: "goal achieved; review report" };
     if (record.state === "failed") {
-      return { nextAction: "composer_goal_report", reason: "goal failed within budget; review report" };
+      return { nextAction: "composer_goal", reason: "goal failed within budget; review report" };
     }
     return { nextAction: "none", reason: "goal cancelled" };
   }
@@ -58,7 +58,7 @@ export function recommendNext(record: GoalRecord): { nextAction: string; reason:
   const pending = record.checks.filter((check) => check.status === "pending");
   if (pending.length > 0) {
     return {
-      nextAction: "composer_goal_status",
+      nextAction: "composer_goal",
       reason: `pending checks: ${pending.map((check) => check.name).join(", ")} — run them, report via composer_goal_step`,
     };
   }

@@ -30,7 +30,7 @@ const CONFIG_PATH = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
 // chain (cwd → ~/.config/composer/). Passing ".env.json" as a literal explicit
 // path makes loadEnvJson skip the global fallback — broke running
 // agent-composer from any cwd that lacks a local .env.json (manifested as
-// "missing ANTHROPIC_AUTH_TOKEN" from composer_code).
+// "missing ANTHROPIC_AUTH_TOKEN" from the old code lane).
 const ENV_PATH = process.env["COMPOSER_ENV"];
 const CLI_SUBCOMMANDS = new Set([
   "help",

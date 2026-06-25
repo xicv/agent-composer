@@ -83,7 +83,7 @@ Tiny but load-bearing. Lock these before Wave 1 forks.
 
 **C0.1 — `src/providers/IProvider.ts`**
 ```typescript
-export type ProviderId = "anthropic" | "openai_compatible" | "cli" | "mock";
+export type ProviderId = "anthropic" | "cli" | "mock";
 export interface IProvider {
   readonly id: ProviderId;
   readonly modelLabel: string;
@@ -101,9 +101,9 @@ export interface IProvider {
 - Optional per-provider blocks (apiKeyEnv, baseUrl, cli, model)
 - Used by code loader AND a `jq`/`ajv` validation step in CI
 
-**C0.3 — MCP tool names (locked strings)**
+**C0.3 — MCP tool names (locked strings; code lane reduced by ADR 0010)**
 - `composer_research(prompt: string, context?: string)`
-- `composer_code(prompt: string, context?: string)`
+- `composer_code_cli(prompt: string, context?: string)`
 - `composer_review(prompt: string, diff: string)`
 - `composer_review_claude(prompt: string, diff: string)` (optional premium escalation)
 
@@ -136,7 +136,7 @@ No row reads or writes another row's code. Each can be assigned to a separate wo
 | F1.4 | `ProviderFactory` + config loader | C0.1 + C0.2 | Pure unit, no I/O | 45min |
 | F1.5 | `scripts/boundary_guard.sh` | C0.4 | Hook fixtures (~12) | 1h |
 | F1.6 | `.claude/settings.json` template | C0.3 + C0.4 | JSON-schema-validated by CI | 15min |
-| F1.7 | `researcher.md` / `coder.md` / `reviewer.md` / `reviewer-claude.md` | C0.3 + C0.5 | Lint frontmatter + manual smoke | 30min |
+| F1.7 | `researcher.md` / `reviewer.md` / `reviewer-claude.md` / `explorer.md` | C0.3 + C0.5 | Lint frontmatter + manual smoke | 30min |
 | F1.8 | `.claude/skills/composer-mastermind/SKILL.md` (negative-style) | C0.3 | Read-aloud check + Tier-3 eval later | 30min |
 | F1.9 | `tests/hooks/*` fixtures + harness | C0.4 | Self-testing | 30min |
 | F1.10 | `ccusage` install + npm script | none | `npm run usage` outputs report | 10min |
@@ -272,7 +272,7 @@ Day 2 — Tier-2 record (~$0.10 on GLM)
 
 Day 3 — End-to-end smoke
   T3.1  Register MCP with `claude mcp add`.
-  T3.2  Manual: ask Claude in test project to use composer_code. Confirm delegation.
+  T3.2  Manual: ask Claude in test project to use composer_code_cli. Confirm delegation.
   T3.3  Manual: try to make Claude write code directly. Confirm hook blocks.
 
 Day 4+ — Tier-3 autoresearch (budgeted; GLM only)

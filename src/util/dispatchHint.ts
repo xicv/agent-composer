@@ -21,7 +21,6 @@ export type RouteTarget =
   | "task-reviewer"
   | "task-researcher-coder"
   | "composer-code-cli"
-  | "composer-code-chain"
   | "composer-review-claude"
   | "composer-oracle-plan"
   | "composer-oracle-job-start";
@@ -403,7 +402,6 @@ function contextBudgetFor(target: RouteTarget, promptSize: PromptSize): ContextB
     case "task-researcher-coder":
       return "full-brief";
     case "composer-code-cli":
-    case "composer-code-chain":
       return promptSize === "full" ? "full-brief" : "handoff";
     default:
       return "handoff";

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveProjectDir } from "../util/applyFileBlocks.js";
+import { resolveProjectDir } from "../util/projectDir.js";
 import { contextWithHandoff } from "./handoffContext.js";
 import {
   classifyCodexLifecycleUnavailable,

@@ -6,7 +6,6 @@ import { MODE_NAMES } from "./modes.js";
 
 export const ProviderIdSchema = z.enum([
   "anthropic",
-  "openai_compatible",
   "cli",
   "mock",
 ]);

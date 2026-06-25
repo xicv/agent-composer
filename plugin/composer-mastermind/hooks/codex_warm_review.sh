@@ -6,24 +6,8 @@ set -u
 
 RUN_LOG="/tmp/composer-codex-review-log.jsonl"
 
-composer_disabled() {
-  case "${COMPOSER_ENABLED:-}" in
-    0|false|FALSE|off|OFF|no|NO) return 0 ;;
-  esac
-  case "${COMPOSER_DISABLED:-}" in
-    1|true|TRUE|on|ON|yes|YES) return 0 ;;
-  esac
-  if [[ -n "${COMPOSER_DISABLED_FILE:-}" && -e "$COMPOSER_DISABLED_FILE" ]]; then
-    return 0
-  fi
-  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -e "$CLAUDE_PROJECT_DIR/.composer-disabled" ]]; then
-    return 0
-  fi
-  if [[ -n "${HOME:-}" && -e "$HOME/.claude/composer.disabled" ]]; then
-    return 0
-  fi
-  return 1
-}
+_composer_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/composer_disabled.lib.sh"
+if [ -r "$_composer_lib" ]; then . "$_composer_lib"; else composer_disabled() { return 1; }; fi
 
 hash_stdin_16() {
   if command -v shasum >/dev/null 2>&1; then

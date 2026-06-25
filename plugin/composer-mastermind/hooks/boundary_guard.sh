@@ -12,24 +12,8 @@
 
 set -u
 
-composer_disabled() {
-  case "${COMPOSER_ENABLED:-}" in
-    0|false|FALSE|off|OFF|no|NO) return 0 ;;
-  esac
-  case "${COMPOSER_DISABLED:-}" in
-    1|true|TRUE|on|ON|yes|YES) return 0 ;;
-  esac
-  if [[ -n "${COMPOSER_DISABLED_FILE:-}" && -e "$COMPOSER_DISABLED_FILE" ]]; then
-    return 0
-  fi
-  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -e "$CLAUDE_PROJECT_DIR/.composer-disabled" ]]; then
-    return 0
-  fi
-  if [[ -n "${HOME:-}" && -e "$HOME/.claude/composer.disabled" ]]; then
-    return 0
-  fi
-  return 1
-}
+_composer_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/composer_disabled.lib.sh"
+if [ -r "$_composer_lib" ]; then . "$_composer_lib"; else composer_disabled() { return 1; }; fi
 
 if composer_disabled; then
   exit 0
@@ -92,7 +76,8 @@ if [[ -e "$STOP_FILE" ]] && [[ "$TOOL" == mcp__composer__* ]]; then
 fi
 
 # 3.7. Subagent context bypass.
-#   Composer's coder subagent must Edit/Update/Write to apply GLM's patch output.
+#   Composer's removed coder subagent previously needed Edit/Update/Write to
+#   apply GLM patch output. Code writes now route through composer_code_cli.
 #   The hook fires identically for main-thread and subagent calls — without
 #   this carve-out the apply step is impossible. Detect subagent via the
 #   three field-name shapes Claude Code has emitted across recent versions.
@@ -151,7 +136,7 @@ case "$TOOL" in
   Edit|Update|Write|NotebookEdit \
   | mcp__*__write_file | mcp__*__edit_file | mcp__*__bash \
   | mcp__*__write | mcp__*__edit | mcp__*__exec)
-    emit_deny "Expected — not a failure. Composer is routing this edit so changes stay reviewable: apply it with composer_code_cli (or composer_code_chain), or run /composer disable to edit directly. Bash inspection stays available."
+    emit_deny "Expected — not a failure. Composer is routing this edit so changes stay reviewable: apply it with composer_code_cli, or run /composer disable to edit directly. Bash inspection stays available."
     ;;
 esac
 

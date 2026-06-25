@@ -40,7 +40,7 @@
 |---|---|
 | Main Claude session (Opus 4.8) | Orchestration, memory, plans. **No `Edit`/`Write`/`Bash`** — denied in `.claude/settings.json` AND blocked by `scripts/boundary_guard.sh` |
 | Native subagents (`.claude/agents/*.md`) | Wrapping layer for context isolation. Each lists exactly one composer MCP tool + `Read`/`Glob`. Model: `haiku` |
-| MCP server (`src/index.ts`) | Wires `composer_research` / `composer_code` / `composer_review` / `composer_review_claude` to provider adapters; ships C0.3 tool annotations + `Use when…` descriptions |
+| MCP server (`src/index.ts`) | Wires `composer_research` / `composer_code_cli` / `composer_review` / `composer_review_claude` to provider adapters; ships C0.3 tool annotations + `Use when…` descriptions |
 | Providers (`src/providers/*`) | `MockProvider` (free), `AnthropicCompatibleProvider` (GLM via z.ai), `CLIProvider` (`Codex`, `agy`, or bounded `claude -p`, spawn-based with stdin closed) |
 | Config loader (`src/config/env.ts`) | Reads `.env.json` via `fs.readFileSync` — **never** with the `Read` tool |
 | Hooks (`scripts/*.sh`) | `boundary_guard.sh` enforces denials. `learn.sh` (Stop hook) appends user corrections to `.claude/learnings/<month>.md` |

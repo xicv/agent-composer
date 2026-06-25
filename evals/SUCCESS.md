@@ -5,16 +5,13 @@ Companion to `tasks.jsonl`. Defines the metric used by `tests/eval/runner.ts` an
 ## Metric (per plan §7)
 
 ```
-task_score = 0.5 * success(0|1)
-           + 0.3 * (1 - main_session_tokens / baseline)
-           + 0.2 * dispatched_correctly(0|1)
+task_score = 0.625 * success(0|1)
+           + 0.375 * (1 - main_session_tokens / baseline)
 
 aggregate = mean(task_score across tasks)
 ```
 
 `success` — mechanical match against `expect.outputContains` (every substring must appear in the worker output) AND `expect.maxMainTokens` is respected if set.
-
-`dispatched_correctly` — Wave 2 stub returns `true`; Wave 3 will trace the real subagent invocation order against `expect.dispatchSequence`.
 
 `baseline` — the orchestrator-side token count for the same task executed by **stock Claude Max5 without Composer**. This must be measured ONCE per task on a fresh session and frozen.
 

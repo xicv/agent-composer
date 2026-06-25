@@ -59,8 +59,6 @@ function nextToolsFor(target: string): string[] {
   switch (target) {
     case "composer-code-cli":
       return ["composer_handoff_create", "composer_code_cli", "composer_review"];
-    case "composer-code-chain":
-      return ["composer_handoff_create", "composer_code_chain", "composer_review"];
     case "task-researcher-coder":
       return ["composer_research", "composer_handoff_create", "composer_code_cli", "composer_review"];
     case "task-reviewer":

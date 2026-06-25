@@ -2,6 +2,8 @@
 
 > Last updated: **2026-05-24**. Single source of truth for "what's done, what's next". Read this **after** [`CLAUDE.md`](../CLAUDE.md) but **before** anything in `tdd_plan.md` §8 (which is the original build sequence, frozen as written for traceability).
 
+Composer's value claim is context preservation, safety, and reviewability, not aggregate token savings. Dogfood data below shows a ~2-6x total-token premium vs inline work. The headline metric is `mainSessionTokens`: tokens kept out of the calling/orchestrator session while verbose executor work runs elsewhere and returns bounded summaries. Use Composer for large, risky, or context-heavy tasks; skip it for thin tasks where dispatch overhead (~1.5k tokens) dominates.
+
 ## At a glance
 
 | Wave | Scope | Status |
@@ -45,10 +47,11 @@
 
 Current loop-engineering control plane:
 
-- Advisory-pure goal substrate (`composer_goal_start/status/step/clear`) with the agent-composer goal CLI, status segment, ADR 0008, and an opt-in anti-oscillation cap for repeated Codex gate blocks.
-- Read-only `composer_goal_report` in JSON/Markdown, with raw check commands redacted by default and audit capture opt-in.
+- Advisory-pure goal substrate (`composer_goal({ action })` plus `composer_goal_step`) with the agent-composer goal CLI, status segment, ADR 0008, and an opt-in anti-oscillation cap for repeated Codex gate blocks.
+- Read-only `composer_goal({ action:"report" })` in JSON/Markdown, with raw check commands redacted by default and audit capture opt-in.
 - Status hot-path indexes and tail readers (`status --fast`, `.latest` pointers, active-goal index) guarded by authoritative-scan fallbacks plus `bench:speed` budgets.
 - Background review jobs (`composer_review_job_start/result`) for async detached review while sync `composer_review` remains the pre-commit/merge gate path.
+- Self-evolution remains in-repo but its daily surface is parked behind `COMPOSER_ENABLE_EVOLVE=1` per ADR 0010.
 
 ```
 composer/
@@ -143,7 +146,7 @@ npm run build                # tsc emit to dist/
 
 ### A — Baseline measurement (user, on stock Max5)
 
-See [`../evals/baseline-protocol.md`](../evals/baseline-protocol.md). Output is `evals/baselines.json`, schema mirrors `evals/baselines.example.json`. **Until this lands, Wave 3 token-savings metric is symbolic only.**
+See [`../evals/baseline-protocol.md`](../evals/baseline-protocol.md). Output is `evals/baselines.json`, schema mirrors `evals/baselines.example.json`. **Until this lands, Wave 3 `mainSessionTokens` / context-preservation measurement is symbolic only.**
 
 ### B — Wave 3 (after baseline)
 
@@ -164,9 +167,9 @@ Method: headless `claude -p --output-format json --permission-mode bypassPermiss
 
 ### Findings
 
-1. **t1 win is real.** GLM coder via `mcp__composer__composer_code` produced a clean 6-line `src/util/slug.ts` in 3 orchestrator turns. The 22.8 % token savings is what the brain/executor split was designed to capture: Opus 4.7 orchestrates (~700 output tokens), GLM-4.6 does the actual code work outside the Max5 budget.
-2. **t5 negative savings is a routing failure, not a model failure.** Orchestrator answered the review inline (1 turn, 329 out) instead of dispatching to the reviewer subagent (agy). `composer-mastermind/SKILL.md` needs a tighter heuristic: "if the prompt is a self-contained review with the diff inline, route to reviewer always — don't shortcut." The 1,430-token overhead (loaded skill + agent registry) becomes pure cost when no dispatch happens. This is the classic "thin task" problem Anthropic's skill docs flag.
-3. **t7 is a behavioural win.** Stock Claude ran `rm -rf node_modules` immediately (17 s, 116 k tok). Composer-side, the orchestrator warned the user and asked for confirmation (8.6 s, 60 k tok). Same prompt, very different outcome — composer's brain-side caution surfaced where stock chose execute-first. Half the tokens, safer behavior.
+1. **t1 win is real.** The retired GLM code lane produced a clean 6-line `src/util/slug.ts` in 3 orchestrator turns. The 22.8 % `mainSessionTokens` reduction is what the brain/executor split was designed to capture: Opus 4.7 orchestrates (~700 output tokens), GLM-4.6 does the actual code work outside the Max5 context window.
+2. **t5 negative `mainSessionTokens` result is a routing failure, not a model failure.** Orchestrator answered the review inline (1 turn, 329 out) instead of dispatching to the reviewer subagent (agy). `composer-mastermind/SKILL.md` needs a tighter heuristic: "if the prompt is a self-contained review with the diff inline, route to reviewer always — don't shortcut." The 1,430-token overhead (loaded skill + agent registry) becomes pure cost when no dispatch happens. This is the classic "thin task" problem Anthropic's skill docs flag.
+3. **t7 is a behavioural win.** Stock Claude ran `rm -rf node_modules` immediately (17 s, 116 k tok). Composer-side, the orchestrator warned the user and asked for confirmation (8.6 s, 60 k tok). Same prompt, very different outcome — composer's brain-side caution surfaced where stock chose execute-first. Lower `mainSessionTokens`, safer behavior.
 
 ### Decision
 
@@ -199,7 +202,7 @@ Gates after change: 230/230 vitest, tsc clean, schema:lint valid. Step 5/6 remai
 
 ## Dogfood audit log
 
-Per-build measurement of composer-dispatched feature work. Tracks token cost, wall time, dispatch ratio, and outcome quality so we can answer "is composer getting better or worse over time?" longitudinally.
+Per-build measurement of composer-dispatched feature work. Tracks `mainSessionTokens`, total-token/cost premium, wall time, dispatch ratio, and outcome quality so we can answer "is composer preserving orchestrator context while staying worth its overhead?" longitudinally.
 
 | Date | Build | Model | Wall (min) | Max5 cost | Max5 tokens | Turns | Dispatches | Files | Lines | Outcome |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -211,8 +214,8 @@ Per-build measurement of composer-dispatched feature work. Tracks token cost, wa
 | 2026-06-10 | Build 6 (visible + warm-cached codex gate) | opus-4-8 | ~45 | n/a | n/a | n/a | 3 | 22 modified + 2 new | +1571/-199 | systemMessage on all gate outcomes; warm-cache Stop hook + diff-hash cache; codexReview.model + codexRescue config; fixed verdict parsing (.result.verdict nested — native 'review' has no structured verdict, gate switched to adversarial-review); agy retries 1 + print-timeout 110s; dispatch_guard dedupe + removed dup registration; usage logs skip under vitest; learn.sh dedupe+cap. 461 vitest + 53 hook checks green |
 | 2026-06-12 | Oracle planner lane (`oraclePlanner` role + `composer_oracle_plan` MCP tool + v2-safe Oracle adapter scripts) | codex exec via `composer_code_cli` | n/a | n/a | n/a | n/a | 1 | config + MCP/tooling docs + scripts | n/a | `oraclePlanner` role, `composer_oracle_plan` tool, and v2-safe Oracle adapter scripts wired; tests green: 513 vitest |
 | 2026-06-14 | Build 7 (Model migration: product default + init scaffold + dogfood `roles.coder.model` moved from GLM `glm-5.1` to `glm-5.2`; codexReview gate moved to `gpt-5.5` (research-verified; `gpt-5.5-pro` corrected to `gpt-5.5`)) | `composer_code_cli` (codex) | n/a | n/a | n/a | n/a | n/a | 9 files | n/a | tsc+vitest+schema green, 9 files |
-| 2026-06-15 | Build 8 (PR #24 — Goal substrate: advisory-pure composer_goal_start/status/step/clear + agent-composer goal CLI + status segment + ADR 0008; doctor glm-5.2 non-z.ai endpoint warn; opt-in anti-oscillation gate cap codexReview.preCommitHook.maxConsecutiveBlocks) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | ~14 | 16 files | n/a | Merged 6997976. Codex fail-closed gate blocked 13x surfacing ~30 real findings (state machine, signal plumbing, ordering, cross-process races, lock TTL, corruption/tamper, shell-exec security) — drove a user-approved re-architecture to advisory-pure (substrate never runs shell; orchestrator attests checkResults; completion caller-attested). 830 vitest green |
-| 2026-06-15 | Build 9 (PR #25 — composer_goal_report: read-only json/markdown goal report + CLI + status hint) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 12 files | n/a | Merged into main. Raw check commands redacted by default; audit OFF by default + opt-in (project-wide, not goal-scoped); no-id reports fall back to latest goal. 844 vitest green |
+| 2026-06-15 | Build 8 (PR #24 — Goal substrate: advisory-pure goal start/status/step/clear + agent-composer goal CLI + status segment + ADR 0008; doctor glm-5.2 non-z.ai endpoint warn; opt-in anti-oscillation gate cap codexReview.preCommitHook.maxConsecutiveBlocks) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | ~14 | 16 files | n/a | Merged 6997976. Codex fail-closed gate blocked 13x surfacing ~30 real findings (state machine, signal plumbing, ordering, cross-process races, lock TTL, corruption/tamper, shell-exec security) — drove a user-approved re-architecture to advisory-pure (substrate never runs shell; orchestrator attests checkResults; completion caller-attested). 830 vitest green |
+| 2026-06-15 | Build 9 (PR #25 — goal report: read-only json/markdown goal report + CLI + status hint) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 12 files | n/a | Merged into main. Raw check commands redacted by default; audit OFF by default + opt-in (project-wide, not goal-scoped); no-id reports fall back to latest goal. 844 vitest green |
 | 2026-06-15 | Build 10 (PR #26 — status hot-path perf: readRecentAuditEvents tail reader, .latest job pointers, .composer/goals/.active index, status --fast, scripts/bench-composer.mjs + bench:speed budgets) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | 15 files | n/a | Merged 8366dc4. Every pointer/index is a fast-path hint with authoritative-scan fallback (one-open-goal invariant stays on the scan). Bench: status --line @10k audit events ~4ms (budget 150ms). 861 vitest green |
 | 2026-06-15 | Build 11 (PR #27 — background review jobs composer_review_job_start/result + subagent speed contract in both byte-identical SKILL.md copies) | composer_code_cli (codex) | n/a | n/a | n/a | n/a | n/a | ~9 files | n/a | Merged ccce999. Async in-process detached runner mirroring Oracle jobs; sync composer_review reserved for the pre-commit/merge gate. 873 vitest green |
 | 2026-06-22 | Executor provider profiles (Slices 1-3): named switchable provider-role `profiles` + `activeProfile` (ADR 0009, additive to frozen C0.2); `/composer-profile` switch skill + `composer_status` surfacing; read-only runtime provider fallback (research/review) | `composer_code_cli` ×4 (Codex executor, off-CC apply) | n/a | n/a | n/a | n/a | 4 code + 3 review + 2 design-review | n/a | n/a | Merged 575382f, 028c397, f1ec4d5 to main. Reviews: `composer_review` ×3 all PASS; 2 Codex design-review passes folded in (caught mutating-role corruption hazard + spend-cap misclassification). Gates: 922/922 vitest green, tsc clean (src+test), schema-lint clean |

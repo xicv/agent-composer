@@ -49,7 +49,7 @@ These all share one pattern: **propose → verify → curate**. We adopt it belo
 |------|--------------|------|------|
 | **T1 — Passive learning log** | `SessionEnd` hook appends user-corrections to `.claude/learnings/YYYY-MM.md`. `composer-mastermind` reads it on session start. | ~zero | none — just a file |
 | **T2 — Proposal-mode skill author** | A `composer-evolve` skill that *drafts* new `.claude/skills/<name>/SKILL.md` files after solved problems. **Drafts go to `proposals/`, user merges manually.** | small | gated by manual merge |
-| **T3 — Autoresearch loop on Composer itself** | `superpowers:autoresearch` mutates `composer-mastermind.md` and `coder.md` prompts against an eval set; keeps deltas that improve token usage / task success. | high (runs unattended) | needs guardrails: read-only mutations to `.claude/skills/<name>.candidate.md`, never overwrites live |
+| **T3 — Autoresearch loop on Composer itself** | `superpowers:autoresearch` mutates `composer-mastermind.md` and active worker prompts against an eval set; keeps deltas that improve token usage / task success. | high (runs unattended) | needs guardrails: read-only mutations to `.claude/skills/<name>.candidate.md`, never overwrites live |
 
 **Recommendation: ship T1 with the v2 plan. T2 after one week of usage data. T3 only once an eval set exists.**
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { withProgress } from "../server/progress.js";
-import { resolveProjectDir } from "../util/applyFileBlocks.js";
+import { resolveProjectDir } from "../util/projectDir.js";
 import {
   COMPOSER_CODEX_LIFECYCLE_DECIDE,
   COMPOSER_CODEX_LIFECYCLE_RUN,

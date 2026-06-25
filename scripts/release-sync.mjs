@@ -21,7 +21,6 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SYNC_PAIRS = [
   { src: ".claude/skills/composer-mastermind/SKILL.md", dest: "plugin/composer-mastermind/skills/composer-mastermind/SKILL.md" },
-  { src: ".claude/agents/coder.md",                     dest: "plugin/composer-mastermind/agents/coder.md" },
   { src: ".claude/agents/researcher.md",                dest: "plugin/composer-mastermind/agents/researcher.md" },
   { src: ".claude/agents/reviewer.md",                  dest: "plugin/composer-mastermind/agents/reviewer.md" },
   { src: ".claude/agents/reviewer-claude.md",           dest: "plugin/composer-mastermind/agents/reviewer-claude.md" },

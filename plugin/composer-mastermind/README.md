@@ -10,11 +10,9 @@ Composer-mastermind is a Claude Code plugin that turns the main session into a c
 |---|---|---|
 | direct | `mcp__composer__composer_handoff_create` | Writes shared context packets for multi-provider work |
 | direct | `mcp__composer__composer_code_cli` | Default coding path; CLI executor applies code directly from the MCP server root; configure as Codex or agy |
-| direct | `mcp__composer__composer_code_chain` | GLM-authored fallback; server applies complete-file blocks deterministically |
 | direct | `mcp__composer__composer_research` | Default docs lookup + web research lane via Codex CLI search in read-only mode |
 | direct | `mcp__composer__composer_review` | Default code review lane via `agy` CLI; ask for repo-appropriate targeted checks |
 | direct | `mcp__composer__composer_review_claude` | Premium Claude second-opinion review for explicit/risky cases |
-| `coder` | `mcp__composer__composer_code` | Patch-only legacy path via GLM (Anthropic-compatible endpoint) |
 | `researcher` | `mcp__composer__composer_research` | High-volume research wrapper when raw upstream output needs isolation |
 | `reviewer` | `mcp__composer__composer_review` | High-volume review wrapper when raw upstream output needs isolation |
 | `reviewer-claude` | `mcp__composer__composer_review_claude` | High-volume premium review wrapper when raw upstream output needs isolation |
@@ -41,10 +39,10 @@ composer-mastermind/
 ├── plugin.json                              # this manifest
 ├── skills/composer-mastermind/SKILL.md      # the orchestrator brain
 ├── agents/                                  # haiku-wrapped subagent defs
-│   ├── coder.md
 │   ├── researcher.md
 │   ├── reviewer.md
-│   └── reviewer-claude.md
+│   ├── reviewer-claude.md
+│   └── explorer.md
 ├── commands/
 │   └── evolve.md                            # /evolve slash command (GEPA loop)
 └── hooks/

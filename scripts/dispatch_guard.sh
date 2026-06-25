@@ -27,24 +27,8 @@ DISPATCH_SLOT_DIR="${TMPDIR:-/tmp}/composer-dispatch-guard-slots"
 DISPATCH_SLOT=""
 DISPATCH_INPUT_FILE=""
 
-composer_disabled() {
-  case "${COMPOSER_ENABLED:-}" in
-    0|false|FALSE|off|OFF|no|NO) return 0 ;;
-  esac
-  case "${COMPOSER_DISABLED:-}" in
-    1|true|TRUE|on|ON|yes|YES) return 0 ;;
-  esac
-  if [[ -n "${COMPOSER_DISABLED_FILE:-}" && -e "$COMPOSER_DISABLED_FILE" ]]; then
-    return 0
-  fi
-  if [[ -n "${CLAUDE_PROJECT_DIR:-}" && -e "$CLAUDE_PROJECT_DIR/.composer-disabled" ]]; then
-    return 0
-  fi
-  if [[ -n "${HOME:-}" && -e "$HOME/.claude/composer.disabled" ]]; then
-    return 0
-  fi
-  return 1
-}
+_composer_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/composer_disabled.lib.sh"
+if [ -r "$_composer_lib" ]; then . "$_composer_lib"; else composer_disabled() { return 1; }; fi
 
 if composer_disabled; then
   exit 0
@@ -409,7 +393,7 @@ fi
 # fires when prompt clearly contains a destructive verb AND the worker
 # is one of composer's roles.
 case "$SUBAGENT" in
-  coder|researcher|reviewer)
+  researcher|reviewer)
     if [[ "$HAS_DESTRUCTIVE" == "true" ]]; then
       emit_deny "dispatch_guard: destructive-op pattern detected; refuse inline (SKILL frontmatter SKIP-condition b). Subagent=${SUBAGENT}, len=${PROMPT_LEN}."
     fi

@@ -108,11 +108,11 @@ assert_pass_payload "no_stop_evolve_allows_mcp_research" \
   '{"hook_event_name":"PreToolUse","tool_name":"mcp__composer__composer_research","tool_input":{"prompt":"x"},"session_id":"t"}'
 unset COMPOSER_STOP_EVOLVE_FILE
 
-# Subagent tool calls must be allowed so coder can apply and verify patches.
+# Subagent tool calls must be allowed so reviewer/researcher wrappers can inspect and report.
 assert_pass_payload "subagent_agent_name_allows_bash" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Bash","agent_name":"coder","tool_input":{"command":"npm run typecheck"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Bash","agent_name":"reviewer","tool_input":{"command":"npm run typecheck"},"session_id":"t"}'
 assert_pass_payload "subagent_transcript_allows_update" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Update","transcript_path":"/tmp/claude/subagents/coder/transcript.jsonl","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Update","transcript_path":"/tmp/claude/subagents/reviewer/transcript.jsonl","tool_input":{"file_path":"x","old_string":"a","new_string":"b"},"session_id":"t"}'
 
 # Global enforcement — deny main-thread mutations regardless of path or project.
 assert_deny_payload "block_edit_inside_repo_abs" \
@@ -909,15 +909,15 @@ assert_dispatch_pass_payload() {
 }
 
 assert_dispatch_hint_payload "dispatch_hint_additional_context" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"refactor","prompt":"Refactor src/server.ts architecture across multi-file tests/server.test.ts"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","description":"review","prompt":"Refactor src/server.ts architecture across multi-file tests/server.test.ts"},"session_id":"t"}'
 assert_dispatch_deny_payload "dispatch_destructive_tiny_still_denied" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","prompt":"rm -rf node_modules"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","prompt":"rm -rf node_modules"},"session_id":"t"}'
 assert_dispatch_deny_payload "dispatch_short_destructive_denied" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"cleanup","prompt":"rm -rf node_modules"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","description":"cleanup","prompt":"rm -rf node_modules"},"session_id":"t"}'
 assert_dispatch_deny_payload "dispatch_padded_destructive_denied" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"cleanup","prompt":"Please inspect the repository carefully and provide detailed context before doing anything. This padding is intentionally long enough to pass any old tiny-prompt heuristic while still containing the destructive command rm -rf node_modules that must be blocked unconditionally by the guard."},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","description":"cleanup","prompt":"Please inspect the repository carefully and provide detailed context before doing anything. This padding is intentionally long enough to pass any old tiny-prompt heuristic while still containing the destructive command rm -rf node_modules that must be blocked unconditionally by the guard."},"session_id":"t"}'
 assert_dispatch_any_hint_payload "dispatch_benign_short_passes_with_hint" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}'
 assert_dispatch_pass_payload "dispatch_non_task_passes_open" \
   '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"src/index.ts"},"session_id":"t"}'
 
@@ -938,7 +938,7 @@ chmod +x "$DISPATCH_TIMEOUT_TMP/reaper-stub.sh"
 DISPATCH_TIMEOUT_LOG="$DISPATCH_TIMEOUT_TMP/dispatch.jsonl"
 DISPATCH_REAPER_LOG="$DISPATCH_TIMEOUT_TMP/reaper.log"
 start="$(date +%s)"
-out="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}' | CLAUDE_PROJECT_DIR="$DISPATCH_TIMEOUT_TMP" COMPOSER_DISPATCH_GUARD_TIMEOUT_MS=1000 COMPOSER_DISPATCH_LOG="$DISPATCH_TIMEOUT_LOG" COMPOSER_CUA_REAPER="$DISPATCH_TIMEOUT_TMP/reaper-stub.sh" COMPOSER_REAPER_STUB_LOG="$DISPATCH_REAPER_LOG" "$DISPATCH_SCRIPT" 2>&1)"
+out="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","description":"check","prompt":"Inspect src/index.ts"},"session_id":"t"}' | CLAUDE_PROJECT_DIR="$DISPATCH_TIMEOUT_TMP" COMPOSER_DISPATCH_GUARD_TIMEOUT_MS=1000 COMPOSER_DISPATCH_LOG="$DISPATCH_TIMEOUT_LOG" COMPOSER_CUA_REAPER="$DISPATCH_TIMEOUT_TMP/reaper-stub.sh" COMPOSER_REAPER_STUB_LOG="$DISPATCH_REAPER_LOG" "$DISPATCH_SCRIPT" 2>&1)"
 end="$(date +%s)"
 elapsed=$((end - start))
 if ! is_deny <<<"$out" && [[ "$elapsed" -le 5 ]] \
@@ -954,7 +954,7 @@ fi
 
 export COMPOSER_ENABLED=0
 assert_dispatch_pass_payload "dispatch_disabled_passes_destructive_task" \
-  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"coder","prompt":"rm -rf node_modules"},"session_id":"t"}'
+  '{"hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"subagent_type":"reviewer","prompt":"rm -rf node_modules"},"session_id":"t"}'
 unset COMPOSER_ENABLED
 
 echo

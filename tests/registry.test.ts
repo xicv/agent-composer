@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   ProviderRegistry,
-  ProviderNotImplementedError,
   ProviderConfigError,
 } from "../src/registry.js";
 import { MockProvider } from "../src/providers/MockProvider.js";
@@ -218,17 +217,6 @@ describe("ProviderRegistry — config reload", () => {
     const after = reg.getProviderForRole("coder");
     expect(after).toBeInstanceOf(CLIProvider);
     expect(after).not.toBe(before);
-  });
-});
-
-describe("ProviderRegistry — openai_compatible (still YAGNI)", () => {
-  it("throws ProviderNotImplementedError", () => {
-    const reg = new ProviderRegistry(
-      makeConfig({ provider: "openai_compatible", baseUrl: "https://x" }),
-    );
-    expect(() => reg.getProviderForRole("coder")).toThrow(
-      ProviderNotImplementedError,
-    );
   });
 });
 

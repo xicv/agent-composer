@@ -24,7 +24,7 @@ The five contracts below (C0.1–C0.5) are locked.
 **Path**: [`src/providers/IProvider.ts`](../../src/providers/IProvider.ts).
 
 ```typescript
-export type ProviderId = "anthropic" | "openai_compatible" | "cli" | "mock";
+export type ProviderId = "anthropic" | "cli" | "mock";
 
 export interface IProviderExecuteInput {
   prompt: string;
@@ -55,7 +55,7 @@ The inline form quoted in `tdd_plan.md` §3 is structurally equivalent. Wave 1 w
 
 **Path**: [`composer.config.schema.json`](../../composer.config.schema.json) (JSON Schema draft-07).
 
-- **Required**: `roles.researcher`, `roles.coder`, `roles.reviewer`; each must specify `provider` ∈ {`anthropic`, `openai_compatible`, `cli`, `mock`}.
+- **Required**: `roles.researcher`, `roles.coder`, `roles.reviewer`; each must specify `provider` ∈ {`anthropic`, `cli`, `mock`}.
 - **Optional per-role**: `apiKeyEnv` (string), `baseUrl` (uri), `model` (string), `cli` (string[], min 1 item).
 - `additionalProperties: false` at every level — typos fail validation early instead of becoming silent defaults.
 - Wave 1 F1.4 (`ProviderFactory` + config loader) validates via `zod` derived from this schema; CI may also lint via `ajv-cli`.
@@ -69,11 +69,11 @@ Referenced by (a) MCP server `registerTool()` calls, (b) each subagent's `tools:
 | Tool name | Input shape | Used by subagent |
 |---|---|---|
 | `composer_research` | `{ prompt: string, context?: string }` | `researcher.md` |
-| `composer_code` | `{ prompt: string, context?: string }` | `coder.md` |
+| `composer_code_cli` | `{ prompt: string, context?: string, projectDir?: string }` | direct MCP call |
 | `composer_review` | `{ prompt: string, diff: string }` | `reviewer.md` |
 | `composer_review_claude` | `{ prompt: string, diff: string }` | `reviewer-claude.md` |
 
-MCP namespace prefix when referenced from subagents or hooks: `mcp__composer__composer_research`, `mcp__composer__composer_code`, `mcp__composer__composer_review`, `mcp__composer__composer_review_claude`.
+MCP namespace prefix when referenced from subagents or hooks: `mcp__composer__composer_research`, `mcp__composer__composer_code_cli`, `mcp__composer__composer_review`, `mcp__composer__composer_review_claude`.
 
 ---
 
@@ -108,11 +108,10 @@ Locked tools allowlists (Wave 1 F1.7):
 | Subagent | `tools:` |
 |---|---|
 | `researcher.md` | `mcp__composer__composer_research, Read, Glob` |
-| `coder.md` | `mcp__composer__composer_code, Read, Glob, Edit, Update, Write, Bash` |
 | `reviewer.md` | `mcp__composer__composer_review, Read, Glob` |
 | `reviewer-claude.md` | `mcp__composer__composer_review_claude, Read, Glob` |
 
-`Read` and `Glob` are present so the subagent can quote the right file path/snippet into the MCP-tool `prompt` argument. `coder.md` is the only subagent allowed to mutate files; `Edit`/`Update`/`Write` apply provider-authored patches, and `Bash` is limited to setup, inspection, and verification. `NotebookEdit` remains forbidden in every subagent's allowlist. The boundary is the allowlist plus the PreToolUse hook, not policy text alone.
+`Read` and `Glob` are present so the subagent can quote the right file path/snippet into the MCP-tool `prompt` argument. Code mutation goes through the direct `composer_code_cli` tool. `NotebookEdit` remains forbidden in every subagent's allowlist. The boundary is the allowlist plus the PreToolUse hook, not policy text alone.
 
 ---
 
@@ -178,7 +177,7 @@ Append-only extensions; no existing tool, provider ID, or required config field 
 - **C0.3**: added `composer_handoff_create` with input
   `{ objective: string, contextSummary?: string, constraints?: string[], relevantFiles?: string[], acceptanceCriteria?: string[], decisions?: string[], openQuestions?: string[], artifacts?: HandoffArtifact[], briefPath?: string }`.
   It writes a validated packet under `.composer/handoffs/<runId>.json` and returns `{ runId, handoffPath, objective }`.
-- **C0.3**: `composer_research`, `composer_code`, `composer_code_chain`, `composer_code_cli`, `composer_review`, and `composer_review_claude` now accept optional `handoffPath?: string`. The server only reads paths resolving under `.composer/handoffs/`, formats the packet as compact context, and prepends it to the provider call.
+- **C0.3**: `composer_research`, `composer_code_cli`, `composer_review`, and `composer_review_claude` accept optional `handoffPath?: string`. The server only reads paths resolving under `.composer/handoffs/`, formats the packet as compact context, and prepends it to the provider call.
 - **C0.1/C0.2**: Codex is piloted through the existing `cli` provider, e.g. `["codex", "exec", "--sandbox", "workspace-write", "-c", "approval_policy=\"never\""]`. No `ProviderId` enum value was added; a first-class Codex provider is deferred until JSONL event parsing and usage telemetry are needed.
 - **C0.1**: `IProviderExecuteInput.cwd?: string` is an optional append-only field. `composer_code_cli` passes the MCP server root through it so CLI executors apply edits in the intended project even when tests or future hosts construct the server with an explicit root.
 - **CLIProvider**: when the configured command is `codex exec`, the provider appends a temporary `--output-last-message <file>` flag unless the user already supplied one. The returned MCP payload is Codex's final summary when available, not the raw stdout/event stream. The provider refuses explicit `danger-full-access` / bypass-sandbox Codex configs unless `COMPOSER_ALLOW_DANGEROUS_CODEX=1` is set in an externally sandboxed environment.
@@ -198,7 +197,7 @@ Append-only extension; routine review remains `composer_review` through `agy`.
 Append-only policy refinement; no tool names, provider IDs, or required config fields changed.
 
 - **C0.4**: `boundary_guard.sh` no longer denies native `Bash` on the main thread. The hook still fails closed on malformed input and still denies direct `Edit`, `Update`, `Write`, `NotebookEdit`, and MCP write/edit/exec wrappers.
-- **C0.5**: `composer-mastermind` now allows main-thread Bash only for bounded inspection and verification (`git status`, `git diff`, `ls`, targeted type/test commands). Authoring code or mutating state through Bash remains prohibited by the orchestrator skill and should route through `composer_code_cli`, `composer_code_chain`, or `coder`.
+- **C0.5**: `composer-mastermind` now allows main-thread Bash only for bounded inspection and verification (`git status`, `git diff`, `ls`, targeted type/test commands). Authoring code or mutating state through Bash remains prohibited by the orchestrator skill and should route through `composer_code_cli`.
 - **Installer**: user-level `settings.json` hook matcher is now `Edit|Update|Write|NotebookEdit`. Reinstall refreshes stale Composer hook entries that still include `Bash` so existing users pick up the new default.
 
 ### 2026-06-03 — Soft-disable toggle for Composer hooks

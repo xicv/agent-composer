@@ -4,7 +4,9 @@
 
 > **Claude Code stays the main brain. Composer routes planning, coding, research, review, and safety gates to the right worker model.**
 
-Composer is an MCP server plus Claude Code plugin for people who want the strongest model to hold the product and architecture context, while cheaper or more specialized models do the mechanical work. It keeps the main Claude session focused on intent, integration, and decisions instead of spending tokens on raw code generation, patch application, repeated research, or long review logs.
+Composer is an MCP server plus Claude Code plugin for people who want the strongest model to hold the product and architecture context while executor models do the verbose work. It keeps executor output out of the orchestrator context window and enforces safety + reviewability with deny-by-default edits, summary-only returns, review gates, and spend caps.
+
+Composer does **not** reduce total token cost. Dogfood data shows a ~2-6x total-token premium vs inline work. The headline metric is `mainSessionTokens`: tokens kept out of the calling session. Reach for Composer on large, risky, or context-heavy tasks; skip it for thin tasks where dispatch overhead (~1.5k tokens) dominates.
 
 ## Why this exists
 
@@ -23,7 +25,7 @@ Composer separates those jobs.
 | Need                                  | Composer answer                                                                                                                 |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Keep the best model as the strategist | Claude Code orchestrates; optional ChatGPT Pro via Oracle acts as a slow co-oracle for hard planning/review/debugging.          |
-| Save Claude Code tokens               | Codex, GLM, `agy`, and bounded `claude -p` calls run outside the main Claude context and return compact summaries.              |
+| Preserve the brain context            | Codex, GLM, `agy`, and bounded `claude -p` calls run outside the main Claude context and return compact summaries.              |
 | Let workers edit locally              | `composer_code_cli` lets Codex or another CLI executor generate **and apply** code directly in the repo.                        |
 | Avoid copy/paste between agents       | `composer_handoff_create` writes shared packets under `.composer/handoffs/`.                                                    |
 | Add quality gates                     | Review lanes, Codex pre-commit review, Claude Code hooks, terminal git hooks, and doctor checks make failures visible.          |
@@ -140,8 +142,6 @@ The first real Oracle run may open a browser for login. Complete the ChatGPT log
 | `composer_handoff_create`         | Create a compact shared packet for multi-agent work.                      |
 | `composer_research`               | Fast docs/current-context lookup through the researcher role.             |
 | `composer_code_cli`               | Default code-edit lane. Codex/CLI executor writes files directly.         |
-| `composer_code_chain`             | GLM writes complete file blocks; Composer applies them deterministically. |
-| `composer_code`                   | Legacy patch/text-only GLM lane. Rare fallback.                           |
 | `composer_review`                 | Default diff review lane.                                                 |
 | `composer_review_claude`          | Expensive second-opinion review.                                          |
 | `composer_oracle_plan`            | Synchronous ChatGPT Pro planning/review/debug lane.                       |
@@ -152,16 +152,12 @@ The first real Oracle run may open a browser for login. Complete the ChatGPT log
 | `composer_codex_lifecycle_result` | Read a lifecycle checkpoint result.                                       |
 | `composer_route_decide`           | Choose the next Composer lane for a task.                                 |
 | `composer_workflow_plan`          | Produce an ordered workflow plan for multi-step work.                     |
-| `composer_audit_record`           | Append a structured audit event.                                          |
-| `composer_audit_read`             | Read recent audit events for project context.                             |
-| `composer_audit_summary`          | Summarize recent routing, review, test, and outcome audit events.         |
+| `composer_audit`                  | Append, read, or summarize audit events via `action:"record"|"read"|"summary"`. |
 | `composer_session_get`            | Inspect the current Composer session settings.                            |
 | `composer_session_set`            | Update session-local mode, oracle, or profile settings.                   |
 | `composer_status`                 | Read config, integration, activity, and recommendation status.            |
-| `composer_goal_start`             | Start one project goal with objective, condition, checks, and budget.     |
-| `composer_goal_status`            | Inspect active or named goal state and next advisory action.              |
+| `composer_goal`                   | Start, status, clear, or report on a project goal via `action`.           |
 | `composer_goal_step`              | Advance the advisory goal loop from deterministic check results.          |
-| `composer_goal_clear`             | Cancel or clear a project goal record.                                    |
 | `composer_config_get`             | Inspect active/project/global Composer config.                            |
 | `composer_config_set`             | Safely patch lifecycle and review-gate settings.                          |
 
@@ -178,7 +174,7 @@ Use these when you want deterministic routing inside an Oracle prompt or wrapper
 [oracle:debug]      Hard root-cause analysis.
 [oracle:research]   Slow research/synthesis.
 [oracle:async]      Orchestrator hint: use the async Oracle job tools.
-[codex]             Keep it on the cheaper Codex lane.
+[codex]             Keep it on the Codex executor lane.
 ```
 
 ## Daily workflows
@@ -228,7 +224,7 @@ flowchart TD
     U[You] --> CC[Claude Code main session<br/>orchestrator: plan, integrate, decide]
     CC -->|MCP tools| MCP[Composer MCP server]
     MCP --> R[composer_research → researcher]
-    MCP --> CODE[composer_code_cli / code_chain → coder / coderCli]
+    MCP --> CODE[composer_code_cli → coderCli]
     MCP --> REV[composer_review / review_claude → reviewer]
     MCP --> HO[composer_handoff_create → .composer/handoffs/]
     MCP --> OR[composer_oracle_plan / job_* → oraclePlanner]
@@ -263,7 +259,7 @@ Composer has one invariant:
 That means:
 
 - Claude Code should plan, inspect, verify, and integrate.
-- File writes should go through `composer_code_cli` or `composer_code_chain`.
+- File writes should go through `composer_code_cli`.
 - Review should run through a different model/provider than the author whenever practical.
 - Oracle is advisory only; it never edits files.
 - Background jobs are persisted as state records, but Oracle async jobs are server-lifetime, not OS-detached workers.
@@ -331,7 +327,7 @@ Composer reads config from the active project first, then from the global Compos
 }
 ```
 
-Currently wired provider IDs are `mock`, `anthropic`, and `cli`. The schema reserves `openai_compatible`, but the runtime does not yet implement that adapter.
+Currently wired provider IDs are `mock`, `anthropic`, and `cli`.
 
 ### Optional Oracle role
 
@@ -459,7 +455,7 @@ Composer is designed for supervised local development.
 
 ### Global enforcement
 
-The boundary_guard hook is installed once at the user level and applies in every repository. The main Claude session cannot call `Edit`/`Write`/`Update`/`NotebookEdit` directly anywhere — those route through `composer_code_cli` / `composer_code_chain`. Enforcement defaults to ON and is gated only by kill switches, read fresh on every tool call (no restart needed):
+The boundary_guard hook is installed once at the user level and applies in every repository. The main Claude session cannot call `Edit`/`Write`/`Update`/`NotebookEdit` directly anywhere — those route through `composer_code_cli`. Enforcement defaults to ON and is gated only by kill switches, read fresh on every tool call (no restart needed):
 
 | Switch | Scope | Effect |
 | ------ | ----- | ------ |
@@ -472,7 +468,6 @@ The `/composer` slash command (`enable` / `disable` / `status`) flips `~/.claude
 ### What is mechanically enforced
 
 - `boundary_guard.sh` denies main-thread file mutation tools and MCP write/edit/exec wrappers in every repo (global user-level hook), fails closed on malformed input, and canonicalizes paths via the nearest existing ancestor so new-directory writes are not false-gated.
-- `composer_code_chain` rejects path traversal and symlink escapes before applying files.
 - `CLIProvider` uses argv arrays, not shell interpolation, and refuses dangerous Codex sandbox configs by default.
 - Codex pre-commit gates can fail closed in Claude Code hook mode and terminal git-hook mode.
 - Oracle browser runs are protected by a single-holder lock and stored under local Composer state / `.composer/oracle/` artefacts.

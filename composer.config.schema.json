@@ -546,7 +546,6 @@
       "type": "string",
       "enum": [
         "anthropic",
-        "openai_compatible",
         "cli",
         "mock"
       ],

@@ -1,13 +1,12 @@
 // C0.3 — locked MCP tool names. Referenced by subagent allowlists +
-// boundary_guard.sh; do not rename without a new ADR.
+// boundary_guard.sh; do not rename without a new ADR. ADR 0010 removed
+// composer_code and composer_code_chain from the code lane.
 export const COMPOSER_RESEARCH = "composer_research" as const;
-export const COMPOSER_CODE = "composer_code" as const;
 export const COMPOSER_REVIEW = "composer_review" as const;
 export const COMPOSER_REVIEW_CLAUDE = "composer_review_claude" as const;
 export const COMPOSER_REVIEW_JOB_START = "composer_review_job_start" as const;
 export const COMPOSER_REVIEW_JOB_RESULT = "composer_review_job_result" as const;
 export const COMPOSER_CODE_CLI = "composer_code_cli" as const;
-export const COMPOSER_CODE_CHAIN = "composer_code_chain" as const;
 export const COMPOSER_HANDOFF_CREATE = "composer_handoff_create" as const;
 export const COMPOSER_CODEX_LIFECYCLE_DECIDE = "composer_codex_lifecycle_decide" as const;
 export const COMPOSER_CODEX_LIFECYCLE_RUN = "composer_codex_lifecycle_run" as const;
@@ -22,20 +21,6 @@ export const RESEARCH_DESCRIPTION =
   "Default off-CC research lane for documentation lookup, web search, " +
   "current API shape, and external context. Returns a bounded summary; call " +
   "directly unless raw upstream output needs separate subagent isolation.";
-
-export const CODE_DESCRIPTION =
-  "LEGACY patch-only GLM authoring lane. Use only when you explicitly need " +
-  "GLM to return a diff/text WITHOUT applying files. For normal code writing, " +
-  "refactoring, debugging, and implementation, prefer composer_code_cli " +
-  "(default) or composer_code_chain (GLM complete-file fallback).";
-
-export const CODE_CHAIN_DESCRIPTION =
-  "Preferred for substantial code: GLM AUTHORS the code (off-CC), then the " +
-  "Composer server APPLIES it to disk deterministically (off-CC), then gate it through " +
-  "composer_review. The orchestrator only calls this once and relays the " +
-  "summary — it never generates or writes code itself. Combines GLM code " +
-  "quality with off-CC application (keeps the main session lean). Returns a " +
-  "summary of files written.";
 
 export const CODE_CLI_DESCRIPTION =
   "Generate AND APPLY code changes directly to disk via the CLI executor " +
@@ -145,34 +130,22 @@ export const ROUTE_DECIDE_DESCRIPTION =
   "to decide which lane to call (composer_code_cli, composer_review, composer_research, " +
   "composer_oracle_plan, …) before spending a worker call. Read-only; no side effects.";
 
-export const COMPOSER_AUDIT_RECORD = "composer_audit_record" as const;
-export const COMPOSER_AUDIT_READ = "composer_audit_read" as const;
-export const AUDIT_RECORD_DESCRIPTION = "Append one event to Composer's durable per-project audit/route trail (route decisions, tool calls, reviews, test outcomes, corrections). Orchestrator-driven: call this to record what a dispatch actually did so route accuracy and outcomes are auditable. Pass a stable runId to group a feature's events.";
-export const AUDIT_READ_DESCRIPTION = "Read the recent Composer audit trail (optionally filtered by runId), as JSON or a markdown summary. Use to inspect what the last run/route/worker actually did, or to export a run report.";
+export const COMPOSER_AUDIT = "composer_audit" as const;
+export const AUDIT_DESCRIPTION = "Durable Composer audit/route trail with action:\"record\" to append an event, action:\"read\" to read recent events, and action:\"summary\" to aggregate route/outcome trends. Record dispatch outcomes so route accuracy and failures are auditable; use read or summary to inspect the trail.";
 export const COMPOSER_SESSION_GET = "composer_session_get" as const;
 export const COMPOSER_SESSION_SET = "composer_session_set" as const;
 export const SESSION_SET_DESCRIPTION = "Set EPHEMERAL session overrides for this server process WITHOUT writing composer.config.json: mode (fast|balanced|strict), oracle ({enabled,defaultMode,requireExplicitTag}), and a default code_cli profile. Pass clear:true to reset. Overrides win over config for the lifetime of the process; nothing is persisted.";
 export const SESSION_GET_DESCRIPTION = "Read the current ephemeral session overrides (mode/oracle/profile) for this server process.";
-export const COMPOSER_AUDIT_SUMMARY = "composer_audit_summary" as const;
-export const AUDIT_SUMMARY_DESCRIPTION = "Aggregate the Composer audit trail into counts by kind/status/route, review verdicts, test pass/fail, user corrections, and recent failures. Use to see route accuracy and outcome trends at a glance (evidence for /evolve).";
 export const COMPOSER_STATUS = "composer_status" as const;
 export const STATUS_DESCRIPTION =
   "Read a structured snapshot of Composer state: mode, integrations (review/lifecycle/oracle/git-hook/disabled), " +
   "active Oracle/Codex jobs, latest audit event, live session overrides, and a recommended next action. " +
   "Use to see what's happening without reading logs.";
-export const COMPOSER_GOAL_START = "composer_goal_start" as const;
-export const COMPOSER_GOAL_STATUS = "composer_goal_status" as const;
+export const COMPOSER_GOAL = "composer_goal" as const;
 export const COMPOSER_GOAL_STEP = "composer_goal_step" as const;
-export const COMPOSER_GOAL_CLEAR = "composer_goal_clear" as const;
-export const COMPOSER_GOAL_REPORT = "composer_goal_report" as const;
-export const GOAL_START_DESCRIPTION =
-  "Use when beginning a bounded Composer goal. Creates one active project-local goal under .composer/goals, " +
-  "stores immutable objective/condition plus optional deterministic checks and budgets, and returns the initial route decision.";
-export const GOAL_STATUS_DESCRIPTION =
-  "Use when inspecting the active or named Composer goal. Read-only: returns state, turns, checks, and last action/verdict/reason without running checks or mutating goal state.";
+export const GOAL_DESCRIPTION =
+  "Manage a bounded Composer goal with action:\"start\" to create one active project-local goal, action:\"status\" to read state, action:\"clear\" to cancel it, or action:\"report\" to summarize it. " +
+  "Start stores objective/condition plus optional deterministic checks and budgets, while status/report are read-only and clear leaves the goal record for auditability. " +
+  "Check command strings are stored as data only; the substrate never runs them.";
 export const GOAL_STEP_DESCRIPTION =
   "Use when advancing a Composer goal. Consumes orchestrator-reported deterministic check results and returns the next recommended tool (advisory; executes nothing).";
-export const GOAL_CLEAR_DESCRIPTION =
-  "Use when cancelling the active or named Composer goal. Marks the goal cancelled and leaves the project-local goal record for auditability.";
-export const GOAL_REPORT_DESCRIPTION =
-  "Use when you need a read-only summary of a goal's state, checks, and recommended next action. Executes nothing and excludes raw check commands by default. Audit is opt-in with includeAudit, is recent project-wide activity rather than goal-scoped evidence, and raw audit events require includeAuditEvents.";

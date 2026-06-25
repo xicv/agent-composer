@@ -54,7 +54,6 @@ export const EvalResultSchema = z
     taskId: z.string(),
     success: z.boolean(),
     mainSessionTokens: z.number().int().nonnegative(),
-    dispatchedCorrectly: z.boolean(),
     durationMs: z.number().nonnegative(),
     wallSeconds: z.number().optional(),
     workerCalls: z.number().int().nonnegative(),

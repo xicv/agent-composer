@@ -1,5 +1,7 @@
 # /evolve — autoresearch loop for composer-mastermind
 
+Note: gated behind `COMPOSER_ENABLE_EVOLVE=1`; parked/experimental per ADR 0010 after zero promotions across 6+ real runs. Enable only for deliberate autoresearch experiments.
+
 Kick off GEPA-lite autoresearch to evolve the orchestrator skill (`.claude/skills/composer-mastermind/SKILL.md`). Runs a synthetic v1 scorer to propose improvements; writes the candidate to `.claude/skills/composer-mastermind/SKILL.candidate.md` for manual review.
 
 ## Usage
@@ -54,7 +56,7 @@ The summary prints to stdout:
 
 ## Evidence
 
-The reflection mutator now receives recent route/audit failures from the durable audit trail (`composer_audit_record` → `readAuditFailures`). Up to 20 recent failures (events with `status=failed` or `userCorrection=true`) are extracted from the audit log and injected into the reflection prompt before the current-ecosystem section. This means proposed skill rewrites are driven by real routing and outcome failures — wrong route choice, unnecessary Oracle use, issues a review caught after the fact, user-corrected routes — not just synthetic scorer signals.
+The reflection mutator now receives recent route/audit failures from the durable audit trail (`composer_audit({action:"record"})` → `readAuditFailures`). Up to 20 recent failures (events with `status=failed` or `userCorrection=true`) are extracted from the audit log and injected into the reflection prompt before the current-ecosystem section. This means proposed skill rewrites are driven by real routing and outcome failures — wrong route choice, unnecessary Oracle use, issues a review caught after the fact, user-corrected routes — not just synthetic scorer signals.
 
 ## v1 caveat
 

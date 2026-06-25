@@ -234,7 +234,7 @@ function extractToolUseDispatchSequence(
       }
     } else if (block.name.startsWith("mcp__composer__composer_")) {
       const suffix = block.name.slice("mcp__composer__composer_".length);
-      if (suffix === "code") {
+      if (suffix === "code_cli") {
         roles.push("coder");
       } else if (suffix === "review") {
         roles.push("reviewer");
@@ -694,8 +694,16 @@ async function main(): Promise<void> {
   console.log(`parent score: ${parentScore.toFixed(4)} → winner score: ${winnerScore.toFixed(4)}`);
 }
 
+const EVOLVE_FLAG_MESSAGE =
+  "/evolve is parked behind a flag (ADR 0010): zero promotions across 6+ real runs. Export COMPOSER_ENABLE_EVOLVE=1 to enable.";
+
 const isEntry = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isEntry) {
+  if (process.env.COMPOSER_ENABLE_EVOLVE !== "1") {
+    console.error(EVOLVE_FLAG_MESSAGE);
+    process.exit(1);
+  }
+
   main().catch((err: unknown) => {
     console.error("run-evolve: fatal:", err instanceof Error ? err.message : String(err));
     process.exit(1);

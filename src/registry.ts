@@ -1,8 +1,7 @@
 // Wave 1 F1.4 — ProviderFactory / role → IProvider resolver.
 //
 // Day 2 (2026-05-23): 'anthropic' and 'cli' now wire to real adapters
-// (F1.1 + F1.2). 'openai_compatible' still throws — YAGNI until a
-// concrete need surfaces.
+// (F1.1 + F1.2).
 
 import type { IProvider } from "./providers/IProvider.js";
 import { MockProvider } from "./providers/MockProvider.js";
@@ -21,15 +20,6 @@ import type {
  * GLM family release (z.ai Anthropic-compat endpoint).
  */
 export const DEFAULT_ANTHROPIC_MODEL = "glm-5.2";
-
-export class ProviderNotImplementedError extends Error {
-  constructor(providerId: string) {
-    super(
-      `Provider '${providerId}' is not wired. Composer ships 'mock', 'anthropic', and 'cli' adapters; 'openai_compatible' is YAGNI until needed.`,
-    );
-    this.name = "ProviderNotImplementedError";
-  }
-}
 
 export class ProviderConfigError extends Error {
   constructor(providerId: string, field: string) {
@@ -114,9 +104,6 @@ export class ProviderRegistry {
           maxResultChars: roleConfig.maxResultChars,
         });
       }
-
-      case "openai_compatible":
-        throw new ProviderNotImplementedError(roleConfig.provider);
     }
   }
 }

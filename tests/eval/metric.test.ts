@@ -12,7 +12,6 @@ function res(overrides: Partial<EvalResult> = {}): EvalResult {
     taskId: "t",
     success: true,
     mainSessionTokens: 100,
-    dispatchedCorrectly: true,
     durationMs: 0,
     workerCalls: 1,
     workerTextSample: "",
@@ -20,21 +19,21 @@ function res(overrides: Partial<EvalResult> = {}): EvalResult {
   };
 }
 
-describe("scoreTask — default weights (0.5 / 0.3 / 0.2)", () => {
+describe("scoreTask — default weights without dispatch signal", () => {
   it("perfect run scores 1.0", () => {
     const s = scoreTask(
-      res({ success: true, mainSessionTokens: 0, dispatchedCorrectly: true }),
+      res({ success: true, mainSessionTokens: 0 }),
       { baselineMainTokens: 1000 },
     );
     expect(s.score).toBeCloseTo(1.0, 6);
   });
 
-  it("failure with full token + dispatch credit scores 0.5", () => {
+  it("failure with full token credit scores only the token component", () => {
     const s = scoreTask(
-      res({ success: false, mainSessionTokens: 0, dispatchedCorrectly: true }),
+      res({ success: false, mainSessionTokens: 0 }),
       { baselineMainTokens: 1000 },
     );
-    expect(s.score).toBeCloseTo(0.3 + 0.2, 6);
+    expect(s.score).toBeCloseTo(0.375, 6);
   });
 
   it("token component caps at 0 (no negative score)", () => {
@@ -50,7 +49,7 @@ describe("scoreTask — default weights (0.5 / 0.3 / 0.2)", () => {
       res({ mainSessionTokens: 250 }), // 75% saving
       { baselineMainTokens: 1000 },
     );
-    expect(s.components.token).toBeCloseTo(0.3 * 0.75, 6);
+    expect(s.components.token).toBeCloseTo(0.375 * 0.75, 6);
   });
 
   it("baseline 0 yields 0 token component", () => {
@@ -73,7 +72,7 @@ describe("scoreTask — custom weights", () => {
 
   it("accepts custom weights summing to 1.0", () => {
     const s = scoreTask(
-      res({ success: true, mainSessionTokens: 500, dispatchedCorrectly: false }),
+      res({ success: true, mainSessionTokens: 500 }),
       {
         baselineMainTokens: 1000,
         successWeight: 0.7,

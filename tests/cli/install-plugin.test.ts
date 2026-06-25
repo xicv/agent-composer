@@ -26,16 +26,10 @@ describe("installPluginAssets", () => {
 
   it("copies all subagent .md files to ~/.claude/agents/", () => {
     installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
-    expect(existsSync(join(claudeHome, "agents/coder.md"))).toBe(true);
     expect(existsSync(join(claudeHome, "agents/researcher.md"))).toBe(true);
     expect(existsSync(join(claudeHome, "agents/reviewer.md"))).toBe(true);
     expect(existsSync(join(claudeHome, "agents/reviewer-claude.md"))).toBe(true);
-  });
-
-  it("installs coder with Bash and Update tools", () => {
-    installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
-    const coder = readFileSync(join(claudeHome, "agents/coder.md"), "utf8");
-    expect(coder).toContain("tools: mcp__composer__composer_code, Read, Glob, Edit, Update, Write, Bash");
+    expect(existsSync(join(claudeHome, "agents/explorer.md"))).toBe(true);
   });
 
   it("copies slash commands to ~/.claude/commands/", () => {
@@ -49,6 +43,11 @@ describe("installPluginAssets", () => {
     expect(existsSync(hookPath)).toBe(true);
     const mode = statSync(hookPath).mode;
     expect((mode & 0o100) !== 0).toBe(true); // owner-execute bit
+  });
+
+  it("copies composer_disabled.lib.sh next to installed hooks", () => {
+    installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
+    expect(existsSync(join(claudeHome, "hooks/composer_disabled.lib.sh"))).toBe(true);
   });
 
   it("writes settings.json hooks.PreToolUse entry pointing at the hook", () => {
@@ -94,15 +93,15 @@ describe("installPluginAssets", () => {
   it("refreshes stale packaged agent files on reinstall", () => {
     mkdirSync(join(claudeHome, "agents"), { recursive: true });
     writeFileSync(
-      join(claudeHome, "agents/coder.md"),
-      "---\nname: coder\ntools: mcp__composer__composer_code, Read, Glob\n---\n",
+      join(claudeHome, "agents/researcher.md"),
+      "---\nname: researcher\ntools: mcp__composer__composer_research\n---\n",
       "utf8",
     );
     const steps = installPluginAssets({ claudeHome, pluginSourceDir: REAL_PLUGIN_SRC });
-    expect(steps.find((s) => s.name === "agent coder.md")?.status).toBe("updated");
-    const coder = readFileSync(join(claudeHome, "agents/coder.md"), "utf8");
-    expect(coder).toContain("Bash");
-    expect(coder).toContain("Update");
+    expect(steps.find((s) => s.name === "agent researcher.md")?.status).toBe("updated");
+    const researcher = readFileSync(join(claudeHome, "agents/researcher.md"), "utf8");
+    expect(researcher).toContain("mcp__composer__composer_research");
+    expect(researcher).toContain("Read");
   });
 
   it("does NOT duplicate the boundary hook entry on second run", () => {

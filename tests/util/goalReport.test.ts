@@ -154,7 +154,7 @@ describe("goalReport", () => {
       maxCost: 1,
     });
     expect(recommendNext(pending)).toMatchObject({
-      nextAction: "composer_goal_status",
+      nextAction: "composer_goal",
       reason: expect.stringContaining("pending checks: unit"),
     });
 
@@ -166,7 +166,7 @@ describe("goalReport", () => {
 
     const failedLike = { ...blocked, state: "failed" as const } satisfies GoalRecord;
     expect(recommendNext(failedLike)).toEqual({
-      nextAction: "composer_goal_report",
+      nextAction: "composer_goal",
       reason: "goal failed within budget; review report",
     });
 

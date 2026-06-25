@@ -35,9 +35,10 @@ export interface InstallPluginOptions {
  *
  * Layout written:
  *   <claudeHome>/skills/composer-mastermind/SKILL.md
- *   <claudeHome>/agents/{coder,researcher,reviewer,reviewer-claude}.md
+ *   <claudeHome>/agents/{researcher,reviewer,reviewer-claude,explorer}.md
  *   <claudeHome>/commands/evolve.md
  *   <claudeHome>/hooks/composer-boundary_guard.sh
+ *   <claudeHome>/hooks/composer_disabled.lib.sh
  *   <claudeHome>/settings.json — patched with PreToolUse entry
  */
 export function installPluginAssets(opts: InstallPluginOptions): InitStep[] {
@@ -80,7 +81,10 @@ export function installPluginAssets(opts: InstallPluginOptions): InitStep[] {
   // Boundary hook — copy script + register in settings.json
   const hookSrc = join(src, "hooks", "boundary_guard.sh");
   const hookDest = join(claudeHome, "hooks", "composer-boundary_guard.sh");
+  const disabledLibSrc = join(src, "hooks", "composer_disabled.lib.sh");
+  const disabledLibDest = join(claudeHome, "hooks", "composer_disabled.lib.sh");
   steps.push(copyOne(hookSrc, hookDest, "composer boundary_guard.sh hook script", { exec: true, overwrite: true }));
+  steps.push(copyOne(disabledLibSrc, disabledLibDest, "composer_disabled.lib.sh hook library", { overwrite: true }));
   steps.push(wireBoundaryHook(claudeHome, hookDest));
 
   return steps;

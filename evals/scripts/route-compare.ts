@@ -2,7 +2,6 @@
 //
 // Runs the same eval tasks through:
 //   - cc-only                 stock Claude, no composer MCP
-//   - composer-glm-chain      Composer MCP, force composer_code_chain
 //   - composer-codex-cli      Composer MCP, force composer_code_cli
 //
 // Writes JSONL records that can be re-summarized without spending more tokens:
@@ -25,7 +24,6 @@ import { EvalTaskSchema, type EvalTask } from "../../tests/eval/schema.js";
 
 const DEFAULT_ROUTES: RouteName[] = [
   "cc-only",
-  "composer-glm-chain",
   "composer-codex-cli",
 ];
 const DEFAULT_OUT = "/tmp/composer-route-runs.jsonl";
@@ -145,21 +143,9 @@ export function routePrompt(route: RouteName, task: EvalTask): string {
     ].join("\n");
   }
 
-  if (route === "composer-glm-chain") {
-    return [
-      "ROUTE UNDER TEST: composer-glm-chain.",
-      "Use Composer for implementation. For file create/edit/refactor work, call composer_handoff_create when useful, then use mcp__composer__composer_code_chain.",
-      "Do not use mcp__composer__composer_code_cli in this run.",
-      "After code is applied, review or summarize the changed diff and keep the final answer short.",
-      "",
-      task.prompt,
-    ].join("\n");
-  }
-
   return [
     "ROUTE UNDER TEST: composer-codex-cli.",
     "Use Composer for implementation. For file create/edit/refactor work, call composer_handoff_create when useful, then use mcp__composer__composer_code_cli.",
-    "Do not use mcp__composer__composer_code_chain in this run.",
     "After code is applied, review or summarize the changed diff and keep the final answer short.",
     "",
     task.prompt,
@@ -216,9 +202,6 @@ export function ccTokensFromModelUsage(
 export function observedRoute(toolUses: ReadonlyArray<ToolUseBlock>): string {
   if (toolUses.some((tool) => tool.name.includes("composer_code_cli"))) {
     return "composer-codex-cli";
-  }
-  if (toolUses.some((tool) => tool.name.includes("composer_code_chain"))) {
-    return "composer-glm-chain";
   }
   if (toolUses.some((tool) => tool.name.startsWith("mcp__composer__"))) {
     return "composer-other";
@@ -439,15 +422,6 @@ function routeConfig(route: RouteName): unknown {
     spendAuthorization: { mode: "auto", maxUsdPerCall: 0.5, maxUsdPerSession: 50 },
   };
 
-  if (route === "composer-glm-chain") {
-    return {
-      ...base,
-      roles: {
-        ...base.roles,
-        coderCli: { provider: "cli", cli: ["agy", "--dangerously-skip-permissions", "-p"] },
-      },
-    };
-  }
   return base;
 }
 

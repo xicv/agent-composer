@@ -50,9 +50,10 @@ describe("runGoal", () => {
     expect(pending.state).toBe("active");
     expect(pending.turns).toBe(1);
     expect(pending.nextAction).toMatchObject({
-      tool: "composer_goal_status",
+      tool: "composer_goal",
+      args: { action: "status" },
       manualChecks: ["unit"],
-      reason: "composer_goal_status shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
+      reason: "composer_goal({action:\"status\"}) shows the declared check commands; run them yourself, then call composer_goal_step with --check-result name=pass|fail for each",
     });
     expect(JSON.stringify(pending.nextAction)).not.toContain("true");
 
@@ -132,7 +133,8 @@ describe("runGoal", () => {
     const stepped = runGoal(root, { action: "step", flags: ["--spent", "1.25"] });
 
     expect(stepped.state).toBe("blocked");
-    expect(stepped.nextAction?.tool).toBe("composer_goal_status");
+    expect(stepped.nextAction?.tool).toBe("composer_goal");
+    expect(stepped.nextAction).toMatchObject({ args: { action: "status" } });
     expect(stepped.lastReason).toBe("budget/turn cap reached - extend budget (budgetExtension) or clear");
   });
 
