@@ -19,6 +19,7 @@ import { parseCleanupArgs, runCleanup } from "./cli/cleanup.js";
 import { applyMode } from "./cli/mode.js";
 import { isModeName, MODE_NAMES } from "./config/modes.js";
 import { runStatus } from "./cli/status.js";
+import { runReadiness } from "./cli/readiness.js";
 import { runInstallGitHook } from "./cli/installGitHook.js";
 import { runGoal } from "./cli/goal.js";
 import { failInFlightCodexLifecycleJobs } from "./util/codexLifecycleJob.js";
@@ -40,6 +41,8 @@ const CLI_SUBCOMMANDS = new Set([
   "doctor",
   "cleanup",
   "status",
+  "readiness",
+  "daily-readiness",
   "install-git-hook",
   "goal",
   "mode",
@@ -94,6 +97,13 @@ async function main(): Promise<void> {
       watch: flags.includes("--watch"),
       replace: flags.includes("--replace"),
       fast: flags.includes("--fast"),
+    });
+    return;
+  }
+  if (subcommand === "readiness" || subcommand === "daily-readiness") {
+    const flags = process.argv.slice(3);
+    await runReadiness(process.cwd(), {
+      json: flags.includes("--json"),
     });
     return;
   }

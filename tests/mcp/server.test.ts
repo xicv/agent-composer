@@ -112,6 +112,8 @@ describe("composer MCP server", () => {
       "composer_codex_lifecycle_run",
       "composer_config_get",
       "composer_config_set",
+      "composer_context_select",
+      "composer_daily_readiness",
       "composer_goal_clear",
       "composer_goal_report",
       "composer_goal_start",
@@ -249,6 +251,16 @@ describe("composer MCP server", () => {
     });
     expect(byName["composer_config_set"]?.annotations).toMatchObject({
       readOnlyHint: false,
+      idempotentHint: true,
+      destructiveHint: false,
+    });
+    expect(byName["composer_context_select"]?.annotations).toMatchObject({
+      readOnlyHint: false,
+      idempotentHint: false,
+      destructiveHint: false,
+    });
+    expect(byName["composer_daily_readiness"]?.annotations).toMatchObject({
+      readOnlyHint: true,
       idempotentHint: true,
       destructiveHint: false,
     });
@@ -1003,6 +1015,36 @@ describe("composer MCP server", () => {
       expect(parsed.runId).toMatch(/^[0-9a-f-]{36}$/i);
       expect(resolve(parsed.handoffPath).startsWith(resolve(root, ".composer/handoffs"))).toBe(true);
       expect(existsSync(parsed.handoffPath)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("composer_context_select writes a compact brief", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-context-select-mcp-"));
+    try {
+      const { client } = await bootClient(root);
+      const result = await client.callTool({
+        name: "composer_context_select",
+        arguments: {
+          task: "implement daily readiness",
+          files: ["src/cli/status.ts"],
+          slices: [{ file: "src/cli/doctor.ts", startLine: 1, endLine: 20, note: "doctor shape" }],
+          symbols: ["buildStatus"],
+        },
+      });
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        briefPath: string;
+        brief: { files: string[]; slices: Array<{ file: string }>; symbols?: string[] };
+        metrics: { fileCount: number; sliceCount: number };
+      };
+      expect(resolve(parsed.briefPath).startsWith(resolve(root, ".composer/briefs"))).toBe(true);
+      expect(existsSync(parsed.briefPath)).toBe(true);
+      expect(parsed.brief.files).toEqual(["src/cli/status.ts", "src/cli/doctor.ts"]);
+      expect(parsed.brief.slices[0]?.file).toBe("src/cli/doctor.ts");
+      expect(parsed.brief.symbols).toEqual(["buildStatus"]);
+      expect(parsed.metrics).toMatchObject({ fileCount: 2, sliceCount: 1 });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -2394,6 +2436,57 @@ describe("composer MCP server", () => {
         rmSync(stateDir, { recursive: true, force: true });
       }
     });
+  });
+
+  it("composer_daily_readiness returns a structured verdict", async () => {
+    const root = mkdtempSync(join(tmpdir(), "composer-readiness-mcp-"));
+    const previousStateDir = process.env[COMPOSER_STATE_DIR_ENV];
+    const previousComposerConfig = process.env["COMPOSER_CONFIG"];
+    const previousComposerDisabled = process.env["COMPOSER_DISABLED"];
+    const previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+    const previousHome = process.env["HOME"];
+    const stateDir = mkdtempSync(join(tmpdir(), "composer-readiness-state-"));
+    process.env[COMPOSER_STATE_DIR_ENV] = stateDir;
+    delete process.env["COMPOSER_CONFIG"];
+    delete process.env["COMPOSER_DISABLED"];
+    process.env["XDG_CONFIG_HOME"] = join(stateDir, "xdg");
+    process.env["HOME"] = stateDir;
+    try {
+      const { client } = await bootClient(root);
+      const result = await client.callTool({
+        name: "composer_daily_readiness",
+        arguments: {},
+      });
+      expect(result.isError).not.toBe(true);
+      const block = (result.content as Array<{ type: string; text: string }>)[0];
+      const parsed = JSON.parse(block?.text ?? "{}") as {
+        version: number;
+        state: string;
+        summary: string;
+        statusLine: string;
+        blockers: unknown[];
+        warnings: unknown[];
+      };
+      expect(parsed.version).toBe(1);
+      expect(["ready", "degraded", "disabled", "blocked"]).toContain(parsed.state);
+      expect(typeof parsed.summary).toBe("string");
+      expect(parsed.statusLine).toMatch(/^CMP /);
+      expect(Array.isArray(parsed.blockers)).toBe(true);
+      expect(Array.isArray(parsed.warnings)).toBe(true);
+    } finally {
+      if (previousStateDir === undefined) delete process.env[COMPOSER_STATE_DIR_ENV];
+      else process.env[COMPOSER_STATE_DIR_ENV] = previousStateDir;
+      if (previousComposerConfig === undefined) delete process.env["COMPOSER_CONFIG"];
+      else process.env["COMPOSER_CONFIG"] = previousComposerConfig;
+      if (previousComposerDisabled === undefined) delete process.env["COMPOSER_DISABLED"];
+      else process.env["COMPOSER_DISABLED"] = previousComposerDisabled;
+      if (previousXdgConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = previousXdgConfigHome;
+      if (previousHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previousHome;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("composer_status returns active.foreground as empty array when no tools are running", async () => {

@@ -332,8 +332,8 @@ function detectJqAvailable(): boolean {
   }
 }
 
-export async function runDoctor(opts: { cwd: string; verbose?: boolean }): Promise<DoctorReport> {
-  const config = loadConfigCheck(opts.cwd);
+export async function runDoctor(opts: { cwd: string; verbose?: boolean; configPath?: string }): Promise<DoctorReport> {
+  const config = loadConfigCheck(opts.cwd, opts.configPath);
   const codexCli = checkCodexCli();
   const pluginRoot = resolveCodexPluginRoot(join(homedir(), ".claude", "plugins"));
   const pluginCheck = checkCodexPluginRoot(pluginRoot);
@@ -588,11 +588,11 @@ function inspectComposerGitHook(
   }
 }
 
-function loadConfigCheck(cwd: string): { ok: true; config: ComposerConfig } | { ok: false; check: DoctorCheck } {
+function loadConfigCheck(cwd: string, explicitConfigPath?: string): { ok: true; config: ComposerConfig } | { ok: false; check: DoctorCheck } {
   const previousCwd = process.cwd();
   try {
     process.chdir(resolve(cwd));
-    const configPath = process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
+    const configPath = explicitConfigPath ?? process.env["COMPOSER_CONFIG"] ?? "composer.config.json";
     return { ok: true, config: loadConfig(configPath) };
   } catch (error) {
     return {

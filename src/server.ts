@@ -16,12 +16,14 @@ import { registerCodeTools } from "./tools/code.js";
 import { registerReviewTools } from "./tools/review.js";
 import { registerOracleTools } from "./tools/oracle.js";
 import { registerHandoffTools } from "./tools/handoff.js";
+import { registerContextSelectionTools } from "./tools/contextSelection.js";
 import { registerCodexLifecycleTools } from "./tools/codexLifecycle.js";
 import { registerConfigTools } from "./tools/config.js";
 import { registerRouteTools } from "./tools/route.js";
 import { registerAuditTools } from "./tools/audit.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerStatusTools } from "./tools/status.js";
+import { registerReadinessTools } from "./tools/readiness.js";
 import { registerSessionTools } from "./tools/session.js";
 import { registerGoalTools } from "./tools/goal.js";
 import { createActiveRunTracker } from "./server/activeRuns.js";
@@ -145,6 +147,7 @@ export function createComposerServer(
   registerReviewTools(ctx);
   registerOracleTools(ctx);
   registerHandoffTools(ctx);
+  registerContextSelectionTools(ctx);
   registerCodexLifecycleTools(ctx);
   registerConfigTools(ctx);
   registerRouteTools(ctx);
@@ -152,6 +155,7 @@ export function createComposerServer(
   registerSessionTools(ctx);
   registerWorkflowTools(ctx);
   registerGoalTools(ctx);
+  registerReadinessTools(ctx);
   registerStatusTools(ctx);
 
   return server;

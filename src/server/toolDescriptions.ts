@@ -9,6 +9,8 @@ export const COMPOSER_REVIEW_JOB_RESULT = "composer_review_job_result" as const;
 export const COMPOSER_CODE_CLI = "composer_code_cli" as const;
 export const COMPOSER_CODE_CHAIN = "composer_code_chain" as const;
 export const COMPOSER_HANDOFF_CREATE = "composer_handoff_create" as const;
+export const COMPOSER_CONTEXT_SELECT = "composer_context_select" as const;
+export const COMPOSER_DAILY_READINESS = "composer_daily_readiness" as const;
 export const COMPOSER_CODEX_LIFECYCLE_DECIDE = "composer_codex_lifecycle_decide" as const;
 export const COMPOSER_CODEX_LIFECYCLE_RUN = "composer_codex_lifecycle_run" as const;
 export const COMPOSER_CODEX_LIFECYCLE_RESULT = "composer_codex_lifecycle_result" as const;
@@ -75,6 +77,18 @@ export const HANDOFF_CREATE_DESCRIPTION =
   "Use this before multi-agent or multi-provider work so Codex, GLM, agy, " +
   "and reviewers receive the same compact objective, constraints, files, " +
   "decisions, and acceptance criteria without copying the full transcript.";
+
+export const CONTEXT_SELECT_DESCRIPTION =
+  "Create a compact context-selection brief under .composer/briefs from the " +
+  "current task, relevant files, symbols, dependencies, and line slices. Use " +
+  "before handoff/code/review calls to pass only the context a worker needs " +
+  "instead of copying the full transcript.";
+
+export const DAILY_READINESS_DESCRIPTION =
+  "Run the daily Composer readiness check by composing composer_status with " +
+  "doctor diagnostics. Returns a compact verdict (ready|degraded|disabled|blocked), " +
+  "blockers, warnings, and the next action so Codex/Claude Code can decide " +
+  "whether Composer is safe to rely on before starting work.";
 
 export const CODEX_LIFECYCLE_DECIDE_DESCRIPTION =
   "Deterministically decide whether Codex should participate in a lifecycle " +

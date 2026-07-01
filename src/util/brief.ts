@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 
 import { z } from "zod";
 
+export const BRIEF_DIR = ".composer/briefs";
+
 export const SliceSchema = z.object({
   file: z.string().min(1),
   startLine: z.number().int().positive().optional(),
@@ -18,6 +20,8 @@ export const BriefSchema = z.object({
   files: z.array(z.string().min(1)),
   symbols: z.array(z.string().min(1)).optional(),
   deps: z.array(z.string().min(1)).optional(),
+  constraints: z.array(z.string().min(1)).optional(),
+  acceptanceCriteria: z.array(z.string().min(1)).optional(),
   slices: z.array(SliceSchema),
 });
 
@@ -34,7 +38,7 @@ export function newBrief(task: string): Brief {
   });
 }
 
-export function writeBrief(brief: Brief, dir = ".composer/briefs"): string {
+export function writeBrief(brief: Brief, dir = BRIEF_DIR): string {
   const validated = BriefSchema.parse(brief);
   const absDir = resolve(dir);
   mkdirSync(absDir, { recursive: true });

@@ -11,6 +11,7 @@ export function formatHelp(): string {
     "  agent-composer init --global    Install orchestrator assets into the user-global config",
     "  agent-composer doctor           Run environment/config diagnostics",
     "  agent-composer doctor --json    Emit the diagnostics report as JSON (exit 0 healthy / 1 unhealthy)",
+    "  agent-composer readiness [--json]  Run the daily readiness verdict (ready/degraded/disabled/blocked)",
     "  agent-composer cleanup          Remove accumulated Composer artefacts (.composer/oracle, results, state jobs)",
     "  agent-composer cleanup --goals --dry-run --older-than 14d   Preview artefact cleanup including terminal goal records",
     "  agent-composer mode <fast|balanced|strict>   Apply a preset (lifecycle + review gates)",

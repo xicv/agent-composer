@@ -22,6 +22,10 @@ describe("formatHelp", () => {
     expect(formatHelp()).toContain("doctor --json");
   });
 
+  it("includes readiness command", () => {
+    expect(formatHelp()).toContain("agent-composer readiness");
+  });
+
   it("includes init --oracle flag", () => {
     expect(formatHelp()).toContain("init --oracle");
   });
